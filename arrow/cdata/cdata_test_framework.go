@@ -67,6 +67,10 @@ package cdata
 // int confuse_go_gc(struct ArrowArrayStream* stream, unsigned int seed);
 // extern void releaseTestArr(struct ArrowArray* array);
 // extern void goReleaseTestArray(struct ArrowArray* array);
+// void* wrap_counting_release(struct ArrowArray* arr);
+// int get_counting_release_count(void* cr);
+// void* setup_single_array_stream(struct ArrowArray* arr, struct ArrowSchema* sc, struct ArrowArrayStream* out);
+// int get_single_array_stream_release_count(void* stream_state);
 import "C"
 
 import (
@@ -503,4 +507,39 @@ func confuseGoGc(reader array.RecordReader) error {
 		return nil
 	}
 	return fmt.Errorf("Exported stream test failed with return code %d", int(rc))
+}
+
+func wrapCountingRelease(arr *CArrowArray) unsafe.Pointer {
+	return C.wrap_counting_release((*C.struct_ArrowArray)(unsafe.Pointer(arr)))
+}
+
+func getCountingReleaseCount(cr unsafe.Pointer) int {
+	return int(C.get_counting_release_count(cr))
+}
+
+func freeCountingRelease(cr unsafe.Pointer) {
+	C.free(cr)
+}
+
+func setupSingleArrayStream(arr *CArrowArray, sc *CArrowSchema, out *CArrowArrayStream) unsafe.Pointer {
+	return C.setup_single_array_stream((*C.struct_ArrowArray)(unsafe.Pointer(arr)), (*C.struct_ArrowSchema)(unsafe.Pointer(sc)), (*C.struct_ArrowArrayStream)(unsafe.Pointer(out)))
+}
+
+func getSingleArrayStreamReleaseCount(state unsafe.Pointer) int {
+	return int(C.get_single_array_stream_release_count(state))
+}
+
+func freeSingleArrayStreamState(state unsafe.Pointer) {
+	C.free(state)
+}
+
+func testBitmap() unsafe.Pointer {
+	p := C.malloc(1)
+	const twoValidRows = 0b11
+	*(*byte)(p) = twoValidRows
+	return p
+}
+
+func freeTestBitmap(p unsafe.Pointer) {
+	C.free(p)
 }
