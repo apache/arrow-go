@@ -740,16 +740,23 @@ func extractStats(dataHeader dataheader) (pageStats metadata.EncodedStatistics) 
 
 // dictionaryAtDataOffset reports whether the page at data_page_offset may be a
 // dictionary page, which is so when the chunk records no dictionary offset or
-// the same offset as the data offset. Encrypted chunks are excluded because the
-// AAD of a page header depends on the page type, which is unknown before the
-// header is read.
+// the same offset as the data offset. Encrypted chunks that record no offset
+// are excluded because the AAD of a page header depends on the page type, which
+// is unknown before the header is read.
 func (p *serializedPageReader) dictionaryAtDataOffset() bool {
-	return p.dataOffset <= p.baseOffset && p.cryptoCtx.MetaDecryptor == nil
+	return p.dataOffset <= p.baseOffset && (p.dictOffset > 0 || p.cryptoCtx.MetaDecryptor == nil)
 }
 
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 	probe := p.dictOffset == 0 && p.dictionaryAtDataOffset()
 	if p.dictOffset > 0 || probe {
+		// This reads the dictionary page header wherever the stream is, so it needs
+		// the dictionary AAD. The flag must still describe the next page of p.r
+		// afterwards.
+		atDictionary := p.cryptoCtx.StartDecryptWithDictionaryPage
+		p.cryptoCtx.StartDecryptWithDictionaryPage = true
+		defer func() { p.cryptoCtx.StartDecryptWithDictionaryPage = atDictionary }()
+
 		span := p.dataOffset - p.baseOffset
 		readBufSize := int(min(span, int64(p.r.BufferSize())))
 		// The dictionary page starts the stream, and the data offset marks its end
@@ -777,7 +784,6 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, errors.New("parquet: invalid dictionary page header")
 		}
 
-		p.cryptoCtx.StartDecryptWithDictionaryPage = true
 		if p.cryptoCtx.DataDecryptor != nil {
 			p.updateDecryption(p.cryptoCtx.DataDecryptor, encryption.DictPageModule, p.dataPageAad)
 		}
@@ -787,7 +793,6 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, err
 		}
 
-		p.cryptoCtx.StartDecryptWithDictionaryPage = false
 		if dictHeader.GetNumValues() < 0 {
 			return nil, errors.New("parquet: invalid page header (negative number of values)")
 		}
@@ -905,6 +910,11 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 
 		p.rowsSeen = 0
 		p.pageOrd = 0
+		if p.dataOffset > p.baseOffset {
+			p.cryptoCtx.StartDecryptWithDictionaryPage = false
+		} else if p.dictOffset > 0 {
+			p.cryptoCtx.StartDecryptWithDictionaryPage = true
+		}
 
 		skipDict := p.dictionaryAtDataOffset()
 		for p.Next() && (p.rowsSeen < rowIdx || (skipDict && p.curPageHdr.GetType() == format.PageType_DICTIONARY_PAGE)) {
@@ -927,6 +937,7 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 
 	p.r.Reset(section)
 	p.rowsSeen, p.pageOrd = pages[index].FirstRowIndex, int16(index)
+	p.cryptoCtx.StartDecryptWithDictionaryPage = false
 	p.Next()
 	return p.err
 }

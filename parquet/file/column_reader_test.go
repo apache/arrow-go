@@ -1059,6 +1059,149 @@ func TestGetDictionaryPageOffsetPastDataPageOffset(t *testing.T) {
 	}
 }
 
+const (
+	encSeekRowGroups = 2
+	encSeekRows      = 1500
+	encSeekKey       = "0123456789012345"
+)
+
+func encryptedDictionaryFile(t *testing.T, pageIndex bool) []byte {
+	t.Helper()
+	sc := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt64Node("x", parquet.Repetitions.Required, -1),
+	}, -1))
+
+	var out bytes.Buffer
+	w, err := file.NewParquetWriterWithError(&out, sc, file.WithWriterProps(parquet.NewWriterProperties(
+		parquet.WithEncryptionProperties(parquet.NewFileEncryptionProperties(encSeekKey)),
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDictionaryCostFallbackFor("x", false),
+		parquet.WithDictionaryPageSizeLimit(1<<20),
+		parquet.WithDataPageSize(400),
+		parquet.WithBatchSize(16),
+		parquet.WithPageIndexEnabled(pageIndex))))
+	require.NoError(t, err)
+	for rg := range encSeekRowGroups {
+		rgw, err := w.AppendRowGroupChecked()
+		require.NoError(t, err)
+		cw, err := rgw.NextColumn()
+		require.NoError(t, err)
+		vals := make([]int64, encSeekRows)
+		for i := range vals {
+			vals[i] = int64((i*31 + rg) % 97)
+		}
+		_, err = cw.(*file.Int64ColumnChunkWriter).WriteBatch(vals, nil, nil)
+		require.NoError(t, err)
+		require.NoError(t, cw.Close())
+		require.NoError(t, rgw.Close())
+	}
+	require.NoError(t, w.Close())
+	return out.Bytes()
+}
+
+func openEncryptedFile(t *testing.T, data []byte) *file.Reader {
+	t.Helper()
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(encSeekKey))
+	rdr, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rdr.Close()) })
+	return rdr
+}
+
+// dataPageRows returns the number of values in each data page of column 0, and
+// whether the chunk starts with a dictionary page.
+func dataPageRows(t *testing.T, rg *file.RowGroupReader) (rows []int64, dictionary bool) {
+	t.Helper()
+	pr, err := rg.GetColumnPageReader(0)
+	require.NoError(t, err)
+	defer pr.Close()
+	for pr.Next() {
+		switch pg := pr.Page().(type) {
+		case *file.DictionaryPage:
+			dictionary = true
+		case file.DataPage:
+			rows = append(rows, int64(pg.NumValues()))
+		}
+	}
+	require.NoError(t, pr.Err())
+	return rows, dictionary
+}
+
+func TestSeekToRowEncryptedDictionary(t *testing.T) {
+	const row = 700
+	for _, pageIndex := range []bool{false, true} {
+		t.Run(fmt.Sprintf("offset index %v", pageIndex), func(t *testing.T) {
+			rdr := openEncryptedFile(t, encryptedDictionaryFile(t, pageIndex))
+			rg := rdr.RowGroup(encSeekRowGroups - 1)
+
+			chunk, err := rdr.MetaData().RowGroup(encSeekRowGroups - 1).ColumnChunk(0)
+			require.NoError(t, err)
+			require.Equal(t, pageIndex, chunk.GetOffsetIndexLocation() != nil)
+			rows, dictionary := dataPageRows(t, rg)
+			require.True(t, dictionary)
+			require.Greater(t, len(rows), 4)
+			require.Less(t, rows[0], int64(row))
+
+			open := func() *file.Int64ColumnChunkReader {
+				cr, err := rg.Column(0)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, cr.Close()) })
+				return cr.(*file.Int64ColumnChunkReader)
+			}
+			want := readRows[int64](t, open(), encSeekRows, 0)
+
+			cr := open()
+			require.NoError(t, cr.SeekToRow(row))
+			require.Equal(t, want[row:row+300], readRows[int64](t, cr, 300, 0))
+		})
+	}
+}
+
+func TestGetDictionaryPageOnEncryptedChunk(t *testing.T) {
+	rdr := openEncryptedFile(t, encryptedDictionaryFile(t, false))
+	rg := rdr.RowGroup(encSeekRowGroups - 1)
+	wantRows, _ := dataPageRows(t, rg)
+
+	scan := func(t *testing.T, pr file.PageReader) {
+		var rows []int64
+		for pr.Next() {
+			rows = append(rows, int64(pr.Page().(file.DataPage).NumValues()))
+		}
+		require.NoError(t, pr.Err())
+		require.Equal(t, wantRows, rows)
+	}
+
+	t.Run("before the first page", func(t *testing.T) {
+		pr, err := rg.GetColumnPageReader(0)
+		require.NoError(t, err)
+		defer pr.Close()
+
+		dict, err := pr.GetDictionaryPage()
+		require.NoError(t, err)
+		require.NotNil(t, dict)
+
+		require.True(t, pr.Next(), "reading after GetDictionaryPage: %v", pr.Err())
+		require.IsType(t, &file.DictionaryPage{}, pr.Page())
+		scan(t, pr)
+	})
+
+	t.Run("after the dictionary page was read", func(t *testing.T) {
+		pr, err := rg.GetColumnPageReader(0)
+		require.NoError(t, err)
+		defer pr.Close()
+
+		require.True(t, pr.Next(), pr.Err())
+		want := pr.Page().(*file.DictionaryPage).NumValues()
+
+		dict, err := pr.GetDictionaryPage()
+		require.NoError(t, err)
+		require.NotNil(t, dict)
+		require.Equal(t, want, dict.NumValues())
+		scan(t, pr)
+	})
+}
+
 // Reject ALP before non-floating-point decoder traits can panic.
 func TestALPOnIntegerColumnIsRejected(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())

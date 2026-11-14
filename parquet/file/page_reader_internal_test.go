@@ -247,6 +247,28 @@ func TestSeekToRowZeroOnEncryptedChunkStartingWithDictionaryPage(t *testing.T) {
 	require.Equal(t, []int32{10, 20, 20, 10, 10, 10, 20, 10}, vals[:n])
 }
 
+// With data_page_offset equal to dictionary_page_offset a seek goes back to the
+// dictionary page, whose header takes the dictionary AAD again.
+func TestReseekOnEncryptedChunkWithSharedPageOffset(t *testing.T) {
+	// RLE_DICTIONARY indices 0,1,1,0,0,0,1,0 at bit width 1
+	indices := []byte{1, 3, 0x46}
+	p := encryptedChunk(t, true, 8, dictPageSpec(10, 20), dataPageSpec(8, format.Encoding_RLE_DICTIONARY, indices))
+	p.baseOffset, p.dataOffset, p.dictOffset = 1, 1, 1
+	cr := requiredInt32Column(t, p)
+	t.Cleanup(func() { require.NoError(t, cr.Close()) })
+
+	want := []int32{10, 20, 20, 10, 10, 10, 20, 10}
+	vals := make([]int32, 8)
+	_, n, err := cr.ReadBatch(8, vals, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, want, vals[:n])
+
+	require.NoError(t, cr.SeekToRow(0))
+	_, n, err = cr.ReadBatch(8, vals, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, want, vals[:n])
+}
+
 type countingReader struct {
 	utils.Reader
 	read *int
