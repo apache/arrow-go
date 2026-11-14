@@ -492,8 +492,9 @@ func TestSkipEmptyRepeatedRows(t *testing.T) {
 	col, err := r.RowGroup(0).Column(0)
 	require.NoError(t, err)
 	typed := col.(*file.Int32ColumnChunkReader)
-	_, err = typed.Skip(2)
+	skipped, err := typed.Skip(2)
 	require.NoError(t, err)
+	assert.EqualValues(t, 2, skipped)
 
 	values := make([]int32, 1)
 	defs := make([]int16, 1)
@@ -505,6 +506,64 @@ func TestSkipEmptyRepeatedRows(t *testing.T) {
 	assert.Equal(t, []int32{42}, values)
 	assert.Equal(t, []int16{1}, defs)
 	assert.Equal(t, []int16{0}, reps)
+}
+
+func TestSkipStopsAtDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	node, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.ByteArray, -1, -1)
+	require.NoError(t, err)
+	descr := schema.NewColumn(node, 0, 0)
+
+	// the length prefix runs past the data, so only decoding fails
+	body := memory.NewBufferBytes([]byte{3, 0, 0, 0, 'a'})
+	page := file.NewDataPageV1(body, 20, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+	defer page.Release()
+
+	pages := new(testutils.MockPageReader)
+	pages.Test(t)
+	pages.TestData().Set("pages", []file.Page{page})
+	pages.On("Err").Return((error)(nil))
+	r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
+	defer r.Close()
+
+	n, err := r.Skip(10)
+	require.Error(t, err)
+	assert.Less(t, n, int64(10))
+}
+
+func TestSkipPastEndOfColumn(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("values", parquet.Repetitions.Required, -1),
+	}, -1)))
+
+	var out bytes.Buffer
+	w := file.NewParquetWriter(&out, sc.Root(), file.WithWriterProps(
+		parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	rg := w.AppendRowGroup()
+	cw, err := rg.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1, 2, 3, 4, 5}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rg.Close())
+	require.NoError(t, w.Close())
+
+	r, err := file.NewParquetReader(bytes.NewReader(out.Bytes()))
+	require.NoError(t, err)
+	defer r.Close()
+	col, err := r.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	icr := col.(*file.Int32ColumnChunkReader)
+
+	skipped, err := icr.Skip(15)
+	require.NoError(t, err)
+	assert.EqualValues(t, 5, skipped)
+
+	skipped, err = icr.Skip(1)
+	require.NoError(t, err)
+	assert.Zero(t, skipped)
 }
 
 func (p *PrimitiveReaderSuite) TestReadBatchMultiPage() {
@@ -989,8 +1048,9 @@ func TestReadBatchStopsAtCorruptPage(t *testing.T) {
 func TestSkipStopsAtCorruptPage(t *testing.T) {
 	icr := newCorruptPageReader(t)
 
-	_, err := icr.Skip(25)
+	n, err := icr.Skip(25)
 	require.ErrorContains(t, err, "invalid checksum")
+	assert.EqualValues(t, 10, n)
 }
 
 func TestSeekToRowAfterCorruptPage(t *testing.T) {
