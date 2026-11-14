@@ -670,6 +670,44 @@ func TestRecordReaderSeekToRowMultiRowGroup(t *testing.T) {
 	assert.Truef(t, array.RecordEqual(first, rec), "expected: %s\ngot: %s", first, rec)
 }
 
+// string_col in alltypes_tiny_pages is dictionary encoded and its chunk has no
+// dictionary_page_offset.
+func TestRecordReaderSeekToRowDictionaryAtDataPageOffset(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	pf, err := file.OpenParquetFile(path.Join(getDataDir(), "alltypes_tiny_pages.parquet"), false,
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 100}, mem)
+	require.NoError(t, err)
+
+	const stringCol, batch = 9, 36
+	newReader := func() pqarrow.RecordReader {
+		rr, err := fr.GetRecordReader(context.Background(), []int{stringCol}, nil)
+		require.NoError(t, err)
+		return rr
+	}
+
+	seq := newReader()
+	defer seq.Release()
+	for range batch {
+		_, err := seq.Read()
+		require.NoError(t, err)
+	}
+	want, err := seq.Read()
+	require.NoError(t, err)
+
+	rr := newReader()
+	defer rr.Release()
+	require.NoError(t, rr.SeekToRow(batch*100))
+	got, err := rr.Read()
+	require.NoError(t, err)
+	require.Truef(t, array.RecordEqual(want, got), "expected: %s\ngot: %s", want, got)
+}
+
 func TestFileReaderWriterMetadata(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)

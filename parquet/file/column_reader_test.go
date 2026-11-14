@@ -18,6 +18,7 @@ package file_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand"
@@ -36,7 +37,9 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/testutils"
+	"github.com/apache/arrow-go/v18/parquet/internal/thrift"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
@@ -853,6 +856,206 @@ func TestFullSeekRow(t *testing.T) {
 			assert.Equal(t, []int16{1, 3, 3, 3, 0}, defLvls[:total])
 			assert.Equal(t, []int16{0, 0, 1, 1, 0}, repLvls[:total])
 		})
+	}
+}
+
+type seekBatchReader[T any] interface {
+	ReadBatch(int64, []T, []int16, []int16) (int64, int, error)
+}
+
+// readRows reads n flat values, returning nil entries for nulls.
+func readRows[T any](t *testing.T, r seekBatchReader[T], n int, maxDef int16) []*T {
+	t.Helper()
+	vals := make([]T, n)
+	defs := make([]int16, n)
+	got, nvals, err := r.ReadBatch(int64(n), vals, defs, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, n, got)
+
+	out := make([]*T, n)
+	next := 0
+	for i := range out {
+		if maxDef == 0 || defs[i] == maxDef {
+			out[i] = &vals[next]
+			next++
+		}
+	}
+	require.Equal(t, nvals, next)
+	return out
+}
+
+// Both files hold dictionary encoded columns whose chunks have no
+// dictionary_page_offset, so the dictionary page sits at data_page_offset.
+func TestSeekToRowDictionaryAtDataPageOffset(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	require.DirExists(t, dir)
+
+	t.Run("offset index", func(t *testing.T) {
+		fr, err := file.OpenParquetFile(filepath.Join(dir, "alltypes_tiny_pages.parquet"), false)
+		require.NoError(t, err)
+		defer fr.Close()
+		rg := fr.RowGroup(0)
+
+		const col, nrows = 2, 100
+		maxDef := fr.MetaData().Schema.Column(col).MaxDefinitionLevel()
+		open := func() *file.Int32ColumnChunkReader {
+			cr, err := rg.Column(col)
+			require.NoError(t, err)
+			return cr.(*file.Int32ColumnChunkReader)
+		}
+		want := readRows[int32](t, open(), nrows, maxDef)
+
+		// Reading past the seek target crosses data pages, which only works if the
+		// dictionary load left the page stream where it was.
+		cr := open()
+		require.NoError(t, cr.SeekToRow(0))
+		require.Equal(t, want, readRows[int32](t, cr, nrows, maxDef))
+	})
+
+	t.Run("no offset index", func(t *testing.T) {
+		fr, err := file.OpenParquetFile(filepath.Join(dir, "datapage_v2.snappy.parquet"), false)
+		require.NoError(t, err)
+		defer fr.Close()
+		rg := fr.RowGroup(0)
+
+		const col, nrows = 2, 5
+		maxDef := fr.MetaData().Schema.Column(col).MaxDefinitionLevel()
+		open := func() *file.Float64ColumnChunkReader {
+			cr, err := rg.Column(col)
+			require.NoError(t, err)
+			return cr.(*file.Float64ColumnChunkReader)
+		}
+		want := readRows[float64](t, open(), nrows, maxDef)
+
+		t.Run("fresh reader", func(t *testing.T) {
+			cr := open()
+			require.NoError(t, cr.SeekToRow(4))
+			require.Equal(t, want[4:], readRows[float64](t, cr, 1, maxDef))
+		})
+
+		t.Run("reseek after read", func(t *testing.T) {
+			cr := open()
+			readRows[float64](t, cr, nrows, maxDef)
+			require.NoError(t, cr.SeekToRow(0))
+			require.Equal(t, want, readRows[float64](t, cr, nrows, maxDef))
+		})
+	})
+}
+
+func sharedOffsetFile(t *testing.T, values []int32, pageIndex bool) []byte {
+	t.Helper()
+	sc := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("x", parquet.Repetitions.Required, -1),
+	}, -1))
+	var out bytes.Buffer
+	w, err := file.NewParquetWriterWithError(&out, sc, file.WithWriterProps(parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDictionaryPageSizeLimit(1<<20),
+		parquet.WithDictionaryCostFallbackFor("x", false),
+		parquet.WithDataPageSize(256),
+		parquet.WithBatchSize(50),
+		parquet.WithPageIndexEnabled(pageIndex))))
+	require.NoError(t, err)
+	rg := w.AppendRowGroup()
+	cw, err := rg.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(values, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rg.Close())
+	require.NoError(t, w.Close())
+
+	data := out.Bytes()
+	footerStart := len(data) - 8 - int(binary.LittleEndian.Uint32(data[len(data)-8:]))
+	md := format.NewFileMetaData()
+	_, err = thrift.DeserializeThrift(md, data[footerStart:len(data)-8])
+	require.NoError(t, err)
+	chunk := md.RowGroups[0].Columns[0].MetaData
+	require.True(t, chunk.IsSetDictionaryPageOffset())
+	require.Greater(t, chunk.DataPageOffset, chunk.GetDictionaryPageOffset())
+	chunk.DataPageOffset = chunk.GetDictionaryPageOffset()
+
+	var footer bytes.Buffer
+	_, err = thrift.NewThriftSerializer().Serialize(md, &footer, nil)
+	require.NoError(t, err)
+	var footerLen [4]byte
+	binary.LittleEndian.PutUint32(footerLen[:], uint32(footer.Len()))
+	return append(append(append(bytes.Clone(data[:footerStart]), footer.Bytes()...), footerLen[:]...), "PAR1"...)
+}
+
+// Unreleased parquet-mr builds between PARQUET-1850 and PARQUET-1977 wrote
+// chunks whose data_page_offset equals dictionary_page_offset, so the
+// dictionary page sits at both offsets and a seek has to read it from there.
+func TestSeekToRowDictionaryPageOffsetEqualsDataPageOffset(t *testing.T) {
+	const nrows = 2000
+	values := make([]int32, nrows)
+	for i := range values {
+		values[i] = int32((i * 37) % 1000)
+	}
+
+	for _, pageIndex := range []bool{false, true} {
+		t.Run(fmt.Sprintf("offset index %v", pageIndex), func(t *testing.T) {
+			rdr, err := file.NewParquetReader(bytes.NewReader(sharedOffsetFile(t, values, pageIndex)))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, rdr.Close()) })
+			open := func() *file.Int32ColumnChunkReader {
+				cr, err := rdr.RowGroup(0).Column(0)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, cr.Close()) })
+				return cr.(*file.Int32ColumnChunkReader)
+			}
+			read := func(cr *file.Int32ColumnChunkReader, n int) []int32 {
+				got := make([]int32, n)
+				read, _, err := cr.ReadBatch(int64(n), got, nil, nil)
+				require.NoError(t, err)
+				require.EqualValues(t, n, read)
+				return got
+			}
+
+			require.Equal(t, values, read(open(), nrows))
+
+			const row = 150
+			cr := open()
+			require.NoError(t, cr.SeekToRow(row))
+			require.Equal(t, values[row:row+250], read(cr, 250))
+
+			if pageIndex {
+				return
+			}
+			t.Run("seek to row 0 after a read", func(t *testing.T) {
+				cr := open()
+				read(cr, 10)
+				require.NoError(t, cr.SeekToRow(0))
+				require.Equal(t, values[:100], read(cr, 100))
+			})
+		})
+	}
+}
+
+// The dictionary page offset of each column chunk in this file is past its
+// data page offset of 0.
+func TestGetDictionaryPageOffsetPastDataPageOffset(t *testing.T) {
+	dir := os.Getenv("PARQUET_TEST_DATA")
+	if dir == "" {
+		dir = "../../parquet-testing/data"
+		t.Log("PARQUET_TEST_DATA not set, using ../../parquet-testing/data")
+	}
+	require.DirExists(t, dir)
+
+	fr, err := file.OpenParquetFile(filepath.Join(dir, "column_chunk_key_value_metadata.parquet"), false)
+	require.NoError(t, err)
+	defer fr.Close()
+
+	for col := range fr.MetaData().Schema.NumColumns() {
+		pr, err := fr.RowGroup(0).GetColumnPageReader(col)
+		require.NoError(t, err)
+		_, err = pr.GetDictionaryPage()
+		require.Error(t, err)
+		require.NoError(t, pr.Close())
 	}
 }
 
