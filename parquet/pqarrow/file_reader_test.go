@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
@@ -556,6 +557,59 @@ func TestRecordReaderSeekToRow(t *testing.T) {
 			assert.Truef(t, array.RecordEqual(tr.RecordBatch(), rec), "expected: %s\ngot: %s", tr.RecordBatch(), rec)
 		})
 	}
+}
+
+func TestRecordReaderSeekToCorruptPage(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	sc := arrow.NewSchema([]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int32, Nullable: true}}, nil)
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	for i := range 30 {
+		bldr.Append(int32(i))
+	}
+	arr := bldr.NewArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(sc, []arrow.Array{arr}, 30)
+	defer rec.Release()
+
+	props := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Gzip),
+		parquet.WithDictionaryDefault(false), parquet.WithDataPageSize(1), parquet.WithBatchSize(10),
+		parquet.WithPageIndexEnabled(true))
+	var buf bytes.Buffer
+	w, err := pqarrow.NewFileWriter(sc, &buf, props, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+	require.NoError(t, err)
+	require.NoError(t, w.Write(rec))
+	require.NoError(t, w.Close())
+	data := buf.Bytes()
+
+	pf, err := file.NewParquetReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	rgIdx, err := pf.GetPageIndexReader().RowGroup(0)
+	require.NoError(t, err)
+	oidx, err := rgIdx.GetOffsetIndex(0)
+	require.NoError(t, err)
+	locs := oidx.GetPageLocations()
+	require.Len(t, locs, 3)
+	require.NoError(t, pf.Close())
+
+	// the last eight bytes of a gzip stream are its CRC-32 and length
+	data[locs[1].Offset+int64(locs[1].CompressedPageSize)-8] ^= 0xff
+
+	pf, err = file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer pf.Close()
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 5}, mem)
+	require.NoError(t, err)
+	rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+	require.NoError(t, err)
+	defer rr.Release()
+
+	require.True(t, rr.Next())
+	require.ErrorContains(t, rr.SeekToRow(15), "invalid checksum")
+	assert.False(t, rr.Next())
+	assert.ErrorContains(t, rr.Err(), "invalid checksum")
 }
 
 func TestRecordReaderMultiRowGroup(t *testing.T) {

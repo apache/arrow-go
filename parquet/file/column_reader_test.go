@@ -19,6 +19,7 @@ package file_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -1236,10 +1237,10 @@ func TestALPPageClaimingTooManyValues(t *testing.T) {
 	require.Equal(t, []float64{1.5, 2.5}, values[:read])
 }
 
-func newCorruptPageReader(t *testing.T) *file.Int32ColumnChunkReader {
+func newCorruptPageFile(t *testing.T, rep parquet.Repetition) (*file.Reader, memory.Allocator) {
 	t.Helper()
 	sc := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
-		schema.NewInt32Node("x", parquet.Repetitions.Required, -1),
+		schema.NewInt32Node("x", rep, -1),
 	}, -1))
 	props := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Gzip),
 		parquet.WithDictionaryDefault(false), parquet.WithDataPageSize(1), parquet.WithPageIndexEnabled(true))
@@ -1253,10 +1254,17 @@ func newCorruptPageReader(t *testing.T) *file.Int32ColumnChunkReader {
 	require.NoError(t, err)
 	for page := range int32(3) {
 		vals := make([]int32, 10)
+		var defs []int16
+		if rep == parquet.Repetitions.Optional {
+			defs = make([]int16, 10)
+		}
 		for i := range vals {
 			vals[i] = page*10 + int32(i)
+			if defs != nil {
+				defs[i] = 1
+			}
 		}
-		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(vals, nil, nil)
+		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(vals, defs, nil)
 		require.NoError(t, err)
 	}
 	require.NoError(t, cw.Close())
@@ -1282,6 +1290,12 @@ func newCorruptPageReader(t *testing.T) *file.Int32ColumnChunkReader {
 	rdr, err = file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(parquet.NewReaderProperties(mem)))
 	require.NoError(t, err)
 	t.Cleanup(func() { rdr.Close() })
+	return rdr, mem
+}
+
+func newCorruptPageReader(t *testing.T) *file.Int32ColumnChunkReader {
+	t.Helper()
+	rdr, _ := newCorruptPageFile(t, parquet.Repetitions.Required)
 	col, err := rdr.RowGroup(0).Column(0)
 	require.NoError(t, err)
 	t.Cleanup(func() { col.Close() })
@@ -1322,6 +1336,128 @@ func TestSeekToRowAfterCorruptPage(t *testing.T) {
 	_, n, err := icr.ReadBatch(5, vals, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []int32{25, 26, 27, 28, 29}, vals[:n])
+}
+
+func TestSeekToRowToCorruptPageStopsReader(t *testing.T) {
+	icr := newCorruptPageReader(t)
+
+	vals := make([]int32, 30)
+	_, n, err := icr.ReadBatch(5, vals, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, []int32{0, 1, 2, 3, 4}, vals[:n])
+
+	err = icr.SeekToRow(15)
+	require.ErrorContains(t, err, "invalid checksum")
+	assert.False(t, icr.HasNext())
+
+	_, n, err2 := icr.ReadBatch(5, vals, nil, nil)
+	assert.Equal(t, err, err2)
+	assert.Zero(t, n)
+
+	require.NoError(t, icr.SeekToRow(25))
+	_, n, err = icr.ReadBatch(5, vals, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []int32{25, 26, 27, 28, 29}, vals[:n])
+}
+
+type closeErrorPageReader struct {
+	file.PageReader
+}
+
+func (r closeErrorPageReader) Close() error {
+	r.PageReader.Close()
+	return errors.New("close failed")
+}
+
+func TestRecordReaderStopsAfterPageReaderFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		fail func(rr file.RecordReaderWithError) error
+	}{
+		{"failed seek", func(rr file.RecordReaderWithError) error { return rr.SeekToRow(15) }},
+		{"failed page reader replacement", func(rr file.RecordReaderWithError) error { return rr.SetPageReaderWithError(nil) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rdr, mem := newCorruptPageFile(t, parquet.Repetitions.Optional)
+			pages, err := rdr.RowGroup(0).GetColumnPageReader(0)
+			require.NoError(t, err)
+			rr := file.NewRecordReader(rdr.MetaData().Schema.Column(0),
+				file.LevelInfo{NullSlotUsage: 1, DefLevel: 1}, arrow.PrimitiveTypes.Int32, mem, rdr.BufferPool()).(file.RecordReaderWithError)
+			defer rr.Release()
+			rr.SetPageReader(closeErrorPageReader{pages})
+			require.NoError(t, rr.Reserve(10))
+
+			n, err := rr.ReadRecords(5)
+			require.NoError(t, err)
+			require.EqualValues(t, 5, n)
+
+			failure := tt.fail(rr)
+			require.Error(t, failure)
+
+			n, err = rr.ReadRecords(5)
+			assert.Zero(t, n)
+			assert.Equal(t, failure, err)
+		})
+	}
+}
+
+// rleLevels is a V1 definition level block holding n defined levels.
+func rleLevels(n int) []byte {
+	run := []byte{byte(n << 1), 1}
+	return append([]byte{byte(len(run)), 0, 0, 0}, run...)
+}
+
+// truncatedByteArray is a PLAIN value whose length prefix runs past the data, so
+// SetData accepts it and only decoding fails.
+var truncatedByteArray = []byte{3, 0, 0, 0, 'a'}
+
+func TestReadBatchStopsAtDecodeError(t *testing.T) {
+	tests := []struct {
+		name string
+		rep  parquet.Repetition
+		body []byte
+	}{
+		{"required value", parquet.Repetitions.Required, truncatedByteArray},
+		{"optional value", parquet.Repetitions.Optional, append(rleLevels(20), truncatedByteArray...)},
+		{"truncated levels", parquet.Repetitions.Optional, rleLevels(5)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			node, err := schema.NewPrimitiveNode("value", tt.rep, parquet.Types.ByteArray, -1, -1)
+			require.NoError(t, err)
+			maxDef := int16(0)
+			if tt.rep == parquet.Repetitions.Optional {
+				maxDef = 1
+			}
+			descr := schema.NewColumn(node, maxDef, 0)
+
+			body := memory.NewBufferBytes(tt.body)
+			page := file.NewDataPageV1(body, 20, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+			defer page.Release()
+
+			pages := new(testutils.MockPageReader)
+			pages.Test(t)
+			pages.TestData().Set("pages", []file.Page{page})
+			pages.On("Err").Return((error)(nil))
+			r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
+			defer r.Close()
+
+			vals := make([]parquet.ByteArray, 10)
+			defs := make([]int16, 10)
+			_, _, err = r.ReadBatch(10, vals, defs, nil)
+			require.Error(t, err)
+			assert.Equal(t, err, r.Err())
+			assert.False(t, r.HasNext())
+
+			total, _, err2 := r.ReadBatch(10, vals, defs, nil)
+			assert.Equal(t, err, err2)
+			assert.Zero(t, total)
+		})
+	}
 }
 
 func BenchmarkReadInt32Column(b *testing.B) {
