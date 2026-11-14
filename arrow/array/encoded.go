@@ -286,14 +286,15 @@ func validateRunEndEncoded(r *RunEndEncoded, full bool) error {
 		}
 		return fmt.Errorf("arrow/array: run-end encoded array has non-zero length %d, but run ends array has zero length", r.data.length)
 	}
-	if int64(r.data.offset)+int64(r.data.length) > runEndTypeLimit(runEndsData.DataType().ID()) {
+	end := int64(r.data.offset) + int64(r.data.length)
+	if end > runEndTypeLimit(runEndsData.DataType().ID()) {
 		return fmt.Errorf("arrow/array: offset + length of a run-end encoded array must fit in the run end type %s", runEndsData.DataType())
 	}
 
 	runEnds := encoded.GetRunEnds(runEndsData)
 	lastRunEnd := runEnds(int64(runEndsData.Len() - 1))
-	if lastRunEnd < int64(r.data.offset+r.data.length) {
-		return fmt.Errorf("arrow/array: last run end is %d but it should cover %d", lastRunEnd, r.data.offset+r.data.length)
+	if lastRunEnd < end {
+		return fmt.Errorf("arrow/array: last run end is %d but it should cover %d", lastRunEnd, end)
 	}
 
 	if !full {

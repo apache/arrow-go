@@ -17,6 +17,7 @@
 package array
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -114,6 +115,22 @@ func setViewHeaderOffset(raw []byte, offset int32) {
 	endian.Native.PutUint32(raw[12:16], uint32(offset))
 }
 
+// Offsets are changed after construction because the constructors reject
+// out of range last offsets on 64 bit platforms.
+func largeBinaryWithOffsets(t *testing.T, first, last int64) *LargeBinary {
+	t.Helper()
+	arr := makeLargeBinaryArrayRaw(t, []int64{0, 5}, []byte("hello"), 1, 0)
+	arr.valueOffsets[0], arr.valueOffsets[1] = first, last
+	return arr
+}
+
+func largeStringWithOffsets(t *testing.T, first, last int64) *LargeString {
+	t.Helper()
+	arr := makeLargeStringArrayRaw(t, []int64{0, 5}, "hello", 1, 0)
+	arr.offsets[0], arr.offsets[1] = first, last
+	return arr
+}
+
 func TestBinaryValidate(t *testing.T) {
 	t.Run("valid array passes", func(t *testing.T) {
 		// offsets [0,3,6,9], data "abcdefghi" — 3 elements of 3 bytes each
@@ -176,6 +193,24 @@ func TestLargeBinaryValidate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "negative")
 	})
+
+	t.Run("offsets equal to the data length pass", func(t *testing.T) {
+		arr := makeLargeBinaryArrayRaw(t, []int64{5, 5}, []byte("hello"), 1, 0)
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("first offset beyond int32 fails ValidateFull", func(t *testing.T) {
+		arr := largeBinaryWithOffsets(t, 1<<32+1, 5)
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: large binary offset 4294967297 out of bounds of data buffer (length 5)")
+	})
+
+	t.Run("last offset beyond int32 fails ValidateFull", func(t *testing.T) {
+		arr := largeBinaryWithOffsets(t, 0, 1<<31+2)
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: large binary offset 2147483650 out of bounds of data buffer (length 5)")
+	})
 }
 
 func TestStringValidate(t *testing.T) {
@@ -235,6 +270,24 @@ func TestLargeStringValidate(t *testing.T) {
 		err := arr.ValidateFull()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "negative")
+	})
+
+	t.Run("offsets equal to the data length pass", func(t *testing.T) {
+		arr := makeLargeStringArrayRaw(t, []int64{5, 5}, "hello", 1, 0)
+		assert.NoError(t, arr.Validate())
+		assert.NoError(t, arr.ValidateFull())
+	})
+
+	t.Run("first offset beyond int32 fails ValidateFull", func(t *testing.T) {
+		arr := largeStringWithOffsets(t, 1<<32+1, 5)
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: large string offset 4294967297 out of bounds of data buffer (length 5)")
+	})
+
+	t.Run("last offset beyond int32 fails ValidateFull", func(t *testing.T) {
+		arr := largeStringWithOffsets(t, 0, 1<<31+2)
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: large string offset 2147483650 out of bounds of data buffer (length 5)")
 	})
 }
 
@@ -379,6 +432,39 @@ func TestBinaryViewValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "references range")
 	})
 
+	t.Run("range ending one byte past the referenced buffer fails ValidateFull", func(t *testing.T) {
+		value := []byte("this payload is out of line")
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(value)
+		headers[0].SetIndexOffset(1, 1)
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]),
+			[]*memory.Buffer{memory.NewBufferBytes(make([]byte, 64)), memory.NewBufferBytes(value)}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: view at slot 0 references range 1-28 of buffer 1 but that buffer is only 27 bytes long")
+	})
+
+	t.Run("offset plus size beyond int32 fails ValidateFull", func(t *testing.T) {
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(make([]byte, 32))
+		headers[0].SetIndexOffset(0, 0x7FFFFFF0)
+		dataBuf := memory.NewBufferBytes(make([]byte, 32))
+		arr := makeBinaryViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: view at slot 0 references range 2147483632-2147483664 of buffer 0 but that buffer is only 32 bytes long")
+	})
+
+	t.Run("offset plus length beyond int32 fails ValidateFull", func(t *testing.T) {
+		arr := makeBinaryViewArrayRaw(t, make([]byte, arrow.ViewHeaderSizeBytes), nil, nil, 0, 2, math.MaxInt32)
+		defer arr.Release()
+
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: binary view buffer must have at least 2147483649 view values")
+	})
+
 	t.Run("inline padding bytes fail ValidateFull", func(t *testing.T) {
 		var headers [1]arrow.ViewHeader
 		headers[0].SetBytes([]byte("x"))
@@ -395,6 +481,26 @@ func TestBinaryViewValidate(t *testing.T) {
 }
 
 func TestStringViewValidate(t *testing.T) {
+	t.Run("offset plus size beyond int32 fails ValidateFull", func(t *testing.T) {
+		var headers [1]arrow.ViewHeader
+		headers[0].SetBytes(make([]byte, 32))
+		headers[0].SetIndexOffset(0, 0x7FFFFFF0)
+		dataBuf := memory.NewBufferBytes(make([]byte, 32))
+		arr := makeStringViewArrayRaw(t, arrow.ViewHeaderTraits.CastToBytes(headers[:]), []*memory.Buffer{dataBuf}, nil, 0, 1, 0)
+		defer arr.Release()
+
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: view at slot 0 references range 2147483632-2147483664 of buffer 0 but that buffer is only 32 bytes long")
+	})
+
+	t.Run("offset plus length beyond int32 fails ValidateFull", func(t *testing.T) {
+		arr := makeStringViewArrayRaw(t, make([]byte, arrow.ViewHeaderSizeBytes), nil, nil, 0, 2, math.MaxInt32)
+		defer arr.Release()
+
+		assert.EqualError(t, arr.ValidateFull(),
+			"arrow/array: string view buffer must have at least 2147483649 view values")
+	})
+
 	t.Run("invalid utf8 passes Validate but fails ValidateFull", func(t *testing.T) {
 		var headers [1]arrow.ViewHeader
 		headers[0].SetBytes([]byte{0xff})
@@ -405,6 +511,28 @@ func TestStringViewValidate(t *testing.T) {
 		err := arr.ValidateFull()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not valid utf8")
+	})
+}
+
+func TestListViewValidate(t *testing.T) {
+	t.Run("offset plus length beyond int32 fails ValidateFull", func(t *testing.T) {
+		child := NewData(arrow.PrimitiveTypes.Int32, 0, []*memory.Buffer{nil, nil}, nil, 0, 0)
+		defer child.Release()
+		for _, dt := range []arrow.DataType{
+			arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+			arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+		} {
+			t.Run(dt.String(), func(t *testing.T) {
+				buf := memory.NewBufferBytes(make([]byte, 16))
+				data := NewData(dt, 2, []*memory.Buffer{nil, buf, buf}, []arrow.ArrayData{child}, 0, math.MaxInt32)
+				defer data.Release()
+				arr := MakeFromData(data)
+				defer arr.Release()
+
+				const msg = "offsets buffer size (bytes): 16 isn't large enough for length: 2 and offset: 2147483647"
+				assert.EqualError(t, arr.(Validator).ValidateFull(), msg)
+			})
+		}
 	})
 }
 

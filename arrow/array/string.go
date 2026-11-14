@@ -416,13 +416,13 @@ func (a *LargeString) Validate() error {
 	if len(a.offsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: large string offset buffer must have at least %d values, got %d", expNumOffsets, len(a.offsets))
 	}
-	firstOffset := int(a.offsets[a.data.offset])
-	if firstOffset > len(a.values) {
+	firstOffset := a.offsets[a.data.offset]
+	if firstOffset > int64(len(a.values)) {
 		return fmt.Errorf("arrow/array: large string offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.values))
 	}
 
-	lastOffset := int(a.offsets[expNumOffsets-1])
-	if lastOffset > len(a.values) {
+	lastOffset := a.offsets[expNumOffsets-1]
+	if lastOffset > int64(len(a.values)) {
 		return fmt.Errorf("arrow/array: large string offset %d out of bounds of data buffer (length %d)", lastOffset, len(a.values))
 	}
 	return nil

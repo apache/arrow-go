@@ -1031,9 +1031,9 @@ func (a *array) validateOffsetsAndMaybeSizes(l offsetsAndSizes, offsetByteWidth 
 		return nil
 	}
 
-	var requiredOffsets int
+	var requiredOffsets int64
 	if nonEmpty {
-		requiredOffsets = a.Len() + a.Offset()
+		requiredOffsets = int64(a.Len()) + int64(a.Offset())
 		if !isListView {
 			requiredOffsets += 1
 		}
@@ -1041,7 +1041,7 @@ func (a *array) validateOffsetsAndMaybeSizes(l offsetsAndSizes, offsetByteWidth 
 		requiredOffsets = 0
 	}
 	offsetsByteSize := a.data.buffers[1].Len()
-	if offsetsByteSize/offsetByteWidth < requiredOffsets {
+	if int64(offsetsByteSize/offsetByteWidth) < requiredOffsets {
 		return fmt.Errorf("offsets buffer size (bytes): %d isn't large enough for length: %d and offset: %d",
 			offsetsByteSize, a.Len(), a.Offset())
 	}
