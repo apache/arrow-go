@@ -92,47 +92,12 @@ type listElementFunction struct {
 	ScalarFunction
 }
 
-func listElementScalarResultSupported(typ arrow.DataType, nullResult bool) bool {
-	switch typ.ID() {
-	case arrow.BINARY_VIEW, arrow.STRING_VIEW, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW:
-		return false
-	case arrow.EXTENSION:
-		return listElementScalarResultSupported(typ.(arrow.ExtensionType).StorageType(), nullResult)
-	case arrow.STRUCT:
-		for _, field := range typ.(*arrow.StructType).Fields() {
-			if !listElementScalarResultSupported(field.Type, nullResult) {
-				return false
-			}
-		}
-	case arrow.SPARSE_UNION:
-		if typ.(arrow.UnionType).NumFields() == 0 {
-			return false
-		}
-		for _, field := range typ.(arrow.UnionType).Fields() {
-			if !listElementScalarResultSupported(field.Type, nullResult) {
-				return false
-			}
-		}
-	case arrow.DENSE_UNION:
-		if !nullResult {
-			return true
-		}
-		fields := typ.(arrow.UnionType).Fields()
-		return len(fields) != 0 && listElementScalarResultSupported(fields[0].Type, true)
-	case arrow.RUN_END_ENCODED:
-		return listElementScalarResultSupported(typ.(*arrow.RunEndEncodedType).Encoded(), nullResult)
-	}
-	return true
-}
-
 func listElementScalarArrayValueSupported(values arrow.Array, index int) bool {
 	if values.IsNull(index) {
-		return listElementScalarResultSupported(values.DataType(), true)
+		return true
 	}
 
 	switch values := values.(type) {
-	case *array.BinaryView, *array.StringView, *array.ListView, *array.LargeListView:
-		return false
 	case array.ExtensionArray:
 		return listElementScalarArrayValueSupported(values.Storage(), index)
 	case *array.Struct:
@@ -200,9 +165,6 @@ func (fn *listElementFunction) Execute(ctx context.Context, opts FunctionOptions
 		listValue, ok := listDatum.Value.(scalar.ListScalar)
 		if !ok {
 			return nil, fmt.Errorf("%w: list_element requires a list-like scalar input", arrow.ErrType)
-		}
-		if !listElementScalarResultSupported(listType.Elem(), !listValue.IsValid()) {
-			return nil, fmt.Errorf("%w: list_element scalar output type %s is not supported", arrow.ErrNotImplemented, listType.Elem())
 		}
 		if !listValue.IsValid() {
 			if _, err := fn.DispatchExact(listDatum.Type(), indexDatum.Type()); err != nil {

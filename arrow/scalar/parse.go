@@ -638,6 +638,16 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 				return nil, fmt.Errorf("inconsistent type for large list scalar array and data type")
 			}
 			return NewLargeListScalar(v), nil
+		case arrow.LIST_VIEW:
+			if !arrow.TypeEqual(v.DataType(), dt.(*arrow.ListViewType).Elem()) {
+				return nil, fmt.Errorf("inconsistent type for list view scalar array and data type")
+			}
+			return NewListViewScalarWithType(v, dt), nil
+		case arrow.LARGE_LIST_VIEW:
+			if !arrow.TypeEqual(v.DataType(), dt.(*arrow.LargeListViewType).Elem()) {
+				return nil, fmt.Errorf("inconsistent type for large list view scalar array and data type")
+			}
+			return NewLargeListViewScalarWithType(v, dt), nil
 		case arrow.FIXED_SIZE_LIST:
 			if !arrow.TypeEqual(v.DataType(), dt.(*arrow.FixedSizeListType).Elem()) {
 				return nil, fmt.Errorf("inconsistent type for list scalar array and data type")
