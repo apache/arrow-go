@@ -80,8 +80,11 @@ func (p *onePagePager) Err() error { return nil }
 func (p *onePagePager) Reset(parquet.BufferedReader, int64, compress.Compression, *CryptoContext) {
 }
 func (p *onePagePager) GetDictionaryPage() (*DictionaryPage, error) { return nil, nil }
-func (p *onePagePager) SeekToPageWithRow(int64) error               { return nil }
-func (p *onePagePager) Close() error                                { return nil }
+func (p *onePagePager) SeekToPageWithRow(int64) error {
+	p.read = true
+	return nil
+}
+func (p *onePagePager) Close() error { return nil }
 
 func shortPageDescr(t *testing.T, rep parquet.Repetition) *schema.Column {
 	t.Helper()
@@ -118,8 +121,8 @@ func shortPage(t *testing.T, descr *schema.Column, enc parquet.Encoding, numValu
 	defer encoded.Release()
 	body = append(body, encoded.Bytes()...)
 
-	return NewDataPageV1(memory.NewBufferBytes(body), int32(numValues), enc,
-		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(len(body)))
+	return NewDataPageV1WithConfig(memory.NewBufferBytes(body), parquet.Encodings.RLE, parquet.Encodings.RLE,
+		DataPageConfig{Num: int32(numValues), Encoding: enc, UncompressedSize: int32(len(body))})
 }
 
 func newInt32Reader(t *testing.T, descr *schema.Column, enc parquet.Encoding, page Page) *Int32ColumnChunkReader {
@@ -173,6 +176,17 @@ func TestSkipPageHoldsFewerValuesThanHeader(t *testing.T) {
 	r := newInt32Reader(t, descr, enc, shortPage(t, descr, enc, 10, nil, []int32{7, 8}))
 
 	_, err := r.Skip(5)
+	require.ErrorContains(t, err, shortPageMessage)
+	require.ErrorContains(t, err, "expected 3")
+	require.ErrorContains(t, r.Err(), shortPageMessage)
+}
+
+func TestSeekToRowPageHoldsFewerValuesThanHeader(t *testing.T) {
+	descr := shortPageDescr(t, parquet.Repetitions.Required)
+	enc := parquet.Encodings.DeltaBinaryPacked
+	r := newInt32Reader(t, descr, enc, shortPage(t, descr, enc, 10, nil, []int32{7, 8}))
+
+	err := r.SeekToRow(5)
 	require.ErrorContains(t, err, shortPageMessage)
 	require.ErrorContains(t, err, "expected 3")
 	require.ErrorContains(t, r.Err(), shortPageMessage)
