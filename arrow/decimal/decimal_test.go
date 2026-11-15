@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -158,17 +159,26 @@ func TestDecimalToReal(t *testing.T) {
 			// exact comparisons would succeed on most platforms, but not all power-of-ten
 			// factors are exactly representable in binary floating point, so we'll use
 			// approx and ensure that the values are within 4 ULP (unit of least precision)
-			for scale := int32(-9); scale <= 9; scale++ {
+			for scale := int32(-19); scale <= 19; scale++ {
 				checkApproxDecimaltoFloat("1", math.Pow10(-int(scale)), scale)
 				checkApproxDecimaltoFloat("123", float64(123)*math.Pow10(-int(scale)), scale)
 			}
 
-			for scale := int32(-18); scale <= 18; scale++ {
+			for scale := int32(-19); scale <= 19; scale++ {
 				checkApproxDecimal64toFloat("1", math.Pow10(-int(scale)), scale)
 				checkApproxDecimal64toFloat("123", float64(123)*math.Pow10(-int(scale)), scale)
 			}
 		})
 	})
+
+	assert.Zero(t, decimal.Decimal32(0).ToBigFloat(math.MinInt32).Sign())
+	assert.Zero(t, decimal.Decimal64(0).ToBigFloat(math.MinInt32).Sign())
+	// 10^646456993 overflows big.Float, but 10^-646456993 doesn't.
+	assert.Equal(t, 1, decimal.Decimal32(1).ToBigFloat(646456993).Sign())
+	assert.Equal(t, 1, decimal.Decimal64(1).ToBigFloat(646456993).Sign())
+	// 10^28 is not exactly representable with 64 bits of precision.
+	want := new(big.Float).SetPrec(64).SetRat(new(big.Rat).SetFrac(big.NewInt(3), new(big.Int).Exp(big.NewInt(10), big.NewInt(28), nil)))
+	assert.Zero(t, want.Cmp(decimal.Decimal64(3).ToBigFloat(28)))
 }
 
 func TestDecimalFromFloat(t *testing.T) {
@@ -291,6 +301,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -308,6 +326,82 @@ func TestFromString(t *testing.T) {
 			assert.Equal(t, ex64, n64)
 		})
 	}
+
+	for _, s := range []string{"abc", "Inf", "-inf"} {
+		_, err := decimal.Decimal32FromString(s, 8, 2)
+		assert.Error(t, err, s)
+		_, err = decimal.Decimal64FromString(s, 8, 2)
+		assert.Error(t, err, s)
+	}
+
+	for _, s := range []string{"2147483648", "4294967295"} {
+		_, err := decimal.Decimal32FromString(s, 9, 0)
+		assert.Error(t, err, s)
+	}
+	n32, err := decimal.Decimal32FromString("4294967295", 9, -1)
+	require.NoError(t, err)
+	assert.Equal(t, decimal.Decimal32(429496729), n32)
+	_, err = decimal.Decimal32FromString("4294967296", 9, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal32")
+	_, err = decimal.Decimal64FromString("9223372036854775808", 18, 0)
+	assert.Error(t, err)
+	_, err = decimal.Decimal64FromString("18446744073709551616", 18, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal64")
+
+	for _, tc := range []struct {
+		s     string
+		scale int32
+		want  decimal.Decimal64
+	}{
+		{"9223372036854775808", -1, 922337203685477580},
+		{"18446744073709551615", -2, 184467440737095516},
+		{"10000000000000000000", -19, 1},
+		{"18000000000000000000", -20, 0},
+		{"1", math.MinInt32, 0},
+	} {
+		n64, err := decimal.Decimal64FromString(tc.s, 18, tc.scale)
+		require.NoError(t, err, tc.s)
+		assert.Equal(t, tc.want, n64, tc.s)
+	}
+
+	for _, tc := range []struct {
+		s           string
+		prec, scale int32
+		want        int64
+		wantErr     bool
+	}{
+		{"1e-18", 9, 19, 10, false},
+		{"1e-18", 9, 20, 100, false},
+		{"-1e-76", 1, 76, -1, false},
+		{"3000000000", 9, -2, 30000000, false},
+		{"1e-18", 1, 20, 0, true},
+		{"1", 9, 100000000, 0, true},
+		{"1", 9, math.MaxInt32, 0, true},
+	} {
+		n32, err := decimal.Decimal32FromString(tc.s, tc.prec, tc.scale)
+		n64, err64 := decimal.Decimal64FromString(tc.s, tc.prec, tc.scale)
+		if tc.wantErr {
+			assert.Error(t, err, tc.s)
+			assert.Error(t, err64, tc.s)
+			continue
+		}
+		require.NoError(t, err, tc.s)
+		require.NoError(t, err64, tc.s)
+		assert.Equal(t, decimal.Decimal32(tc.want), n32, tc.s)
+		assert.Equal(t, decimal.Decimal64(tc.want), n64, tc.s)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny32, err := decimal.Decimal32FromString("-1e-20000000", 9, 0)
+	require.NoError(t, err)
+	tiny64, err := decimal.Decimal64FromString("-1e-20000000", 18, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal.Decimal32(0), tiny32)
+	assert.Equal(t, decimal.Decimal64(0), tiny64)
+	// Rounding these values directly would allocate about 33 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestCmp(t *testing.T) {
@@ -395,6 +489,61 @@ func TestDecimalRescale(t *testing.T) {
 	// A value that genuinely overflows Decimal64 still reports data loss.
 	_, err = decimal.Decimal64(5_000_000_000_000_000_000).Rescale(0, 1)
 	assert.ErrorContains(t, err, "rescale data loss")
+
+	for _, tc := range []struct {
+		bits               int
+		n                  int64
+		oldScale, newScale int32
+		want               int64
+		wantErr            bool
+	}{
+		{64, 1, 0, 10, 10_000_000_000, false},
+		{64, -1, 0, 18, -1_000_000_000_000_000_000, false},
+		{64, 10_000_000_000, 10, 0, 1, false},
+		{64, -1_000_000_000_000_000_000, 18, 0, -1, false},
+		{32, 2, 0, 9, 2_000_000_000, false},
+		{32, -3, 0, 9, 0, true},
+		{64, -9, 0, 18, -9_000_000_000_000_000_000, false},
+		{64, 10, 0, 18, 0, true},
+		{32, 214748364, 0, 1, 2147483640, false},
+		{32, 214748365, 0, 1, 0, true},
+		{64, -922337203685477580, 0, 1, -9223372036854775800, false},
+		{64, -922337203685477581, 0, 1, 0, true},
+		{32, 1, 0, 10, 0, true},
+		{64, -1, 19, 0, 0, true},
+		{32, 1410065408, 10, 0, 0, true},
+		{32, 0, 32, 0, 0, false},
+		{64, 0, math.MinInt32, math.MaxInt32, 0, false},
+		{32, math.MinInt32, 5, 5, math.MinInt32, false},
+		{32, math.MinInt32, 1, 0, 0, true},
+		{64, math.MinInt64, 0, 1, 0, true},
+		{32, 10, math.MinInt32, math.MaxInt32, 0, true},
+		{64, 10, math.MaxInt32, math.MinInt32, 0, true},
+		{32, 1, -1, math.MaxInt32, 0, true},
+		{32, 111, math.MaxInt32 - 2, math.MaxInt32, 11100, false},
+		{64, 11100, math.MinInt32 + 2, math.MinInt32, 111, false},
+		{64, -555, 2, 1, 0, true},
+	} {
+		t.Run(fmt.Sprintf("decimal%d_%d_%d_%d", tc.bits, tc.n, tc.oldScale, tc.newScale), func(t *testing.T) {
+			var got int64
+			var err error
+			if tc.bits == 32 {
+				var out decimal.Decimal32
+				out, err = decimal.Decimal32(tc.n).Rescale(tc.oldScale, tc.newScale)
+				got = int64(out)
+			} else {
+				var out decimal.Decimal64
+				out, err = decimal.Decimal64(tc.n).Rescale(tc.oldScale, tc.newScale)
+				got = int64(out)
+			}
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestDecimalIncreaseScale(t *testing.T) {
@@ -435,6 +584,8 @@ func TestDecimalReduceScale(t *testing.T) {
 		assert.Equal(t, decimal.Decimal64(tt.expected).Negate(),
 			decimal.Decimal64(tt.value).Negate().ReduceScaleBy(tt.scale, tt.round), "decimal64")
 	}
+
+	assert.Equal(t, decimal.Decimal64(1), decimal.Decimal64(10_000_000_000).ReduceScaleBy(10, false))
 }
 
 func TestDecimalBasics(t *testing.T) {

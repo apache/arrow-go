@@ -128,6 +128,59 @@ func TestDictionaryArrayBloomFilter(t *testing.T) {
 	}))
 }
 
+func TestDictionaryArrayStatisticsEmptyString(t *testing.T) {
+	tests := []struct {
+		name       string
+		dictionary string
+		indices    string
+		min, max   string
+	}{
+		{"empty and nonempty", `["", "az"]`, `[0, 1]`, "", "az"},
+		{"only empty referenced", `["", "az"]`, `[0]`, "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			dictionary, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(tt.dictionary))
+			require.NoError(t, err)
+			defer dictionary.Release()
+			indices, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(tt.indices))
+			require.NoError(t, err)
+			defer indices.Release()
+
+			dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+			values := array.NewDictionaryArray(dictType, indices, dictionary)
+			defer values.Release()
+			sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(sc, []arrow.Array{values}, int64(values.Len()))
+			defer rec.Release()
+
+			var output bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(sc, &output,
+				parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithStats(true)),
+				pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem)))
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+
+			reader, err := file.NewParquetReader(bytes.NewReader(output.Bytes()))
+			require.NoError(t, err)
+			defer reader.Close()
+			chunk, err := reader.MetaData().RowGroup(0).ColumnChunk(0)
+			require.NoError(t, err)
+			stats, err := chunk.Statistics()
+			require.NoError(t, err)
+
+			require.True(t, stats.HasMinMax())
+			assert.Equal(t, tt.min, string(stats.EncodeMin()))
+			assert.Equal(t, tt.max, string(stats.EncodeMax()))
+		})
+	}
+}
+
 func TestWriteColumnDataRejectsOutOfBoundsDictionaryIndex(t *testing.T) {
 	mem := memory.DefaultAllocator
 

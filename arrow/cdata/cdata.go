@@ -719,7 +719,8 @@ func (imp *cimporter) doImport() error {
 			return err
 		}
 
-		imp.data = array.NewData(dt, int(imp.arr.length), nil, nil, int(imp.arr.null_count), int(imp.arr.offset))
+		// NullType's layout has one always-null buffer, which C Data does not export.
+		imp.data = array.NewData(dt, int(imp.arr.length), []*memory.Buffer{nil}, nil, int(imp.arr.null_count), int(imp.arr.offset))
 	case arrow.FixedWidthDataType:
 		return imp.importFixedSizePrimitive()
 	case *arrow.StringType:

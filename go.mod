@@ -27,7 +27,7 @@ tool (
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.7
+	github.com/andybalholm/brotli v1.2.8
 	github.com/apache/thrift v0.25.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/goccy/go-json v0.12.0
@@ -35,23 +35,23 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hamba/avro/v2 v2.31.0
 	github.com/klauspost/compress v1.20.3
-	github.com/klauspost/cpuid/v2 v2.4.1
+	github.com/klauspost/cpuid/v2 v2.4.2
 	github.com/pierrec/lz4/v4 v4.1.33
 	github.com/pterm/pterm v0.12.84
 	github.com/stoewer/go-strcase v1.3.1
 	github.com/stretchr/testify v1.12.1
 	github.com/substrait-io/substrait-go/v8 v8.1.1
 	github.com/substrait-io/substrait-protobuf/go v0.85.0
-	github.com/tidwall/sjson v1.2.5
+	github.com/tidwall/sjson v1.2.7
 	github.com/twmb/avro v1.9.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	golang.org/x/sys v0.49.0
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
@@ -81,7 +81,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/substrait-io/substrait v0.87.0 // indirect
-	github.com/tidwall/gjson v1.14.2 // indirect
+	github.com/tidwall/gjson v1.20.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect

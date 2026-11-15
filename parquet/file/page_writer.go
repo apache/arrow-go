@@ -528,6 +528,10 @@ func (bw *bufferedPageWriter) Close(hasDict, fallback bool) error {
 	return nil
 }
 
+func (bw *bufferedPageWriter) release() {
+	bw.inMemSink.Release()
+}
+
 func (bw *bufferedPageWriter) WriteDataPage(page DataPage) (int64, error) {
 	return bw.pager.WriteDataPage(page)
 }

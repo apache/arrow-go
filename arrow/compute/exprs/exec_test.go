@@ -984,6 +984,316 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		defer result.Release()
 		assert.Equal(t, []byte("world"), result.(*compute.ScalarDatum).Value.(*scalar.Binary).Data())
 	})
+
+	t.Run("scalar list element struct field", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "l", Type: arrow.ListOf(arrow.StructOf(
+				arrow.Field{Name: "x", Type: arrow.BinaryTypes.Binary, Nullable: true})), Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"l": [{"x": "aGVsbG8="}, {"x": "d29ybGQ="}]}}]`)
+		sc := arrow.NewSchema(dt.Fields(), nil)
+
+		st, err := exprs.ToSubstraitType(dt, false, extSet)
+		require.NoError(t, err)
+		e, err := expr.NewRootFieldRef(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0,
+			Child: &expr.ListElementRef{Offset: 1, Child: &expr.StructFieldRef{Field: 0}}}},
+			types.NewRecordTypeFromStruct(*st.(*types.StructType)))
+		require.NoError(t, err)
+
+		result := execute(t, mem, sc, e, compute.NewDatumWithoutOwning(input))
+		input.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+		assert.Equal(t, []byte("world"), result.(*compute.ScalarDatum).Value.(*scalar.Binary).Data())
+		result.Release()
+	})
+
+	t.Run("scalar struct result", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		inner := arrow.StructOf(arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true})
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "t", Type: inner, Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"t": {"b": "aGVsbG8="}}}]`)
+
+		result, err := exprs.GetReferencedValue(mem,
+			&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0}},
+			compute.NewDatumWithoutOwning(input), extSet)
+		require.NoError(t, err)
+		input.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+		b := result.(*compute.ScalarDatum).Value.(*scalar.Struct).Value[0]
+		assert.Equal(t, []byte("hello"), b.(*scalar.Binary).Data())
+		result.Release()
+	})
+
+	t.Run("array list element", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		lists, _, err := array.FromJSON(mem, arrow.ListOf(arrow.BinaryTypes.Binary),
+			strings.NewReader(`[["YQ=="], ["Yg==", "Yw=="]]`))
+		require.NoError(t, err)
+
+		result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: 1},
+			compute.NewDatumWithoutOwning(lists), extSet)
+		require.NoError(t, err)
+		lists.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+
+		expected, _, err := array.FromJSON(mem, arrow.BinaryTypes.Binary, strings.NewReader(`["Yg==", "Yw=="]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assert.Truef(t, array.Equal(expected, result.(*compute.ScalarDatum).Value.(*scalar.List).Value),
+			"got %s", result)
+		result.Release()
+	})
+
+	t.Run("GetScalar", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: arrow.StructOf(
+			arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true}), Nullable: true})
+		input := scalarInput(t, mem, dt, `[{"s": {"b": "aGVsbG8="}}]`)
+
+		result, err := exprs.GetScalar(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0}},
+			input, mem, extSet)
+		require.NoError(t, err)
+		input.Release()
+		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
+		assert.Equal(t, []byte("hello"), result.(*scalar.Binary).Data())
+		result.(scalar.Releasable).Release()
+	})
+}
+
+func TestNestedFieldRefSlicedStruct(t *testing.T) {
+	inner := arrow.StructOf(arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true})
+	sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(
+		arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		arrow.Field{Name: "t", Type: inner, Nullable: true}), Nullable: true}}, nil)
+	const records = `[
+		{"s": {"a": 1, "t": {"a": 10}}},
+		{"s": {"a": 2, "t": {"a": 20}}},
+		{"s": {"a": 3, "t": {"a": 30}}},
+		{"s": {"a": 4, "t": {"a": 40}}}
+	]`
+
+	tests := []struct {
+		name     string
+		exprType arrow.DataType
+		path     []any
+		expected string
+	}{
+		{"field", arrow.PrimitiveTypes.Int32, []any{"s", "a"}, `[3, 4]`},
+		{"nested field", arrow.PrimitiveTypes.Int32, []any{"s", "t", "a"}, `[30, 40]`},
+		{"type mismatch", arrow.BinaryTypes.String, []any{"s", "t", "a"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(records))
+			require.NoError(t, err)
+			defer rec.Release()
+			sliced := rec.NewSlice(2, 4)
+			defer sliced.Release()
+
+			exprSchema := sc
+			if tt.expected == "" {
+				exprSchema = arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.StructOf(
+					arrow.Field{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+					arrow.Field{Name: "t", Type: arrow.StructOf(
+						arrow.Field{Name: "a", Type: tt.exprType, Nullable: true}), Nullable: true}), Nullable: true}}, nil)
+			}
+			bldr := exprs.NewExprBuilder(extSet)
+			require.NoError(t, bldr.SetInputSchema(exprSchema))
+			e, err := bldr.FieldRefList(tt.path...).BuildExpr()
+			require.NoError(t, err)
+
+			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
+			if tt.expected == "" {
+				assert.ErrorIs(t, err, arrow.ErrInvalid)
+				assert.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, tt.exprType, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
+		})
+	}
+}
+
+func TestNestedFieldRefNullStruct(t *testing.T) {
+	t.Run("array", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		child, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2, 3, null]`))
+		require.NoError(t, err)
+		defer child.Release()
+		// the struct is null at index 1, where its child holds a valid 2
+		validity := memory.NewResizableBuffer(mem)
+		defer validity.Release()
+		validity.Resize(1)
+		validity.Bytes()[0] = 0b1101
+		structs, err := array.NewStructArrayWithNulls([]arrow.Array{child}, []string{"a"}, validity, 1, 0)
+		require.NoError(t, err)
+		defer structs.Release()
+
+		sc := arrow.NewSchema([]arrow.Field{{Name: "s", Type: structs.DataType(), Nullable: true}}, nil)
+		rec := array.NewRecordBatch(sc, []arrow.Array{structs}, int64(structs.Len()))
+		defer rec.Release()
+		sliced := rec.NewSlice(1, 4)
+		defer sliced.Release()
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+		e, err := bldr.FieldRefList("s", "a").BuildExpr()
+		require.NoError(t, err)
+
+		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
+		require.NoError(t, err)
+		defer result.Release()
+
+		expected, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[null, 3, null]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
+	})
+
+	t.Run("scalar", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		innerType := arrow.StructOf(arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true})
+		dt := arrow.StructOf(arrow.Field{Name: "s", Type: innerType, Nullable: true})
+		// the struct is null, but its child holds a valid value
+		inner := scalar.NewStructScalar([]scalar.Scalar{
+			scalar.NewBinaryScalar(memory.NewBufferBytes([]byte("hello")), arrow.BinaryTypes.Binary)}, innerType)
+		inner.Valid = false
+		input := scalar.NewStructScalar([]scalar.Scalar{inner}, dt)
+		sc := arrow.NewSchema(dt.Fields(), nil)
+
+		bldr := exprs.NewExprBuilder(extSet)
+		require.NoError(t, bldr.SetInputSchema(sc))
+		e, err := bldr.FieldRefList("s", "b").BuildExpr()
+		require.NoError(t, err)
+
+		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(input))
+		require.NoError(t, err)
+		defer result.Release()
+		assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
+	})
+
+	t.Run("scalar list fields", func(t *testing.T) {
+		for _, listType := range []arrow.DataType{
+			arrow.ListOf(arrow.PrimitiveTypes.Int32),
+			arrow.LargeListOf(arrow.PrimitiveTypes.Int32),
+		} {
+			t.Run(listType.ID().String(), func(t *testing.T) {
+				inputType := arrow.StructOf(arrow.Field{Name: "l", Type: listType, Nullable: true})
+				input := scalar.MakeNullScalar(inputType)
+				defer input.(scalar.Releasable).Release()
+
+				result, err := exprs.GetReferencedValue(memory.DefaultAllocator,
+					&expr.StructFieldRef{Field: 0, Child: &expr.ListElementRef{Offset: 0}},
+					compute.NewDatumWithoutOwning(input), extSet)
+				require.NoError(t, err)
+				defer result.Release()
+				assert.Equal(t, arrow.PrimitiveTypes.Int32, result.(*compute.ScalarDatum).Value.DataType())
+				assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
+			})
+		}
+	})
+
+	t.Run("scalar map field", func(t *testing.T) {
+		mapType := arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32)
+		inputType := arrow.StructOf(arrow.Field{Name: "m", Type: mapType, Nullable: true})
+		input := scalar.MakeNullScalar(inputType)
+		defer input.(scalar.Releasable).Release()
+
+		result, err := exprs.GetReferencedValue(memory.DefaultAllocator,
+			&expr.StructFieldRef{Field: 0, Child: &expr.MapKeyRef{
+				MapKey: expr.NewPrimitiveLiteral("key", false)}},
+			compute.NewDatumWithoutOwning(input), extSet)
+		require.NoError(t, err)
+		defer result.Release()
+		assert.Equal(t, arrow.PrimitiveTypes.Int32, result.(*compute.ScalarDatum).Value.DataType())
+		assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
+	})
+
+	t.Run("unknown null count without bitmap", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		child, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2, 3]`))
+		require.NoError(t, err)
+		defer child.Release()
+		dt := arrow.StructOf(arrow.Field{Name: "a", Type: child.DataType(), Nullable: true})
+		data := array.NewData(dt, child.Len(), []*memory.Buffer{nil}, []arrow.ArrayData{child.Data()}, array.UnknownNullCount, 0)
+		defer data.Release()
+
+		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+			&compute.ArrayDatum{Value: data}, extSet)
+		require.NoError(t, err)
+		defer result.Release()
+		assertEqual(t, child, result)
+	})
+
+	t.Run("field without validity bitmap", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		runEnds, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 3]`))
+		require.NoError(t, err)
+		defer runEnds.Release()
+		values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		require.NoError(t, err)
+		defer values.Release()
+		child := array.NewRunEndEncodedArray(runEnds, values, 3, 0)
+		defer child.Release()
+		validity := memory.NewBufferBytes([]byte{0b101})
+		defer validity.Release()
+		parent, err := array.NewStructArrayWithNulls([]arrow.Array{child}, []string{"a"}, validity, 1, 0)
+		require.NoError(t, err)
+		defer parent.Release()
+
+		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+			compute.NewDatumWithoutOwning(parent), extSet)
+		assert.ErrorIs(t, err, arrow.ErrNotImplemented)
+		assert.Nil(t, result)
+	})
+
+	t.Run("null field without validity bitmap", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		child := array.NewNull(3)
+		defer child.Release()
+		validity := memory.NewBufferBytes([]byte{0b101})
+		defer validity.Release()
+		parent, err := array.NewStructArrayWithNulls([]arrow.Array{child}, []string{"n"}, validity, 1, 0)
+		require.NoError(t, err)
+		defer parent.Release()
+
+		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+			compute.NewDatumWithoutOwning(parent), extSet)
+		require.NoError(t, err)
+		defer result.Release()
+		assertEqual(t, child, result)
+	})
 }
 
 func TestDecimalFilterLarge(t *testing.T) {

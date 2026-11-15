@@ -312,7 +312,7 @@ func safeRescaleDecimal256Out(inputType arrow.Type, outScale, outPrecision, inSc
 		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) decimal256.Num {
 			out, e := decimal256.FromDecimal128(val).Rescale(inScale, outScale)
 			if e != nil {
-				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, *err)
+				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 				return decimal256.Num{}
 			}
 
@@ -327,7 +327,7 @@ func safeRescaleDecimal256Out(inputType arrow.Type, outScale, outPrecision, inSc
 	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal256.Num {
 		out, e := val.Rescale(inScale, outScale)
 		if e != nil {
-			*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, *err)
+			*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 			return decimal256.Num{}
 		}
 
@@ -345,7 +345,7 @@ func safeRescaleDecimal128Out(inputType arrow.Type, outScale, outPrecision, inSc
 		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) decimal128.Num {
 			out, e := val.Rescale(inScale, outScale)
 			if e != nil {
-				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, *err)
+				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 				return decimal128.Num{}
 			}
 
@@ -360,7 +360,7 @@ func safeRescaleDecimal128Out(inputType arrow.Type, outScale, outPrecision, inSc
 	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal128.Num {
 		out, e := val.Rescale(inScale, outScale)
 		if e != nil {
-			*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, *err)
+			*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 			return decimal128.Num{}
 		}
 

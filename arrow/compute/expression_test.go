@@ -59,6 +59,8 @@ func TestExpressionToString(t *testing.T) {
 		{compute.NewLiteral(&scalar.Int64{}), "null"},
 		{compute.NewLiteral(scalar.NewBinaryScalar(memory.NewBufferBytes([]byte("az")),
 			arrow.BinaryTypes.Binary)), `"617A"`},
+		{compute.NewLiteral(scalar.NewStringViewScalar("a\nb")), `"a\nb"`},
+		{compute.NewLiteral(scalar.NewBinaryViewScalar(memory.NewBufferBytes([]byte("az")))), `"617A"`},
 		{compute.NewLiteral(ts), "1990-10-23 10:23:33.123456Z"},
 		{compute.NewCall("add", []compute.Expression{compute.NewLiteral(3), compute.NewFieldRef("beta")}, nil), "add(3, beta)"},
 		{compute.And(compute.NewFieldRef("a"), compute.NewFieldRef("b")), "(a and b)"},
@@ -273,6 +275,15 @@ func TestCumulativeOptionsTypedNilStart(t *testing.T) {
 		expr := compute.NewCall("cumulative_sum", nil, &opts)
 		expr.Release()
 	})
+}
+
+func TestNullLiteralRelease(t *testing.T) {
+	lit := compute.NullLiteral(&arrow.DictionaryType{
+		IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String})
+	dict := lit.(*compute.Literal).Literal.(*compute.ScalarDatum).Value.(*scalar.Dictionary).Value.Dict.Data()
+	require.NotEmpty(t, dict.Buffers())
+	lit.Release()
+	assert.Nil(t, dict.Buffers())
 }
 
 func TestExpressionHashing(t *testing.T) {

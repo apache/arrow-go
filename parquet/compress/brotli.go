@@ -131,8 +131,9 @@ func (brotliCodec) DecodeWithError(dst, src []byte) ([]byte, error) {
 			return nil, err
 		}
 		if sofar == len(dst) {
+			// Read can return (0, nil) on the call that finishes the stream.
 			var extra [1]byte
-			if n, err := rdr.Read(extra[:]); n != 0 || err != io.EOF {
+			if _, err := io.ReadFull(rdr, extra[:]); err != io.EOF {
 				if err != nil {
 					return nil, err
 				}

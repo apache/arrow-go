@@ -2115,13 +2115,17 @@ func (s *ByteArrayStatistics) UpdateFromArrow(values arrow.Array, updateCounts b
 		data      = arr.ValueBytes()
 		curOffset = int64(0)
 	)
+	if data == nil {
+		// minval and maxval treat nil as unset
+		data = []byte{}
+	}
 
 	for i := 0; i < arr.Len(); i++ {
 		nextOffset := curOffset + int64(arr.ValueLen(i))
 		v := data[curOffset:nextOffset]
 		curOffset = nextOffset
 
-		if len(v) == 0 {
+		if arr.IsNull(i) {
 			continue
 		}
 

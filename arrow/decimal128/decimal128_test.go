@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
@@ -203,6 +204,37 @@ func TestDiv(t *testing.T) {
 			if got, want := rem, tc.want_rem; got != want {
 				t.Fatalf("invalid rem value. got=%v, want=%v", got, want)
 			}
+		})
+	}
+}
+
+func TestRescale(t *testing.T) {
+	oneE38 := decimal128.FromBigInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(38), nil))
+	for _, tc := range []struct {
+		n                  int64
+		original, newScale int32
+		want               decimal128.Num
+		wantErr            bool
+	}{
+		{111, 0, 2, decimal128.FromI64(11100), false},
+		{-11100, 2, 0, decimal128.FromI64(-111), false},
+		{555, 2, 1, decimal128.Num{}, true},
+		{1, 0, 38, oneE38, false},
+		{-2, 0, 38, decimal128.Num{}, true},
+		{0, -9, 38, decimal128.Num{}, false},
+		{0, 38, -9, decimal128.Num{}, false},
+		{12, 0, 39, decimal128.Num{}, true},
+		{-12, 39, 0, decimal128.Num{}, true},
+		{10, math.MinInt32, math.MaxInt32, decimal128.Num{}, true},
+	} {
+		t.Run(fmt.Sprintf("%d_%d_%d", tc.n, tc.original, tc.newScale), func(t *testing.T) {
+			got, err := decimal128.FromI64(tc.n).Rescale(tc.original, tc.newScale)
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -672,6 +704,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -683,6 +723,33 @@ func TestFromString(t *testing.T) {
 			assert.Equal(t, ex, n)
 		})
 	}
+
+	for _, s := range []string{"Inf", "+Inf", "-inf", "1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal128.FromString(s, 37, scale)
+			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
+	}
+
+	for _, tc := range []struct {
+		s     string
+		scale int32
+	}{
+		{"1e646456990", 38},
+		{"-1e600000000", -2},
+	} {
+		_, err := decimal128.FromString(tc.s, 37, tc.scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal128", "%s at scale %d", tc.s, tc.scale)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny, err := decimal128.FromString("-1e-20000000", 37, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal128.Num{}, tiny)
+	// Rounding this value directly would allocate about 16 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestInvalidNonNegScaleFromString(t *testing.T) {
@@ -709,6 +776,14 @@ func TestBitLen(t *testing.T) {
 	assert.ErrorContains(t, err, "bitlen too large for decimal128")
 	_, err = decimal128.FromString(b.String(), decimal128.MaxPrecision, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal128")
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 127)
+	_, err = decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal128")
+	limit.Sub(limit, big.NewInt(1))
+	got, err := decimal128.FromString(limit.String(), decimal128.MaxPrecision, -1)
+	require.NoError(t, err)
+	assert.Equal(t, limit.Quo(limit, big.NewInt(10)).String(), got.BigInt().String())
 }
 
 func TestFromStringDecimal128b(t *testing.T) {
@@ -748,4 +823,35 @@ func TestToStringRejectsInvalidScale(t *testing.T) {
 	for _, scale := range []int32{-39, 39} {
 		assert.Panics(t, func() { decimal128.FromI64(1).ToString(scale) })
 	}
+}
+
+func TestToBigFloatRejectsInvalidScale(t *testing.T) {
+	for _, scale := range []int32{39, -39, math.MinInt32} {
+		assert.PanicsWithValue(t, "arrow/decimal128: scale out of range", func() { decimal128.FromI64(12345).ToBigFloat(scale) }, "scale %d", scale)
+	}
+}
+
+func TestFromStringScaleOutOfRange(t *testing.T) {
+	for _, tc := range []struct {
+		s     string
+		scale int32
+		want  string
+	}{
+		{"1e-39", 39, "scale 39 out of range for decimal128, must be between -38 and 38"},
+		{"1", -39, "scale -39 out of range for decimal128, must be between -38 and 38"},
+		{"1", math.MinInt32, "scale -2147483648 out of range for decimal128, must be between -38 and 38"},
+	} {
+		_, err := decimal128.FromString(tc.s, 38, tc.scale)
+		assert.EqualError(t, err, tc.want, "%s at scale %d", tc.s, tc.scale)
+	}
+
+	n, err := decimal128.FromString("1e38", 38, -38)
+	require.NoError(t, err)
+	assert.Equal(t, decimal128.FromI64(1), n)
+
+	// Errors found before the scale is used take precedence.
+	_, err = decimal128.FromString("1e40", 38, -39)
+	assert.EqualError(t, err, "bitlen too large for decimal128")
+	_, err = decimal128.FromString("Inf", 38, 39)
+	assert.EqualError(t, err, "cannot convert Inf to decimal128")
 }

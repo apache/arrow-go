@@ -449,6 +449,17 @@ func (b *BaseEncodingTestSuite) TestByteStreamSplitRoundTrip() {
 	}
 }
 
+func (b *BaseEncodingTestSuite) TestALPRoundTrip() {
+	b.initData(10000, 1)
+
+	switch b.typ {
+	case reflect.TypeOf(float32(0)), reflect.TypeOf(float64(0)):
+		b.checkRoundTrip(parquet.Encodings.ALP)
+	default:
+		b.Panics(func() { b.checkRoundTrip(parquet.Encodings.ALP) })
+	}
+}
+
 func (b *BaseEncodingTestSuite) TestSpacedRoundTrip() {
 	exec := func(vals, repeats int, validBitsOffset int64, nullProb float64) {
 		b.Run(fmt.Sprintf("%d vals %d repeats %d offset %0.3f null", vals, repeats, validBitsOffset, 1-nullProb), func() {
@@ -1694,6 +1705,118 @@ func TestRleBooleanEncoderPutSpacedBitmap(t *testing.T) {
 	// Valid values are at positions 0,2,4,6 with values true,false,false,true
 	expected := []bool{true, false, false, true}
 	assert.Equal(t, expected, out)
+}
+
+func TestRleBooleanEncoderFlushStartsNewPage(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Required, -1), 0, 0)
+	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.RLE, false, descr, memory.DefaultAllocator)
+	benc := enc.(encoding.BooleanEncoder)
+
+	benc.Put([]bool{true, true, true, false})
+	first, err := enc.FlushValues()
+	require.NoError(t, err)
+	first.Release()
+
+	benc.Put([]bool{false, true})
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	dec := encoding.NewDecoder(parquet.Types.Boolean, parquet.Encodings.RLE, descr, memory.DefaultAllocator)
+	bdec := dec.(encoding.BooleanDecoder)
+	require.NoError(t, bdec.SetData(2, buf.Bytes()))
+
+	out := make([]bool, 2)
+	n, err := bdec.Decode(out)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+	assert.Equal(t, []bool{false, true}, out)
+}
+
+func TestEncoderResetDropsBufferedValues(t *testing.T) {
+	boolsA := make([]bool, 9003)
+	for i := range boolsA {
+		boolsA[i] = i%3 != 0
+	}
+	boolsB := []bool{false, false, true}
+
+	ints32A := make([]int32, 200)
+	for i := range ints32A {
+		ints32A[i] = int32(i*i + 7)
+	}
+	ints32B := []int32{100, 90, 95, 1000, -5}
+
+	bytesA := make([]parquet.ByteArray, 10)
+	for i := range bytesA {
+		bytesA[i] = parquet.ByteArray(fmt.Sprintf("prefix/%04d", i))
+	}
+	bytesB := []parquet.ByteArray{parquet.ByteArray("prefix/zeta"), parquet.ByteArray("prefix/zulu"), parquet.ByteArray("other")}
+
+	t.Run("plain boolean", func(t *testing.T) {
+		checkResetDropsBufferedValues(t, schema.NewBooleanNode, parquet.Encodings.Plain, boolsA, boolsB)
+	})
+	t.Run("rle boolean", func(t *testing.T) {
+		checkResetDropsBufferedValues(t, schema.NewBooleanNode, parquet.Encodings.RLE, boolsA, boolsB)
+	})
+	t.Run("delta binary packed int32", func(t *testing.T) {
+		checkResetDropsBufferedValues(t, schema.NewInt32Node, parquet.Encodings.DeltaBinaryPacked, ints32A, ints32B)
+	})
+	t.Run("delta length byte array", func(t *testing.T) {
+		checkResetDropsBufferedValues(t, schema.NewByteArrayNode, parquet.Encodings.DeltaLengthByteArray, bytesA, bytesB)
+	})
+	t.Run("delta byte array", func(t *testing.T) {
+		checkResetDropsBufferedValues(t, schema.NewByteArrayNode, parquet.Encodings.DeltaByteArray, bytesA, bytesB)
+	})
+}
+
+func checkResetDropsBufferedValues[T parquet.ColumnTypes](t *testing.T, node nodeFactory, enc parquet.Encoding, a, b []T) {
+	descr := schema.NewColumn(node("col", parquet.Repetitions.Required, -1), 0, 0)
+	typ := descr.PhysicalType()
+	mem := memory.DefaultAllocator
+	newEncoder := func() encoding.Encoder[T] {
+		return encoding.NewEncoder(typ, enc, false, descr, mem).(encoding.Encoder[T])
+	}
+
+	t.Run("buffered values", func(t *testing.T) {
+		e := newEncoder()
+		defer e.Release()
+
+		e.Reset()
+		e.Put(a)
+		e.Reset()
+		assert.Empty(t, e.Bytes())
+		e.Put(b)
+		buf, err := e.FlushValues()
+		require.NoError(t, err)
+		defer buf.Release()
+
+		dec := encoding.NewDecoder(typ, enc, descr, mem).(encoding.Decoder[T])
+		require.NoError(t, dec.SetData(len(b), buf.Bytes()))
+		out := make([]T, len(b))
+		_, err = dec.Decode(out)
+		require.NoError(t, err)
+		assert.Equal(t, b, out)
+	})
+
+	t.Run("empty page", func(t *testing.T) {
+		fresh := newEncoder()
+		defer fresh.Release()
+		// PlainBooleanEncoder.FlushValues panics until its first Put.
+		fresh.Put(a[:0])
+		want, err := fresh.FlushValues()
+		require.NoError(t, err)
+		defer want.Release()
+
+		e := newEncoder()
+		defer e.Release()
+		e.Put(a)
+		e.Reset()
+		got, err := e.FlushValues()
+		require.NoError(t, err)
+		defer got.Release()
+
+		assert.Equal(t, want.Bytes(), got.Bytes())
+	})
 }
 
 func TestRleBooleanEncoderPutSpacedBitmapConsistency(t *testing.T) {

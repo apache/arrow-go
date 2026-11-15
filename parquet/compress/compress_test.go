@@ -259,6 +259,21 @@ func TestBrotliCompressBound(t *testing.T) {
 	}
 }
 
+func TestBrotliDecodeDestinationSize(t *testing.T) {
+	codec, err := compress.GetCodec(compress.Codecs.Brotli)
+	assert.NoError(t, err)
+	// This stream is 32769 bytes, so the decoder's second 32 KiB read holds only the final empty metablock.
+	data := makeRandomData(32765)
+	compressed := codec.Encode(nil, data)
+
+	out, err := compress.Decode(codec, make([]byte, len(data)), compressed)
+	assert.NoError(t, err)
+	assert.Equal(t, data, out)
+
+	_, err = compress.Decode(codec, make([]byte, len(data)-1), compressed)
+	assert.ErrorContains(t, err, "exceeds destination size")
+}
+
 func TestBrotliEncodeLevelReuse(t *testing.T) {
 	codec, err := compress.GetCodec(compress.Codecs.Brotli)
 	assert.NoError(t, err)

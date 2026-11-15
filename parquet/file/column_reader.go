@@ -331,6 +331,10 @@ func (c *columnChunkReader) readDictionary() error {
 }
 
 func (c *columnChunkReader) configureDict(page *DictionaryPage) error {
+	if c.descr.PhysicalType() == parquet.Types.Boolean {
+		return errors.New("parquet: dictionary encoding not implemented for boolean type")
+	}
+
 	enc := page.encoding
 	if enc == format.Encoding_PLAIN_DICTIONARY || enc == format.Encoding_PLAIN {
 		enc = format.Encoding_RLE_DICTIONARY
@@ -497,6 +501,14 @@ func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) err
 			format.Encoding_DELTA_LENGTH_BYTE_ARRAY,
 			format.Encoding_DELTA_BINARY_PACKED,
 			format.Encoding_BYTE_STREAM_SPLIT:
+			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
+			c.decoders[encoding] = c.curDecoder
+		case format.Encoding_ALP:
+			// Reject before building a decoder: the traits for a non-float type
+			// have no ALP case and panic on one.
+			if pt := c.descr.PhysicalType(); pt != parquet.Types.Float && pt != parquet.Types.Double {
+				return fmt.Errorf("parquet: only float and double support ALP encoding, got %s", pt)
+			}
 			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
 			c.decoders[encoding] = c.curDecoder
 		case format.Encoding_RLE_DICTIONARY:

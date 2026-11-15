@@ -290,4 +290,14 @@ func TestDecimal256GetOneForMarshal(t *testing.T) {
 	for i := range cases {
 		assert.Equalf(t, cases[i].want, arr.GetOneForMarshal(i), "unexpected value at index %d", i)
 	}
+
+	const placeholder = "<scale out of range, cannot format Decimal256 value>"
+	for _, scale := range []int32{77, -77} {
+		past := array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: 76, Scale: scale})
+		past.Append(decimal256.FromI64(12345))
+		pastArr := past.NewDecimal256Array()
+		assert.Equal(t, placeholder, pastArr.GetOneForMarshal(0), "scale %d", scale)
+		pastArr.Release()
+		past.Release()
+	}
 }

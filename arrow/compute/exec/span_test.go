@@ -557,11 +557,56 @@ func TestArraySpan_FillFromScalar(t *testing.T) {
 	dict, _, _ := array.FromJSON(memory.DefaultAllocator, arrow.BinaryTypes.String, strings.NewReader(`["Hello", "World"]`))
 	defer dict.Release()
 
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	longView := memory.NewResizableBuffer(mem)
+	longView.Resize(24)
+	copy(longView.Bytes(), "long string; not inlined")
+	inlineView := scalar.NewStringViewScalar("hello")
+	defer inlineView.Release()
+	outOfLineView := scalar.NewBinaryViewScalar(longView)
+	defer outOfLineView.Release()
+	longView.Release()
+
 	tests := []struct {
 		name string
 		args scalar.Scalar
 		exp  exec.ArraySpan
 	}{
+		{"string view inline",
+			inlineView,
+			exec.ArraySpan{
+				Type:    arrow.BinaryTypes.StringView,
+				Len:     1,
+				Scratch: viewHeaderScratch(5, "hello"),
+				Buffers: [3]exec.BufferSpan{
+					{Buf: []byte{0x01}},
+					{Buf: viewHeaderBytes(5, "hello")},
+					{}},
+			}},
+		{"binary view out of line",
+			outOfLineView,
+			exec.ArraySpan{
+				Type:    arrow.BinaryTypes.BinaryView,
+				Len:     1,
+				Scratch: viewHeaderScratch(24, "long"),
+				Buffers: [3]exec.BufferSpan{
+					{Buf: []byte{0x01}},
+					{Buf: viewHeaderBytes(24, "long")},
+					{Buf: longView.Bytes(), Owner: longView}},
+			}},
+		{"string view null",
+			scalar.MakeNullScalar(arrow.BinaryTypes.StringView),
+			exec.ArraySpan{
+				Type:    arrow.BinaryTypes.StringView,
+				Len:     1,
+				Nulls:   1,
+				Scratch: viewHeaderScratch(0, ""),
+				Buffers: [3]exec.BufferSpan{
+					{Buf: []byte{0x00}},
+					{Buf: viewHeaderBytes(0, "")},
+					{}},
+			}},
 		{"null-type",
 			scalar.MakeNullScalar(arrow.Null),
 			exec.ArraySpan{Type: arrow.Null, Len: 1, Nulls: 1}},
@@ -894,6 +939,163 @@ func TestArraySpan_FillFromScalar(t *testing.T) {
 			}
 			a.FillFromScalar(tt.args)
 			assert.Equal(t, tt.exp, *a)
+		})
+	}
+}
+
+// viewHeaderBytes returns the 16-byte view header for a value of the given
+// size whose inline bytes or 4-byte prefix are data, with buffer index and
+// offset 0.
+func viewHeaderBytes(size int, data string) []byte {
+	raw := make([]byte, arrow.ViewHeaderSizeBytes)
+	endian.Native.PutUint32(raw, uint32(size))
+	copy(raw[4:], data)
+	return raw
+}
+
+func viewHeaderScratch(size int, data string) [2]uint64 {
+	raw := viewHeaderBytes(size, data)
+	return [2]uint64{endian.Native.Uint64(raw[:8]), endian.Native.Uint64(raw[8:])}
+}
+
+func TestArraySpan_FillFromScalarViewOverwritesSpan(t *testing.T) {
+	long := scalar.NewLargeStringScalar("long string; not inlined")
+	defer long.Release()
+	longView := scalar.NewStringViewScalar("long string; not inlined")
+	defer longView.Release()
+	short := scalar.NewStringViewScalar("hi")
+	defer short.Release()
+
+	for _, previous := range []scalar.Scalar{long, longView} {
+		t.Run(previous.DataType().String(), func(t *testing.T) {
+			var span exec.ArraySpan
+			span.FillFromScalar(previous)
+			span.FillFromScalar(short)
+			assert.Equal(t, exec.ArraySpan{
+				Type:    arrow.BinaryTypes.StringView,
+				Len:     1,
+				Scratch: viewHeaderScratch(2, "hi"),
+				Buffers: [3]exec.BufferSpan{
+					{Buf: []byte{0x01}},
+					{Buf: viewHeaderBytes(2, "hi")},
+					{}},
+			}, span)
+
+			out := span.MakeArray()
+			defer out.Release()
+			require.NoError(t, array.ValidateFull(out))
+			assert.Equal(t, "hi", out.(*array.StringView).Value(0))
+		})
+	}
+}
+
+func TestArraySpan_FillFromScalarRoundTripsViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	sv, bv := arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView
+	jsonType, err := extensions.NewJSONType(sv)
+	require.NoError(t, err)
+
+	fromJSON := func(t *testing.T, dt arrow.DataType, data string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(data))
+		require.NoError(t, err)
+		return arr
+	}
+
+	tests := []struct {
+		name  string
+		build func(t *testing.T) arrow.Array
+	}{
+		{"string_view", func(t *testing.T) arrow.Array {
+			return fromJSON(t, sv, `["", "hello", "twelve bytes", "thirteen byte", null]`)
+		}},
+		{"binary_view", func(t *testing.T) arrow.Array {
+			return fromJSON(t, bv, `["", "aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz", null]`)
+		}},
+		{"struct<string_view, binary_view>", func(t *testing.T) arrow.Array {
+			return fromJSON(t, arrow.StructOf(
+				arrow.Field{Name: "sv", Type: sv, Nullable: true},
+				arrow.Field{Name: "bv", Type: bv, Nullable: true},
+			), `[{"sv": "a", "bv": "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz"}, null, {"sv": "long string; not inlined", "bv": null}]`)
+		}},
+		{"dense_union<string_view, int32>", func(t *testing.T) arrow.Array {
+			return fromJSON(t, arrow.DenseUnionOf([]arrow.Field{
+				{Name: "sv", Type: sv, Nullable: true},
+				{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			}, []arrow.UnionTypeCode{0, 1}), `[[0, "a"], [1, 5], [0, null], [0, "long string; not inlined"], [0, ""]]`)
+		}},
+		{"extension<string_view>", func(t *testing.T) arrow.Array {
+			storage := fromJSON(t, sv, `["1", "{\"key\": \"long string; not inlined\"}", null]`)
+			defer storage.Release()
+			return array.NewExtensionArrayWithStorage(jsonType, storage)
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			arr := tc.build(t)
+			defer arr.Release()
+
+			var span exec.ArraySpan
+			for i := 0; i < arr.Len(); i++ {
+				sc, err := scalar.GetScalar(arr, i)
+				require.NoError(t, err, "index %d", i)
+
+				span.FillFromScalar(sc)
+				out := span.MakeArray()
+				require.NoError(t, array.ValidateFull(out), "index %d", i)
+				// Concatenate does not support dense unions.
+				if arr.DataType().ID() != arrow.DENSE_UNION {
+					concatenated, err := array.Concatenate([]arrow.Array{out, out, arr}, mem)
+					require.NoError(t, err, "index %d", i)
+					require.NoError(t, array.ValidateFull(concatenated), "index %d", i)
+					concatenated.Release()
+				}
+				expected := array.NewSlice(arr, int64(i), int64(i+1))
+				assert.Truef(t, array.Equal(expected, out), "index %d: expected %s, got %s", i, expected, out)
+
+				roundTripped, err := scalar.GetScalar(out, 0)
+				require.NoError(t, err, "index %d", i)
+				assert.Truef(t, scalar.Equals(sc, roundTripped), "index %d: expected %s, got %s", i, sc, roundTripped)
+
+				for _, s := range []scalar.Scalar{sc, roundTripped} {
+					if r, ok := s.(scalar.Releasable); ok {
+						r.Release()
+					}
+				}
+				expected.Release()
+				out.Release()
+			}
+		})
+	}
+}
+
+func TestArraySpan_MakeDataInlineOnlyViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView} {
+		t.Run(dt.String(), func(t *testing.T) {
+			inline, _, err := array.FromJSON(mem, dt, strings.NewReader(`["", "aGk=", null]`))
+			require.NoError(t, err)
+			defer inline.Release()
+			mixed, _, err := array.FromJSON(mem, dt, strings.NewReader(`["aGk=", "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz"]`))
+			require.NoError(t, err)
+			defer mixed.Release()
+
+			var span exec.ArraySpan
+			span.SetMembers(inline.Data())
+			out := span.MakeArray()
+			defer out.Release()
+			require.NoError(t, array.ValidateFull(out))
+			assert.Truef(t, array.Equal(inline, out), "expected %s, got %s", inline, out)
+
+			concatenated, err := array.Concatenate([]arrow.Array{out, mixed, out}, mem)
+			require.NoError(t, err)
+			defer concatenated.Release()
+			require.NoError(t, array.ValidateFull(concatenated))
+			assert.Equal(t, 8, concatenated.Len())
 		})
 	}
 }

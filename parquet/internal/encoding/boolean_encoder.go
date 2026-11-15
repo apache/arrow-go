@@ -185,6 +185,13 @@ func (enc *PlainBooleanEncoder) FlushValues() (Buffer, error) {
 	return enc.sink.Finish(), nil
 }
 
+func (enc *PlainBooleanEncoder) Reset() {
+	enc.encoder.Reset()
+	if enc.wr != nil {
+		enc.wr.Reset(0, boolsInBuf)
+	}
+}
+
 const rleLengthInBytes = 4
 
 type RleBooleanEncoder struct {
@@ -281,6 +288,12 @@ func (enc *RleBooleanEncoder) FlushValues() (Buffer, error) {
 	debug.Assert(n <= rleBufferSizeMax, "num encoded bytes larger than expected max")
 	buf := enc.sink.Finish()
 	binary.LittleEndian.PutUint32(buf.Bytes(), uint32(n))
+	enc.bufferedValues = enc.bufferedValues[:0]
 
 	return buf, nil
+}
+
+func (enc *RleBooleanEncoder) Reset() {
+	enc.encoder.Reset()
+	enc.bufferedValues = enc.bufferedValues[:0]
 }

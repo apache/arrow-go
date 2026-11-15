@@ -238,18 +238,32 @@ func (rg *rowGroupWriter) Close() error {
 		rg.closed = true
 		if err := rg.checkRowsWritten(); err != nil {
 			rg.closeErr = err
+			// the row group is invalid, so free the column writers
+			// without flushing any of their pages to the sink
+			for _, wr := range rg.columnWriters {
+				if d, ok := wr.(interface{ discard() }); ok {
+					d.discard()
+				}
+			}
 			return err
 		}
 
+		// close every column writer so each releases its buffers,
+		// even after an earlier one has failed
 		for _, wr := range rg.columnWriters {
 			if wr != nil {
 				if err := wr.Close(); err != nil {
-					rg.closeErr = err
-					return err
+					if rg.closeErr == nil {
+						rg.closeErr = err
+					}
+					continue
 				}
 				rg.bytesWritten += wr.TotalBytesWritten()
 				rg.compressedBytesWritten += wr.TotalCompressedBytes()
 			}
+		}
+		if rg.closeErr != nil {
+			return rg.closeErr
 		}
 
 		rg.columnWriters = nil

@@ -466,10 +466,17 @@ func getMaxBufferLen(dt arrow.DataType, length int) int {
 		}
 		return bufferLen
 	case *arrow.ListViewType:
+		// list values are empty, but a dense union among them still
+		// creates children of length 1 that share this buffer
+		bufferLen = maxOf(getMaxBufferLen(dt.Elem(), 0))
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
 	case *arrow.LargeListViewType:
+		bufferLen = maxOf(getMaxBufferLen(dt.Elem(), 0))
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length))
 	case arrow.OffsetsDataType:
+		if list, ok := dt.(arrow.ListLikeType); ok {
+			bufferLen = maxOf(getMaxBufferLen(list.Elem(), 0))
+		}
 		return maxOf(dt.OffsetTypeTraits().BytesRequired(length + 1))
 	case arrow.BinaryViewDataType:
 		return maxOf(arrow.ViewHeaderSizeBytes * length)

@@ -173,6 +173,15 @@ func (enc *DeltaByteArrayEncoder) FlushValues() (Buffer, error) {
 	return poolBuffer{ret}, nil
 }
 
+func (enc *DeltaByteArrayEncoder) Reset() {
+	enc.encoder.Reset()
+	if enc.prefixEncoder != nil {
+		enc.prefixEncoder.Reset()
+		enc.suffixEncoder.Reset()
+	}
+	enc.lastVal = nil
+}
+
 // DeltaByteArrayDecoder is a decoder for a column of data encoded using incremental or prefix encoding.
 type DeltaByteArrayDecoder struct {
 	*DeltaLengthByteArrayDecoder

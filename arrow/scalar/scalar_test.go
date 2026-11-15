@@ -32,6 +32,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/types"
@@ -146,6 +147,9 @@ func TestBasicDecimal128(t *testing.T) {
 	assert.False(t, null.IsValid())
 
 	assert.False(t, scalar.Equals(pi, pi2))
+
+	_, err := pi.CastTo(&arrow.Decimal128Type{Precision: 38, Scale: 38})
+	assert.EqualError(t, err, "rescale data loss")
 }
 
 func TestBasicDecimal256(t *testing.T) {
@@ -180,6 +184,117 @@ func TestDecimalScalarStringCastUsesExactScaling(t *testing.T) {
 	cast256, err := decimal256Scalar.CastTo(arrow.BinaryTypes.String)
 	require.NoError(t, err)
 	assert.Equal(t, "-0.1234567812345678123456781234567812345678123456781234567812345678123456781234", cast256.String())
+
+	past128 := scalar.NewDecimal128Scalar(decimal128.FromI64(12345), &arrow.Decimal128Type{Precision: 38, Scale: 39})
+	_, err = past128.CastTo(arrow.BinaryTypes.String)
+	assert.EqualError(t, err, "scale 39 out of range for decimal128, must be between -38 and 38", "decimal128 cast at scale 39")
+	assert.Equal(t, "...", past128.String(), "decimal128 String at scale 39")
+	past256 := scalar.NewDecimal256Scalar(decimal256.FromI64(12345), &arrow.Decimal256Type{Precision: 76, Scale: 77})
+	_, err = past256.CastTo(arrow.BinaryTypes.String)
+	assert.EqualError(t, err, "scale 77 out of range for decimal256, must be between -76 and 76", "decimal256 cast at scale 77")
+	assert.Equal(t, "...", past256.String(), "decimal256 String at scale 77")
+}
+
+func TestDecimal32And64Scalars(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	wider := []scalar.Scalar{
+		scalar.NewDecimal64Scalar(-12345, &arrow.Decimal64Type{Precision: 10, Scale: 2}),
+		scalar.NewDecimal128Scalar(decimal128.FromI64(-123450), &arrow.Decimal128Type{Precision: 20, Scale: 3}),
+		scalar.NewDecimal256Scalar(decimal256.FromI64(-12345), &arrow.Decimal256Type{Precision: 40, Scale: 2}),
+	}
+	tests := []struct {
+		value   scalar.Scalar
+		native  any
+		casts   []scalar.Scalar
+		invalid []arrow.DataType
+	}{
+		{
+			value:  scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: 5, Scale: 2}),
+			native: decimal.Decimal32(-12345),
+			casts:  append([]scalar.Scalar{scalar.NewDecimal32Scalar(-1234500, &arrow.Decimal32Type{Precision: 7, Scale: 4})}, wider...),
+			invalid: []arrow.DataType{
+				&arrow.Decimal32Type{Precision: 4, Scale: 2},
+				&arrow.Decimal64Type{Precision: 12, Scale: 1},
+				&arrow.Decimal256Type{Precision: 76, Scale: 76},
+				arrow.PrimitiveTypes.Int32,
+			},
+		},
+		{
+			value:  scalar.NewDecimal64Scalar(-12345, &arrow.Decimal64Type{Precision: 12, Scale: 2}),
+			native: decimal.Decimal64(-12345),
+			casts:  wider,
+			invalid: []arrow.DataType{
+				&arrow.Decimal32Type{Precision: 9, Scale: 2},
+				&arrow.Decimal128Type{Precision: 4, Scale: 2},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		dt := tc.value.DataType()
+		t.Run(dt.String(), func(t *testing.T) {
+			assert.Equal(t, "-123.45", tc.value.String())
+			assertMakeScalarParam(t, tc.value, dt, tc.native)
+			assertMakeScalarParam(t, tc.value, dt, "-123.45")
+			other, err := scalar.ParseScalar(dt, "123.45")
+			require.NoError(t, err)
+			assert.False(t, scalar.Equals(tc.value, other))
+			_, err = scalar.MakeScalarParam(tc.native, arrow.PrimitiveTypes.Int32)
+			assert.Error(t, err)
+			_, err = scalar.ParseScalar(dt, "12345678901234.5")
+			assert.Error(t, err)
+
+			null := checkMakeNullScalar(t, dt)
+			assert.Equal(t, "null", null.String())
+			for _, want := range tc.casts {
+				got, err := tc.value.CastTo(want.DataType())
+				require.NoError(t, err, "cast to %s", want.DataType())
+				assertScalarsEqual(t, want, got)
+
+				got, err = null.CastTo(want.DataType())
+				require.NoError(t, err)
+				assert.False(t, got.IsValid())
+				assert.True(t, arrow.TypeEqual(want.DataType(), got.DataType()))
+			}
+			for _, to := range tc.invalid {
+				_, err := tc.value.CastTo(to)
+				assert.Error(t, err, "cast to %s", to)
+			}
+
+			expected, _, err := array.FromJSON(mem, dt, strings.NewReader(`["-123.45", null]`))
+			require.NoError(t, err)
+			defer expected.Release()
+			for i, want := range []scalar.Scalar{tc.value, null} {
+				got, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				assertScalarsEqual(t, want, got)
+			}
+
+			bldr := array.NewBuilder(mem, dt)
+			defer bldr.Release()
+			require.NoError(t, scalar.AppendSlice(bldr, []scalar.Scalar{tc.value, null}))
+			appended := bldr.NewArray()
+			defer appended.Release()
+			assert.Truef(t, array.Equal(expected, appended), "expected: %s, got: %s", expected, appended)
+		})
+	}
+
+	_, err := scalar.NewDecimal32Scalar(1, &arrow.Decimal32Type{Precision: 9, Scale: 10}).CastTo(&arrow.Decimal32Type{Precision: 9, Scale: 80})
+	assert.Error(t, err)
+	assert.Equal(t, "1e-19", scalar.NewDecimal32Scalar(1, &arrow.Decimal32Type{Precision: 1, Scale: 19}).String())
+	assert.Equal(t, "1e-19", scalar.NewDecimal64Scalar(1, &arrow.Decimal64Type{Precision: 1, Scale: 19}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: 9, Scale: 1_000_000}).String())
+	assert.Equal(t, "1.2345e+1000004", scalar.NewDecimal64Scalar(12345, &arrow.Decimal64Type{Precision: 18, Scale: -1_000_000}).String())
+	assert.Equal(t, "0", scalar.NewDecimal32Scalar(0, &arrow.Decimal32Type{Precision: 9, Scale: 1_000_000}).String())
+	assert.Equal(t, "-1.2345e-999996", scalar.NewDecimal32Scalar(-12345, &arrow.Decimal32Type{Precision: -1, Scale: 1_000_000}).String())
+	b64 := array.NewDecimal64Builder(mem, &arrow.Decimal64Type{Precision: 18, Scale: 1_000_000})
+	defer b64.Release()
+	b64.Append(12345)
+	huge := b64.NewDecimalArray()
+	defer huge.Release()
+	assert.Equal(t, "1.2345e-999996", huge.ValueStr(0))
 }
 
 func TestBinaryScalarBasics(t *testing.T) {
@@ -232,8 +347,8 @@ func TestBinaryScalarValidateErrors(t *testing.T) {
 
 	nullScalar := scalar.MakeNullScalar(arrow.BinaryTypes.Binary)
 	nullScalar.(*scalar.Binary).Valid = true
-	assert.Error(t, sc.Validate())
-	assert.Error(t, sc.ValidateFull())
+	assert.Error(t, nullScalar.Validate())
+	assert.Error(t, nullScalar.ValidateFull())
 }
 
 func TestBinaryScalarCastToBinaryUsesTargetType(t *testing.T) {
@@ -272,8 +387,8 @@ func TestStringScalarValidateErrors(t *testing.T) {
 
 	nullScalar := scalar.MakeNullScalar(arrow.BinaryTypes.String)
 	nullScalar.(*scalar.String).Valid = true
-	assert.Error(t, sc.Validate())
-	assert.Error(t, sc.ValidateFull())
+	assert.Error(t, nullScalar.Validate())
+	assert.Error(t, nullScalar.ValidateFull())
 
 	// invalid utf8
 	sc = scalar.NewStringScalarFromBuffer(memory.NewBufferBytes([]byte{0xff}))
@@ -1328,42 +1443,6 @@ func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
 		newValues func() arrow.Array
 	}{
 		{
-			name: "string view",
-			newValues: func() arrow.Array {
-				b := array.NewStringViewBuilder(memory.DefaultAllocator)
-				defer b.Release()
-				b.AppendValues([]string{"one", "two"}, nil)
-				return b.NewStringViewArray()
-			},
-		},
-		{
-			name: "binary view",
-			newValues: func() arrow.Array {
-				b := array.NewBinaryViewBuilder(memory.DefaultAllocator)
-				defer b.Release()
-				b.AppendValues([][]byte{[]byte("one"), []byte("two")}, nil)
-				return b.NewBinaryViewArray()
-			},
-		},
-		{
-			name: "decimal32",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal32Builder(memory.DefaultAllocator, &arrow.Decimal32Type{Precision: 6, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal32{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
-		{
-			name: "decimal64",
-			newValues: func() arrow.Array {
-				b := array.NewDecimal64Builder(memory.DefaultAllocator, &arrow.Decimal64Type{Precision: 12, Scale: 2})
-				defer b.Release()
-				b.AppendValues([]decimal.Decimal64{123, 456}, nil)
-				return b.NewDecimalArray()
-			},
-		},
-		{
 			name: "list view",
 			newValues: func() arrow.Array {
 				b := array.NewListViewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32)
@@ -1560,9 +1639,15 @@ func getScalars(mem memory.Allocator) []scalar.Scalar {
 		scalar.NewDurationScalar(60, arrow.FixedWidthTypes.Duration_s),
 		scalar.NewBinaryScalar(hello, arrow.BinaryTypes.Binary),
 		scalar.NewFixedSizeBinaryScalar(hello, &arrow.FixedSizeBinaryType{ByteWidth: hello.Len()}),
+		scalar.NewDecimal32Scalar(10, &arrow.Decimal32Type{Precision: 9, Scale: 4}),
+		scalar.NewDecimal64Scalar(10, &arrow.Decimal64Type{Precision: 16, Scale: 4}),
 		scalar.NewDecimal128Scalar(decimal128.FromI64(10), &arrow.Decimal128Type{Precision: 16, Scale: 4}),
 		scalar.NewDecimal256Scalar(decimal256.FromI64(10), &arrow.Decimal256Type{Precision: 16, Scale: 4}),
 		scalar.NewStringScalarFromBuffer(hello),
+		scalar.NewBinaryViewScalar(hello),
+		scalar.NewBinaryScalar(hello, arrow.BinaryTypes.BinaryView),
+		scalar.NewStringViewScalarFromBuffer(hello),
+		scalar.NewStringViewScalar("long string; not inlined"),
 		scalar.NewListScalar(int8Arr),
 		scalar.NewMapScalar(mapArr.ListValues()),
 		scalar.NewFixedSizeListScalar(int8Arr),
@@ -1717,6 +1802,58 @@ func TestMakeArrayFromScalarSupportsZeroLength(t *testing.T) {
 	assert.Equal(t, 0, nullArr.Len())
 	assert.Equal(t, 0, nullArr.NullN())
 	require.NoError(t, array.ValidateFull(nullArr))
+
+	unionType := arrow.DenseUnionOf([]arrow.Field{{Name: "i", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, []arrow.UnionTypeCode{0})
+	listType := arrow.ListOf(unionType)
+	unionValues := array.MakeArrayOfNull(mem, unionType, 1)
+	defer unionValues.Release()
+	listOfUnion := scalar.NewListScalar(unionValues)
+	defer listOfUnion.Release()
+	for _, s := range []scalar.Scalar{listOfUnion, scalar.MakeNullScalar(listType)} {
+		arr, err := scalar.MakeArrayFromScalar(s, 0, mem)
+		require.NoError(t, err)
+		assert.Equal(t, 0, arr.Len())
+		assert.Truef(t, arrow.TypeEqual(listType, arr.DataType()), "type %s", arr.DataType())
+		assert.NoError(t, array.ValidateFull(arr), "valid scalar: %t", s.IsValid())
+		arr.Release()
+	}
+}
+
+func TestMakeArrayFromDictionaryScalarZeroLength(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	int32Field := arrow.Field{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true}
+	for _, valueType := range []arrow.DataType{
+		arrow.BinaryTypes.LargeBinary,
+		arrow.BinaryTypes.StringView,
+		arrow.FixedWidthTypes.Boolean,
+		arrow.ListOf(arrow.PrimitiveTypes.Int32),
+		arrow.StructOf(int32Field),
+		arrow.SparseUnionOf([]arrow.Field{int32Field}, []arrow.UnionTypeCode{0}),
+		arrow.DenseUnionOf([]arrow.Field{int32Field}, []arrow.UnionTypeCode{0}),
+		arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int32),
+		extensions.NewUUIDType(),
+	} {
+		dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: valueType}
+		t.Run(valueType.String(), func(t *testing.T) {
+			dict := array.MakeArrayOfNull(mem, valueType, 1)
+			defer dict.Release()
+			valid := scalar.NewDictScalar(scalar.NewInt8Scalar(0), dict)
+			defer valid.Release()
+			null := scalar.NewNullDictScalar(dictType)
+			defer null.Release()
+
+			for _, sc := range []*scalar.Dictionary{valid, null} {
+				arr, err := scalar.MakeArrayFromScalar(sc, 0, mem)
+				require.NoError(t, err)
+				assert.Equal(t, 0, arr.Len())
+				assert.Truef(t, arrow.TypeEqual(dictType, arr.DataType()), "type %s", arr.DataType())
+				assert.NoError(t, array.ValidateFull(arr))
+				arr.Release()
+			}
+		})
+	}
 }
 
 func TestMakeArrayFromDictionaryScalar(t *testing.T) {
@@ -1764,6 +1901,501 @@ func TestMakeArrayFromScalarRejectsNegativeLength(t *testing.T) {
 		arr, err := scalar.MakeArrayFromScalar(sc, -1, mem)
 		require.ErrorIs(t, err, arrow.ErrInvalid)
 		assert.Nil(t, arr)
+	}
+}
+
+const longViewValue = "long string; not inlined"
+
+// viewTestValues covers the empty value, inline values up to the 12-byte
+// limit and out-of-line values.
+var viewTestValues = []string{"", "hello", "twelve bytes", "thirteen byte", longViewValue}
+
+func releaseScalar(sc scalar.Scalar) {
+	if r, ok := sc.(interface{ Release() }); ok {
+		r.Release()
+	}
+}
+
+func newAllocatedBuffer(mem memory.Allocator, value string) *memory.Buffer {
+	buf := memory.NewResizableBuffer(mem)
+	buf.Resize(len(value))
+	copy(buf.Bytes(), value)
+	return buf
+}
+
+func newViewScalar(mem memory.Allocator, dt arrow.DataType, value string) scalar.BinaryScalar {
+	buf := newAllocatedBuffer(mem, value)
+	defer buf.Release()
+	if dt.ID() == arrow.STRING_VIEW {
+		return scalar.NewStringViewScalarFromBuffer(buf)
+	}
+	return scalar.NewBinaryViewScalar(buf)
+}
+
+func TestViewScalarBasics(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	const value = "hello"
+	binaryView := newViewScalar(mem, arrow.BinaryTypes.BinaryView, value)
+	defer binaryView.Release()
+	stringView := newViewScalar(mem, arrow.BinaryTypes.StringView, value)
+	defer stringView.Release()
+	fromString := scalar.NewStringViewScalar(value)
+	defer fromString.Release()
+
+	for _, sc := range []scalar.BinaryScalar{binaryView, stringView, fromString} {
+		assert.NoError(t, sc.ValidateFull())
+		assert.True(t, sc.IsValid())
+		assert.Equal(t, value, string(sc.Data()))
+		assert.Equal(t, value, sc.String())
+	}
+	assert.IsType(t, &scalar.BinaryView{}, binaryView)
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.BinaryView, binaryView.DataType()))
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.StringView, stringView.DataType()))
+	assertScalarsEqual(t, stringView, fromString)
+
+	str := scalar.NewStringScalar(value)
+	defer str.Release()
+	assert.False(t, scalar.Equals(stringView, binaryView))
+	assert.False(t, scalar.Equals(stringView, str))
+
+	for _, tc := range []struct {
+		dt   arrow.DataType
+		kind scalar.Scalar
+	}{
+		{arrow.BinaryTypes.BinaryView, &scalar.BinaryView{}},
+		{arrow.BinaryTypes.StringView, &scalar.StringView{}},
+	} {
+		null := checkMakeNullScalar(t, tc.dt)
+		assert.IsType(t, tc.kind, null)
+		assert.Nil(t, null.(scalar.BinaryScalar).Buffer())
+		assert.Equal(t, "null", null.String())
+
+		dict := scalar.NewNullDictScalar(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: tc.dt})
+		encoded, err := dict.GetEncodedValue()
+		require.NoError(t, err)
+		assert.IsType(t, tc.kind, encoded)
+		assert.False(t, encoded.IsValid())
+		dict.Release()
+	}
+}
+
+func TestViewScalarValidateErrors(t *testing.T) {
+	sc := scalar.NewStringViewScalar("xxx")
+	defer sc.Release()
+	sc.Valid = false
+	assert.Error(t, sc.Validate())
+	assert.Error(t, sc.ValidateFull())
+
+	invalidUTF8 := memory.NewBufferBytes([]byte{0xff})
+	stringView := scalar.NewStringViewScalarFromBuffer(invalidUTF8)
+	defer stringView.Release()
+	binaryView := scalar.NewBinaryViewScalar(invalidUTF8)
+	defer binaryView.Release()
+	invalidUTF8.Release()
+
+	assert.NoError(t, stringView.Validate())
+	assert.ErrorContains(t, stringView.ValidateFull(), "string_view scalar contains invalid utf8 data")
+	assert.NoError(t, binaryView.ValidateFull())
+}
+
+func TestViewScalarMakeScalarParamAndParse(t *testing.T) {
+	const value = "three"
+	buf := memory.NewBufferBytes([]byte(value))
+	defer buf.Release()
+
+	for _, tc := range []struct {
+		dt       arrow.DataType
+		expected scalar.Scalar
+	}{
+		{arrow.BinaryTypes.BinaryView, scalar.NewBinaryViewScalar(buf)},
+		{arrow.BinaryTypes.StringView, scalar.NewStringViewScalar(value)},
+	} {
+		t.Run(tc.dt.String(), func(t *testing.T) {
+			defer releaseScalar(tc.expected)
+			for _, in := range []any{[]byte(value), buf, value} {
+				out, err := scalar.MakeScalarParam(in, tc.dt)
+				require.NoError(t, err, "%T", in)
+				assert.IsType(t, tc.expected, out)
+				assert.NoError(t, out.ValidateFull())
+				assertScalarsEqual(t, tc.expected, out)
+				releaseScalar(out)
+			}
+
+			out, err := scalar.ParseScalar(tc.dt, value)
+			require.NoError(t, err)
+			defer releaseScalar(out)
+			assert.IsType(t, tc.expected, out)
+			assertScalarsEqual(t, tc.expected, out)
+		})
+	}
+}
+
+func TestViewScalarCastTo(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	targets := []struct {
+		dt   arrow.DataType
+		kind scalar.Scalar
+	}{
+		{arrow.BinaryTypes.Binary, &scalar.Binary{}},
+		{arrow.BinaryTypes.String, &scalar.String{}},
+		{arrow.BinaryTypes.BinaryView, &scalar.BinaryView{}},
+		{arrow.BinaryTypes.StringView, &scalar.StringView{}},
+	}
+
+	buf := newAllocatedBuffer(mem, longViewValue)
+	sources := []scalar.BinaryScalar{
+		scalar.NewBinaryScalar(buf, arrow.BinaryTypes.Binary),
+		scalar.NewStringScalarFromBuffer(buf),
+		scalar.NewBinaryViewScalar(buf),
+		scalar.NewStringViewScalarFromBuffer(buf),
+	}
+	buf.Release()
+	for _, src := range sources {
+		defer src.Release()
+		for _, target := range targets {
+			t.Run(fmt.Sprintf("%s to %s", src.DataType(), target.dt), func(t *testing.T) {
+				got, err := src.CastTo(target.dt)
+				require.NoError(t, err)
+				defer releaseScalar(got)
+				assert.IsType(t, target.kind, got)
+				assert.True(t, arrow.TypeEqual(target.dt, got.DataType()))
+				assert.NoError(t, got.ValidateFull())
+				assert.Equal(t, longViewValue, string(got.(scalar.BinaryScalar).Data()))
+
+				null, err := scalar.MakeNullScalar(src.DataType()).CastTo(target.dt)
+				require.NoError(t, err)
+				assert.IsType(t, target.kind, null)
+				assert.False(t, null.IsValid())
+			})
+		}
+	}
+}
+
+func makeViewArray(t *testing.T, mem memory.Allocator, dt arrow.DataType, values []*string) arrow.Array {
+	t.Helper()
+	bldr := array.NewBuilder(mem, dt)
+	defer bldr.Release()
+	// A small block size puts each out-of-line value in its own data buffer.
+	bldr.(interface{ SetBlockSize(uint) }).SetBlockSize(1)
+	for _, v := range values {
+		switch {
+		case v == nil:
+			bldr.AppendNull()
+		case dt.ID() == arrow.STRING_VIEW:
+			bldr.(*array.StringViewBuilder).Append(*v)
+		default:
+			bldr.(*array.BinaryViewBuilder).Append([]byte(*v))
+		}
+	}
+	arr := bldr.NewArray()
+	require.NoError(t, array.ValidateFull(arr))
+	return arr
+}
+
+func viewTestValuesWithNull() []*string {
+	out := make([]*string, 0, len(viewTestValues)+1)
+	for i := range viewTestValues {
+		out = append(out, &viewTestValues[i])
+	}
+	return append(out, nil)
+}
+
+func TestGetScalarViews(t *testing.T) {
+	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
+	defer mem.AssertSize(t, 0)
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView} {
+		t.Run(dt.String(), func(t *testing.T) {
+			values := viewTestValuesWithNull()
+			full := makeViewArray(t, mem, dt, append([]*string{&viewTestValues[4]}, values...))
+			arr := array.NewSlice(full, 1, int64(full.Len()))
+			full.Release()
+
+			scalars := make([]scalar.Scalar, arr.Len())
+			for i := range scalars {
+				sc, err := scalar.GetScalar(arr, i)
+				require.NoError(t, err)
+				scalars[i] = sc
+			}
+			arr.Release()
+			// Scalar values must survive zeroing the source array's memory.
+			mem.AssertSize(t, 0)
+
+			for i, sc := range scalars {
+				require.NoError(t, sc.ValidateFull())
+				assert.True(t, arrow.TypeEqual(dt, sc.DataType()))
+				if dt.ID() == arrow.STRING_VIEW {
+					assert.IsType(t, &scalar.StringView{}, sc)
+				} else {
+					assert.IsType(t, &scalar.BinaryView{}, sc)
+				}
+				if values[i] == nil {
+					assert.False(t, sc.IsValid())
+				} else {
+					assert.True(t, sc.IsValid())
+					assert.Equal(t, *values[i], string(sc.(scalar.BinaryScalar).Data()))
+				}
+				releaseScalar(sc)
+			}
+		})
+	}
+}
+
+func TestMakeArrayFromViewScalar(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView} {
+		for _, value := range viewTestValuesWithNull() {
+			name := "null"
+			if value != nil {
+				name = fmt.Sprintf("%q", *value)
+			}
+			for _, length := range []int{0, 1, 3} {
+				t.Run(fmt.Sprintf("%s/%s/%d", dt, name, length), func(t *testing.T) {
+					sc := scalar.MakeNullScalar(dt)
+					if value != nil {
+						sc = newViewScalar(mem, dt, *value)
+					}
+					defer releaseScalar(sc)
+
+					arr, err := scalar.MakeArrayFromScalar(sc, length, mem)
+					require.NoError(t, err)
+					defer arr.Release()
+					require.NoError(t, array.ValidateFull(arr))
+					assert.True(t, arrow.TypeEqual(dt, arr.DataType()))
+					assert.Equal(t, length, arr.Len())
+
+					if value == nil || length == 0 {
+						if length > 0 {
+							assert.Equal(t, length, arr.NullN())
+						}
+						return
+					}
+					assert.Zero(t, arr.NullN())
+
+					buffers := arr.Data().Buffers()
+					assert.Nil(t, buffers[0])
+					assert.Equal(t, length*arrow.ViewHeaderSizeBytes, buffers[1].Len())
+					if len(*value) <= 12 {
+						assert.Len(t, buffers, 2)
+					} else {
+						require.Len(t, buffers, 3)
+						assert.Equal(t, *value, string(buffers[2].Bytes()))
+						assert.NotSame(t, sc.(scalar.BinaryScalar).Buffer(), buffers[2])
+					}
+
+					for i := 0; i < length; i++ {
+						got, err := scalar.GetScalar(arr, i)
+						require.NoError(t, err)
+						assertScalarsEqual(t, sc, got)
+						releaseScalar(got)
+					}
+
+					if length > 1 {
+						sliced := array.NewSlice(arr, 1, int64(length))
+						defer sliced.Release()
+						assert.NoError(t, array.ValidateFull(sliced))
+						assert.Zero(t, sliced.NullN())
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestAppendViewScalars(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView} {
+		t.Run(dt.String(), func(t *testing.T) {
+			expected := makeViewArray(t, mem, dt, viewTestValuesWithNull())
+			defer expected.Release()
+
+			scalars := make([]scalar.Scalar, expected.Len())
+			for i := range scalars {
+				sc, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				defer releaseScalar(sc)
+				scalars[i] = sc
+			}
+
+			bldr := array.NewBuilder(mem, dt)
+			defer bldr.Release()
+			require.NoError(t, scalar.AppendSlice(bldr, scalars))
+			result := bldr.NewArray()
+			defer result.Release()
+
+			require.NoError(t, array.ValidateFull(result))
+			assert.Truef(t, array.Equal(expected, result), "expected: %s, got: %s", expected, result)
+
+			require.NoError(t, scalar.AppendSlice(bldr, scalars[:3]))
+			inlineOnly := bldr.NewArray()
+			defer inlineOnly.Release()
+			assert.Len(t, inlineOnly.Data().Buffers(), 2, "inline values need no data buffer")
+		})
+	}
+}
+
+func TestViewScalarValidateWithoutValue(t *testing.T) {
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.BinaryView, arrow.BinaryTypes.StringView} {
+		plain := scalar.NewBinaryScalar(memory.NewBufferBytes(nil), dt)
+		plain.Value = nil
+		view := scalar.MakeNullScalar(dt)
+		switch v := view.(type) {
+		case *scalar.BinaryView:
+			v.Valid = true
+		case *scalar.StringView:
+			v.Valid = true
+		}
+		for _, sc := range []scalar.Scalar{plain, view} {
+			assert.Error(t, sc.Validate(), "%T %s", sc, dt)
+		}
+	}
+}
+
+// smallValueLimitBuilder stands in for the view builders' 2 GiB limit on each
+// value with a limit small enough to test.
+type smallValueLimitBuilder struct {
+	*array.StringViewBuilder
+	limit int
+}
+
+func (b smallValueLimitBuilder) ReserveData(n int) {
+	if n > b.limit {
+		panic(fmt.Sprintf("reserved %d bytes, more than one value's limit of %d", n, b.limit))
+	}
+	b.StringViewBuilder.ReserveData(n)
+}
+
+func TestAppendViewScalarsReservesEachValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	values := []string{"fifteen bytes 1", "short", "fifteen bytes 2", "fifteen bytes 3"}
+	scalars := make([]scalar.Scalar, len(values))
+	for i, v := range values {
+		scalars[i] = scalar.NewStringViewScalar(v)
+	}
+
+	bldr := smallValueLimitBuilder{array.NewStringViewBuilder(mem), 20}
+	defer bldr.Release()
+	require.NoError(t, scalar.AppendSlice(bldr, scalars))
+	result := bldr.NewArray()
+	defer result.Release()
+
+	require.NoError(t, array.ValidateFull(result))
+	for i, v := range values {
+		assert.Equal(t, v, result.(*array.StringView).Value(i))
+	}
+}
+
+func TestViewScalarsInNestedTypes(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	sv, bv := arrow.BinaryTypes.StringView, arrow.BinaryTypes.BinaryView
+	fromJSON := func(t *testing.T, dt arrow.DataType, data string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(data))
+		require.NoError(t, err)
+		return arr
+	}
+
+	tests := []struct {
+		name    string
+		build   func(t *testing.T) arrow.Array
+		lengths []int
+		// noAppend skips Append, which cannot build these rows' types.
+		noAppend bool
+	}{
+		{name: "list<string_view>", lengths: []int{0, 1, 3}, build: func(t *testing.T) arrow.Array {
+			return fromJSON(t, arrow.ListOf(sv), `[["a", "long string; not inlined", null], null, [], [""]]`)
+		}},
+		{name: "struct<string_view, binary_view>", lengths: []int{0, 1, 3}, build: func(t *testing.T) arrow.Array {
+			return fromJSON(t, arrow.StructOf(
+				arrow.Field{Name: "sv", Type: sv, Nullable: true},
+				arrow.Field{Name: "bv", Type: bv, Nullable: true},
+			), `[{"sv": "a", "bv": "dGhpcyBpcyBieXRlcyBiZXlvbmQgdHdlbHZlIGNoYXJz"}, null, {"sv": "long string; not inlined", "bv": null}, {"sv": "", "bv": ""}]`)
+		}},
+		{name: "dictionary<int8, string_view>", lengths: []int{0, 1, 3}, noAppend: true, build: func(t *testing.T) arrow.Array {
+			dict := fromJSON(t, sv, `["a", "long string; not inlined", ""]`)
+			defer dict.Release()
+			indices := fromJSON(t, arrow.PrimitiveTypes.Int8, `[0, null, 1, 2]`)
+			defer indices.Release()
+			return array.NewDictionaryArray(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: sv}, indices, dict)
+		}},
+		{name: "run_end_encoded<int32, string_view>", lengths: []int{0, 1, 3}, noAppend: true, build: func(t *testing.T) arrow.Array {
+			runEnds := fromJSON(t, arrow.PrimitiveTypes.Int32, `[2, 3, 5]`)
+			defer runEnds.Release()
+			values := fromJSON(t, sv, `["long string; not inlined", null, "a"]`)
+			defer values.Release()
+			return array.NewRunEndEncodedArray(runEnds, values, 5, 0)
+		}},
+		// MakeArrayFromScalar supports valid union scalars only at length 0.
+		{name: "dense_union<string_view, int32>", lengths: []int{0}, build: func(t *testing.T) arrow.Array {
+			return fromJSON(t, arrow.DenseUnionOf([]arrow.Field{
+				{Name: "sv", Type: sv, Nullable: true},
+				{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+			}, []arrow.UnionTypeCode{0, 1}), `[[0, "a"], [1, 5], [0, null], [0, "long string; not inlined"], [0, ""]]`)
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			arr := tc.build(t)
+			defer arr.Release()
+			require.NoError(t, array.ValidateFull(arr))
+
+			scalars := make([]scalar.Scalar, arr.Len())
+			for i := range scalars {
+				sc, err := scalar.GetScalar(arr, i)
+				require.NoError(t, err, "index %d", i)
+				defer releaseScalar(sc)
+				require.NoError(t, sc.ValidateFull(), "index %d", i)
+				assert.True(t, arrow.TypeEqual(arr.DataType(), sc.DataType()))
+				scalars[i] = sc
+			}
+
+			for i, sc := range scalars {
+				if !sc.IsValid() {
+					continue
+				}
+				for _, length := range tc.lengths {
+					out, err := scalar.MakeArrayFromScalar(sc, length, mem)
+					require.NoError(t, err, "index %d length %d", i, length)
+					require.NoError(t, array.ValidateFull(out), "index %d length %d", i, length)
+					assert.Equal(t, length, out.Len())
+					for j := 0; j < length; j++ {
+						got, err := scalar.GetScalar(out, j)
+						require.NoError(t, err)
+						assertScalarsEqual(t, sc, got)
+						releaseScalar(got)
+					}
+					if length == 1 {
+						expected := array.NewSlice(arr, int64(i), int64(i+1))
+						assert.Truef(t, array.Equal(expected, out), "index %d: expected %s, got %s", i, expected, out)
+						expected.Release()
+					}
+					out.Release()
+				}
+			}
+
+			if tc.noAppend {
+				return
+			}
+			bldr := array.NewBuilder(mem, arr.DataType())
+			defer bldr.Release()
+			require.NoError(t, scalar.AppendSlice(bldr, scalars))
+			appended := bldr.NewArray()
+			defer appended.Release()
+			require.NoError(t, array.ValidateFull(appended))
+			assert.Truef(t, array.Equal(arr, appended), "expected %s, got %s", arr, appended)
+		})
 	}
 }
 
@@ -1827,19 +2459,28 @@ func TestScalarFieldCloneOwnsBinaryValue(t *testing.T) {
 	mem := memory.NewCheckedAllocator(&zeroingAllocator{})
 	defer mem.AssertSize(t, 0)
 
-	original := scalar.NewStringScalar("10")
-	encoded, err := scalar.ToScalar(scalarFieldOption{Value: original}, mem)
-	require.NoError(t, err)
-	original.Release()
+	for _, original := range []scalar.BinaryScalar{
+		scalar.NewStringScalar("10"),
+		newViewScalar(mem, arrow.BinaryTypes.BinaryView, longViewValue),
+		newViewScalar(mem, arrow.BinaryTypes.StringView, longViewValue),
+	} {
+		t.Run(original.DataType().String(), func(t *testing.T) {
+			want := string(original.Data())
+			encoded, err := scalar.ToScalar(scalarFieldOption{Value: original}, mem)
+			require.NoError(t, err)
+			original.Release()
 
-	var decoded scalarFieldOption
-	require.NoError(t, scalar.FromScalarWithAllocator(encoded.(*scalar.Struct), &decoded, mem))
-	encoded.(*scalar.Struct).Release()
+			var decoded scalarFieldOption
+			require.NoError(t, scalar.FromScalarWithAllocator(encoded.(*scalar.Struct), &decoded, mem))
+			encoded.(*scalar.Struct).Release()
 
-	value, ok := decoded.Value.(scalar.BinaryScalar)
-	require.True(t, ok)
-	assert.Equal(t, "10", string(value.Data()))
-	value.Release()
+			assert.IsType(t, original, decoded.Value)
+			value, ok := decoded.Value.(scalar.BinaryScalar)
+			require.True(t, ok)
+			assert.Equal(t, want, string(value.Data()))
+			value.Release()
+		})
+	}
 }
 
 func TestToScalarReleasesFieldsWhenLaterFieldFails(t *testing.T) {
@@ -2221,7 +2862,7 @@ func TestGetScalarReleasesPartialStructChildrenOnError(t *testing.T) {
 
 	dt := arrow.StructOf(
 		arrow.Field{Name: "values", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
-		arrow.Field{Name: "view", Type: arrow.BinaryTypes.StringView},
+		arrow.Field{Name: "unsupported", Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32)},
 	)
 	builder := array.NewStructBuilder(mem, dt)
 	defer builder.Release()
@@ -2230,7 +2871,7 @@ func TestGetScalarReleasesPartialStructChildrenOnError(t *testing.T) {
 	listBuilder := builder.FieldBuilder(0).(*array.ListBuilder)
 	listBuilder.Append(true)
 	listBuilder.ValueBuilder().(*array.Int32Builder).Append(1)
-	builder.FieldBuilder(1).(*array.StringViewBuilder).Append("unsupported")
+	builder.FieldBuilder(1).(*array.ListViewBuilder).AppendWithSize(true, 0)
 
 	arr := builder.NewStructArray()
 	defer arr.Release()
@@ -2689,6 +3330,15 @@ func TestRunEndEncodedGetScalar(t *testing.T) {
 	slice := array.NewSlice(reeArray, 199, 404).(*array.RunEndEncoded)
 	defer slice.Release()
 
+	nullRunEnds, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+	defer nullRunEnds.Release()
+
+	nullValues, _, _ := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[null, 7]`))
+	defer nullValues.Release()
+
+	nullRun := array.NewRunEndEncodedArray(nullRunEnds, nullValues, 2, 0)
+	defer nullRun.Release()
+
 	tests := []struct {
 		name  string
 		arr   arrow.Array
@@ -2697,6 +3347,7 @@ func TestRunEndEncodedGetScalar(t *testing.T) {
 	}{
 		{"simple", reeArray, 225, "world"},
 		{"offset", slice, 125, "of"},
+		{"null primitive", nullRun, 0, "null"},
 	}
 
 	for _, tt := range tests {
@@ -2724,6 +3375,27 @@ func TestRunEndEncodedNullScalar(t *testing.T) {
 	assert.IsType(t, (*scalar.RunEndEncoded)(nil), sc)
 	assert.NoError(t, sc.Validate())
 	assert.NoError(t, sc.ValidateFull())
+}
+
+func TestRunEndEncodedScalarValidateRejectsMismatches(t *testing.T) {
+	dt := arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64)
+
+	nullWithValue := scalar.NewRunEndEncodedScalar(scalar.NewInt64Scalar(7), dt)
+	nullWithValue.Valid = false
+	assert.ErrorContains(t, nullWithValue.Validate(), "has non-null storage value")
+
+	validWithNull := scalar.NewRunEndEncodedScalar(scalar.MakeNullScalar(arrow.PrimitiveTypes.Int64), dt)
+	validWithNull.Valid = true
+	assert.ErrorContains(t, validWithNull.Validate(), "has null storage value")
+
+	nullWrongType := scalar.NewRunEndEncodedScalar(scalar.MakeNullScalar(arrow.PrimitiveTypes.Int32), dt)
+	assert.ErrorContains(t, nullWrongType.Validate(), "does not match type")
+
+	noType := &scalar.RunEndEncoded{Value: scalar.MakeNullScalar(arrow.BinaryTypes.String)}
+	assert.ErrorContains(t, noType.Validate(), "lacks a type")
+
+	nilType := scalar.NewRunEndEncodedScalar(scalar.MakeNullScalar(arrow.BinaryTypes.String), nil)
+	assert.ErrorContains(t, nilType.Validate(), "should not have type")
 }
 
 func TestRunEndEncodedScalarValidateRejectsMissingNonNullValue(t *testing.T) {

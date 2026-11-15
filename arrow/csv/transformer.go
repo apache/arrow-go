@@ -17,11 +17,10 @@
 package csv
 
 import (
-	"bytes"
 	"encoding/base64"
-	"encoding/csv"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -244,19 +243,12 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 			}
 			start, end := arr.ValueOffsets(i)
 			list := array.NewSlice(listVals, start, end)
-			var b bytes.Buffer
-			b.Write([]byte{'{'})
-			writer := csv.NewWriter(&b)
 			values, err := w.transformColToStringArr(list.DataType(), list, stringsReplacer)
 			if err != nil {
 				list.Release()
 				return nil, err
 			}
-			writer.Write(values)
-			writer.Flush()
-			b.Truncate(b.Len() - 1)
-			b.Write([]byte{'}'})
-			res[i] = b.String()
+			res[i] = encodeListItems(values, list, w.nullValue)
 			list.Release()
 		}
 	case *arrow.BinaryType:
@@ -303,4 +295,39 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 		panic(fmt.Errorf("arrow/csv: field has unsupported data type %s", typ.String()))
 	}
 	return res, nil
+}
+
+// encodeListItems formats list items as {item1,item2,...}, quoting items with
+// CSV rules when they are empty or contain characters that would be ambiguous
+// inside the list, so that the reader can parse them back. An unquoted empty
+// item would be lost: {} is an empty list. Quoting braces keeps the items
+// intact for readers that strip every leading and trailing brace.
+//
+// A quoted item is never read back as null, so null items are written as the
+// null value unquoted, and non-null items equal to it are quoted. With an
+// empty null value, a list whose only item is null is written as {}.
+func encodeListItems(values []string, list arrow.Array, nullValue string) string {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, v := range values {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		if list.IsNull(i) || (!listItemNeedsQuotes(v) && v != nullValue) {
+			b.WriteString(v)
+			continue
+		}
+		b.WriteByte('"')
+		b.WriteString(strings.ReplaceAll(v, `"`, `""`))
+		b.WriteByte('"')
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+func listItemNeedsQuotes(v string) bool {
+	if v == "" || strings.ContainsAny(v, ",\"\r\n{}") {
+		return true
+	}
+	return v[0] == ' ' || v[0] == '\t'
 }
