@@ -149,6 +149,17 @@ func TestVariantExtensionType(t *testing.T) {
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
 			), Nullable: false}), Nullable: true}),
 			"typed_value field must be a valid nested type"},
+		{arrow.StructOf(
+			arrow.Field{Name: "metadata", Type: arrow.BinaryTypes.Binary, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
+			arrow.Field{Name: "typed_value", Type: arrow.ListOfField(arrow.Field{Name: "element", Type: arrow.StructOf(
+				arrow.Field{Name: "typed_value", Type: arrow.StructOf(
+					arrow.Field{Name: "n", Type: arrow.StructOf(
+						arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Uint32, Nullable: true},
+					)},
+				), Nullable: true},
+			), Nullable: false}), Nullable: true}),
+			"typed_value field must be a valid nested type"},
 	}
 
 	for _, tt := range tests {
@@ -1235,7 +1246,7 @@ func TestManyTypesShredded(t *testing.T) {
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int8, Nullable: true},
 			)},
-			arrow.Field{Name: "uint8", Type: arrow.StructOf(
+			arrow.Field{Name: "int16_from_uint8", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int16, Nullable: true},
 			)},
@@ -1243,7 +1254,7 @@ func TestManyTypesShredded(t *testing.T) {
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int16, Nullable: true},
 			)},
-			arrow.Field{Name: "uint16", Type: arrow.StructOf(
+			arrow.Field{Name: "int32_from_uint16", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			)},
@@ -1251,7 +1262,7 @@ func TestManyTypesShredded(t *testing.T) {
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
 			)},
-			arrow.Field{Name: "uint32", Type: arrow.StructOf(
+			arrow.Field{Name: "int64_from_uint32", Type: arrow.StructOf(
 				arrow.Field{Name: "value", Type: arrow.BinaryTypes.Binary, Nullable: true},
 				arrow.Field{Name: "typed_value", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
 			)},
@@ -1292,18 +1303,18 @@ func TestManyTypesShredded(t *testing.T) {
 
 	values := []any{
 		map[string]any{
-			"strval":    "click",
-			"bool":      true,
-			"int8":      int8(42),
-			"uint8":     uint8(255),
-			"int16":     int16(12345),
-			"uint16":    uint16(54321),
-			"int32":     int32(1234567890),
-			"uint32":    uint32(1234567890),
-			"bytes":     []byte{0xDE, 0xAD, 0xBE, 0xEF},
-			"timemicro": arrow.Time64(43200000000),
-			"uuid":      uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
-			"event_day": arrow.Date32FromTime(time.Date(2024, 10, 24, 0, 0, 0, 0, time.UTC)),
+			"strval":            "click",
+			"bool":              true,
+			"int8":              int8(42),
+			"int16_from_uint8":  uint8(255),
+			"int16":             int16(12345),
+			"int32_from_uint16": uint16(54321),
+			"int32":             int32(1234567890),
+			"int64_from_uint32": uint32(1234567890),
+			"bytes":             []byte{0xDE, 0xAD, 0xBE, 0xEF},
+			"timemicro":         arrow.Time64(43200000000),
+			"uuid":              uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+			"event_day":         arrow.Date32FromTime(time.Date(2024, 10, 24, 0, 0, 0, 0, time.UTC)),
 			"location": map[string]any{
 				"latitude":  37.7749,
 				"longitude": -122.4194,
@@ -1328,11 +1339,11 @@ func TestManyTypesShredded(t *testing.T) {
 		"strval": "click",
 		"bool": true,
 		"int8": 42,
-		"uint8": 255,
+		"int16_from_uint8": 255,
 		"int16": 12345,
-		"uint16": 54321,
+		"int32_from_uint16": 54321,
 		"int32": 1234567890,
-		"uint32": 1234567890,
+		"int64_from_uint32": 1234567890,
 		"bytes": "3q2+7w==",
 		"timemicro": "`+time.UnixMicro(43200000000).In(time.Local).Format("15:04:05.999999Z0700")+`",
 		"uuid": "123e4567-e89b-12d3-a456-426614174000",

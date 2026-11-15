@@ -150,8 +150,7 @@ func NewShreddedVariantType(dt arrow.DataType) *VariantType {
 //     b. MUST have an nullable field named "value" that is binary/largebinary/binary_view
 //     and another nullable field named "typed_value" that is either a primitive type
 //     (other than an unsigned integer) or a list/large_list/list_view or struct which
-//     also satisfies the following requirements. Unsigned integers are not valid
-//     shredded types.
+//     also satisfies the following requirements.
 //     i. The elements must be NON-NULLABLE
 //     ii. There must either be a single NON-NULLABLE field named "value" which is
 //     binary/largebinary/binary_view or have an nullable "value" field and an nullable
@@ -372,7 +371,7 @@ func validStruct(s *arrow.StructType) bool {
 		if f.Name == "value" {
 			return isBinary(f.Type)
 		}
-		return f.Name == "typed_value" && !isNullType(f.Type) && !isUnsignedInteger(f.Type)
+		return f.Name == "typed_value" && validTypedValue(f.Type)
 	case 2:
 		valField, ok := s.FieldByName("value")
 		if !ok || !valField.Nullable || !isBinary(valField.Type) {
@@ -384,14 +383,17 @@ func validStruct(s *arrow.StructType) bool {
 			return false
 		}
 
-		if nt, ok := typedField.Type.(arrow.NestedType); ok && nt.Name() != "extension" {
-			return validNestedType(nt)
-		}
-
-		return !isNullType(typedField.Type) && !isUnsignedInteger(typedField.Type)
+		return validTypedValue(typedField.Type)
 	default:
 		return false
 	}
+}
+
+func validTypedValue(dt arrow.DataType) bool {
+	if nt, ok := dt.(arrow.NestedType); ok && nt.Name() != "extension" {
+		return validNestedType(nt)
+	}
+	return !isNullType(dt) && !isUnsignedInteger(dt)
 }
 
 func validNestedType(dt arrow.NestedType) bool {
