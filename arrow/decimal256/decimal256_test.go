@@ -581,6 +581,31 @@ func TestDecimalFromFloat(t *testing.T) {
 				assert.Equal(t, "1230", n.BigInt().String())
 			}
 		})
+
+		t.Run("scaled past float32 range", func(t *testing.T) {
+			// decimal256 can hold values far larger than math.MaxFloat32,
+			// so scaling a float32 up must not overflow the conversion
+			tests := []struct {
+				val              float32
+				precision, scale int32
+			}{
+				{456.78, 38, 30}, // stays below math.MaxFloat32 once scaled
+				{123.5, 76, 38},
+				{-123.5, 76, 38},
+				{1, 76, 39},
+				{1e30, 60, 20},
+				{3.4e38, 50, 5},
+				{-3.4e38, 50, 5},
+				{math.MaxFloat32, 40, 1},
+			}
+
+			for _, tt := range tests {
+				n, err := decimal256.FromFloat32(tt.val, tt.precision, tt.scale)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.val, n.ToFloat32(tt.scale), "FromFloat32(%v, %d, %d) = %s",
+					tt.val, tt.precision, tt.scale, n.ToString(tt.scale))
+			}
+		})
 	})
 }
 
