@@ -286,6 +286,12 @@ func fromPositiveFloat32(v float32, prec, scale int32) (Num, error) {
 	}
 
 	v = float32(val)
+	if math.IsInf(float64(v), 1) {
+		// the scaled value is past the float32 range but can still fit
+		// in a decimal256, so split it as a float64 instead
+		return splitPositiveFloat64(val), nil
+	}
+
 	var arr [4]float32
 	arr[3] = float32(math.Floor(math.Ldexp(float64(v), -192)))
 	v -= float32(math.Ldexp(float64(arr[3]), 192))
@@ -330,6 +336,12 @@ func fromPositiveFloat64(v float64, prec, scale int32) (Num, error) {
 		return Num{}, err
 	}
 
+	return splitPositiveFloat64(val), nil
+}
+
+// splitPositiveFloat64 converts an already scaled and rounded non-negative
+// float64 into the 64-bit words of a Num.
+func splitPositiveFloat64(val float64) Num {
 	var arr [4]float64
 	arr[3] = math.Floor(math.Ldexp(val, -192))
 	val -= math.Ldexp(arr[3], 192)
@@ -347,7 +359,7 @@ func fromPositiveFloat64(v float64, prec, scale int32) (Num, error) {
 	debug.Assert(arr[1] < 1.8446744073709552e+19, "bad conversion float64 to decimal256") // 2**64
 	debug.Assert(arr[0] >= 0, "bad conversion float64 to decimal256")
 	debug.Assert(arr[0] < 1.8446744073709552e+19, "bad conversion float64 to decimal256") // 2**64
-	return Num{[4]uint64{uint64(arr[0]), uint64(arr[1]), uint64(arr[2]), uint64(arr[3])}}, nil
+	return Num{[4]uint64{uint64(arr[0]), uint64(arr[1]), uint64(arr[2]), uint64(arr[3])}}
 }
 
 func (n Num) tofloat64Positive(scale int32) float64 {
