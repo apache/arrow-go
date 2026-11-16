@@ -18,10 +18,13 @@ package encoding
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,6 +92,83 @@ func TestDeltaByteArrayEncoderPreservesLastValueAcrossBatches(t *testing.T) {
 			for i := range values {
 				assert.Equal(t, string(values[i]), string(out[i]), "value %d", i)
 			}
+		})
+	}
+}
+
+func fixedLenColumn(t *testing.T, width int) *schema.Column {
+	t.Helper()
+	node, err := schema.NewPrimitiveNode("f", parquet.Repetitions.Required, parquet.Types.FixedLenByteArray, -1, int32(width))
+	require.NoError(t, err)
+	return schema.NewColumn(node, 0, 0)
+}
+
+func TestDeltaByteArrayFixedLenMatchesByteArray(t *testing.T) {
+	for _, width := range []int{4, 16} {
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(uint64(width), 1))
+			values := make([]parquet.ByteArray, deltaByteArrayBatchSize*2+3)
+			prev := make([]byte, width)
+			for i := range values {
+				cur := append([]byte(nil), prev...)
+				for j := width - rng.IntN(width+1); j < width; j++ {
+					cur[j] = byte(rng.IntN(256))
+				}
+				values[i], prev = cur, cur
+			}
+			flba := make([]parquet.FixedLenByteArray, len(values))
+			for i, v := range values {
+				flba[i] = parquet.FixedLenByteArray(v)
+			}
+			descr := fixedLenColumn(t, width)
+
+			encodeBytes := func(values []parquet.ByteArray) []byte {
+				t.Helper()
+				enc := NewEncoder(parquet.Types.ByteArray, parquet.Encodings.DeltaByteArray, false, nil, memory.DefaultAllocator).(ByteArrayEncoder)
+				defer enc.Release()
+				enc.Put(values)
+				buf, err := enc.FlushValues()
+				require.NoError(t, err)
+				defer buf.Release()
+				return append([]byte(nil), buf.Bytes()...)
+			}
+			newFixedEncoder := func() FixedLenByteArrayEncoder {
+				return NewEncoder(parquet.Types.FixedLenByteArray, parquet.Encodings.DeltaByteArray, false, descr, memory.DefaultAllocator).(FixedLenByteArrayEncoder)
+			}
+
+			enc := newFixedEncoder()
+			defer enc.Release()
+			enc.Put(flba)
+			buf, err := enc.FlushValues()
+			require.NoError(t, err)
+			defer buf.Release()
+			require.Equal(t, encodeBytes(values), buf.Bytes())
+
+			dec := NewDecoder(parquet.Types.FixedLenByteArray, parquet.Encodings.DeltaByteArray, descr, memory.DefaultAllocator).(FixedLenByteArrayDecoder)
+			require.NoError(t, dec.SetData(len(flba), buf.Bytes()))
+			out := make([]parquet.FixedLenByteArray, len(flba))
+			decoded, err := dec.Decode(out)
+			require.NoError(t, err)
+			require.Equal(t, len(flba), decoded)
+			for i := range flba {
+				require.Equal(t, []byte(flba[i]), []byte(out[i]), "value %d", i)
+			}
+
+			validBits := make([]byte, bitutil.BytesForBits(int64(len(values))))
+			var valid []parquet.ByteArray
+			for i := range values {
+				if i%3 != 1 {
+					bitutil.SetBit(validBits, i)
+					valid = append(valid, values[i])
+				}
+			}
+			spaced := newFixedEncoder()
+			defer spaced.Release()
+			spaced.PutSpaced(flba, validBits, 0)
+			spacedBuf, err := spaced.FlushValues()
+			require.NoError(t, err)
+			defer spacedBuf.Release()
+			require.Equal(t, encodeBytes(valid), spacedBuf.Bytes())
 		})
 	}
 }

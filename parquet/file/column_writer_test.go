@@ -662,6 +662,15 @@ func (p *PrimitiveWriterTestSuite) TestRequiredALP() {
 	}
 }
 
+func (p *PrimitiveWriterTestSuite) TestRequiredDeltaByteArray() {
+	switch p.Typ {
+	case reflect.TypeOf(parquet.ByteArray{}), reflect.TypeOf(parquet.FixedLenByteArray{}):
+		p.testRequiredWithEncoding(parquet.Encodings.DeltaByteArray)
+	default:
+		p.Panics(func() { p.testRequiredWithEncoding(parquet.Encodings.DeltaByteArray) })
+	}
+}
+
 func (p *PrimitiveWriterTestSuite) TestRequiredDictionary() {
 	p.testRequiredWithEncoding(parquet.Encodings.PlainDict)
 }
@@ -1213,4 +1222,41 @@ func (b *BooleanValueWriterSuite) TestWriteBitmapBatchSpaced() {
 
 	// ValuesOut should contain only the non-null values
 	b.Equal(expected, b.ValuesOut.([]bool)[:values])
+}
+
+func TestFixedLenByteArrayDeltaByteArrayRejectsWrongLength(t *testing.T) {
+	values := []parquet.FixedLenByteArray{[]byte("abcd"), []byte("abc"), []byte("abce")}
+	spacedValues := []parquet.FixedLenByteArray{[]byte("abcd"), nil, []byte("abc")}
+	tests := []struct {
+		name  string
+		write func(*file.FixedLenByteArrayColumnChunkWriter) error
+	}{
+		{"WriteBatch", func(w *file.FixedLenByteArrayColumnChunkWriter) error {
+			_, err := w.WriteBatch(values, []int16{1, 1, 1}, nil)
+			return err
+		}},
+		{"WriteBatchSpacedWithError", func(w *file.FixedLenByteArrayColumnChunkWriter) error {
+			_, err := w.WriteBatchSpacedWithError(spacedValues, []int16{1, 0, 1}, nil, []byte{0b101}, 0)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+				schema.NewFixedLenByteArrayNode("v", parquet.Repetitions.Optional, 4, -1),
+			}, -1))
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(false),
+				parquet.WithEncoding(parquet.Encodings.DeltaByteArray),
+			)
+			var buf bytes.Buffer
+			w := file.NewParquetWriter(&buf, root, file.WithWriterProps(props))
+			rgw := w.AppendRowGroup()
+			cw, err := rgw.NextColumn()
+			require.NoError(t, err)
+
+			err = tt.write(cw.(*file.FixedLenByteArrayColumnChunkWriter))
+			require.ErrorContains(t, err, "parquet: FLBA type requires fixed-length 4 but got 3")
+		})
+	}
 }
