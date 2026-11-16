@@ -60,8 +60,9 @@ func NewResizableBuffer(mem Allocator) *Buffer {
 }
 
 func SliceBuffer(buf *Buffer, offset, length int) *Buffer {
+	data := buf.Bytes()[offset : offset+length]
 	buf.Retain()
-	b := &Buffer{parent: buf, buf: buf.Bytes()[offset : offset+length], length: length}
+	b := &Buffer{parent: buf, buf: data, length: length}
 	b.refCount.Add(1)
 	return b
 }
