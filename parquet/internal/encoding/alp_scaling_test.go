@@ -33,13 +33,29 @@ func TestALPFastRoundFloat32(t *testing.T) {
 		{"positive integer", 5.0, 5},
 		{"positive round up", 2.7, 3},
 		{"positive round down", 2.3, 2},
-		{"positive half", 2.5, 2}, // round-to-even via magic trick
+		{"positive half", 2.5, 2}, // a tie goes to the even integer
 		{"negative integer", -5.0, -5},
 		{"negative round up", -2.3, -2},
 		{"negative round down", -2.7, -3},
 		{"zero", 0.0, 0},
 		{"small positive", 0.1, 0},
 		{"large integer", 12345.0, 12345},
+		// Adding and subtracting 2^23 + 2^22 rounds whole numbers correctly
+		// only up to 2^22.
+		{"below 2^22", 1<<22 - 1, 1<<22 - 1},
+		{"2^22", 1 << 22, 1 << 22},
+		{"above 2^22", 1<<22 + 1, 1<<22 + 1},
+		{"negative below 2^22", -(1<<22 - 1), -(1<<22 - 1)},
+		{"negative 2^22", -(1 << 22), -(1 << 22)},
+		{"negative above 2^22", -(1<<22 + 1), -(1<<22 + 1)},
+		// A float32 holds every whole number up to 2^24, and only even ones
+		// past it.
+		{"below 2^24", 1<<24 - 1, 1<<24 - 1},
+		{"2^24", 1 << 24, 1 << 24},
+		{"above 2^24", 1<<24 + 2, 1<<24 + 2},
+		{"negative below 2^24", -(1<<24 - 1), -(1<<24 - 1)},
+		{"negative 2^24", -(1 << 24), -(1 << 24)},
+		{"negative above 2^24", -(1<<24 + 2), -(1<<24 + 2)},
 	}
 
 	for _, tt := range tests {
@@ -66,6 +82,22 @@ func TestALPFastRoundFloat64(t *testing.T) {
 		{"zero", 0.0, 0},
 		{"small positive", 0.1, 0},
 		{"large integer", 123456789.0, 123456789},
+		// Adding and subtracting 2^52 + 2^51 rounds whole numbers correctly
+		// only up to 2^51.
+		{"below 2^51", 1<<51 - 1, 1<<51 - 1},
+		{"2^51", 1 << 51, 1 << 51},
+		{"above 2^51", 1<<51 + 1, 1<<51 + 1},
+		{"negative below 2^51", -(1<<51 - 1), -(1<<51 - 1)},
+		{"negative 2^51", -(1 << 51), -(1 << 51)},
+		{"negative above 2^51", -(1<<51 + 1), -(1<<51 + 1)},
+		// A float64 holds every whole number up to 2^53, and only even ones
+		// past it.
+		{"below 2^53", 1<<53 - 1, 1<<53 - 1},
+		{"2^53", 1 << 53, 1 << 53},
+		{"above 2^53", 1<<53 + 2, 1<<53 + 2},
+		{"negative below 2^53", -(1<<53 - 1), -(1<<53 - 1)},
+		{"negative 2^53", -(1 << 53), -(1 << 53)},
+		{"negative above 2^53", -(1<<53 + 2), -(1<<53 + 2)},
 	}
 
 	for _, tt := range tests {

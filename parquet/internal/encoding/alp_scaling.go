@@ -27,9 +27,6 @@ import (
 )
 
 const (
-	alpMagicFloat32 = float32(12582912.0)         // 2^22 + 2^23
-	alpMagicFloat64 = float64(6755399441055744.0) // 2^51 + 2^52
-
 	// The largest and smallest values of each type that convert to an integer
 	// of the matching width. They stop short of the integer limits because
 	// neither type can represent every integer that close to them.
@@ -65,17 +62,6 @@ var (
 		1e-10, 1e-11, 1e-12, 1e-13, 1e-14, 1e-15, 1e-16, 1e-17, 1e-18,
 	}
 )
-
-func alpMagic[T alpFloat]() T {
-	var z T
-	switch any(z).(type) {
-	case float32:
-		return T(alpMagicFloat32)
-	case float64:
-		return T(alpMagicFloat64)
-	}
-	panic("parquet: ALP: unsupported float type")
-}
 
 func alpPow10[T alpFloat](i int) T {
 	var z T
@@ -176,18 +162,11 @@ type alpScaling[T alpFloat] struct {
 	encExp, encFac T
 	decFac, decExp T
 
-	lo, hi, magic T
-	// The range of the integer type a vector stores: int32 for FLOAT, int64
-	// for DOUBLE.
-	intMin, intMax int64
+	lo, hi T
 }
 
 func newALPScaling[T alpFloat](exponent, factor int) alpScaling[T] {
 	lo, hi := alpEncodingLimits[T]()
-	intMin, intMax := int64(math.MinInt64), int64(math.MaxInt64)
-	if alpEncodedBytes[T]() == 4 {
-		intMin, intMax = math.MinInt32, math.MaxInt32
-	}
 	return alpScaling[T]{
 		encExp: alpPow10[T](exponent),
 		encFac: alpNegPow10[T](factor),
@@ -195,27 +174,24 @@ func newALPScaling[T alpFloat](exponent, factor int) alpScaling[T] {
 		decExp: alpNegPow10[T](exponent),
 		lo:     lo,
 		hi:     hi,
-		magic:  alpMagic[T](),
-		intMin: intMin,
-		intMax: intMax,
 	}
 }
 
-// round adds and subtracts a magic constant, which rounds to the nearest
-// integer without a library call.
+// round rounds to the nearest integer, and a tie to the even one.
+//
+// Adding and subtracting 2^52 + 2^51 (2^23 + 2^22 for float32) does the same
+// without a library call, but only below 2^51 (2^22): past that the sum has no
+// bit left for the units, and comes back as a different integer. A float32
+// holds whole numbers up to 2^24, so that trick turned much of what a FLOAT
+// column can hold exactly into exceptions.
 func (s *alpScaling[T]) round(v T) int64 {
-	if v >= 0 {
-		return int64((v + s.magic) - s.magic)
-	}
-	return int64((v - s.magic) + s.magic)
+	return int64(math.RoundToEven(float64(v)))
 }
 
 // encode returns the integer v scales to. NaNs, infinities, out-of-range
 // values, and negative zero cannot round-trip through an integer, so they get a
 // sentinel that cannot decode to the original value.
 func (s *alpScaling[T]) encode(v T) int64 {
-	// The conversion keeps the product from fusing with the addition in round,
-	// so every platform rounds the same product.
 	scaled := T(v * s.encExp * s.encFac)
 	if scaled != scaled || scaled > s.hi || scaled < s.lo || (scaled == 0 && math.Signbit(float64(scaled))) {
 		return int64(s.hi)
@@ -232,13 +208,10 @@ func (s *alpScaling[T]) decode(encoded int64) T {
 // tryEncode reports whether v survives the required round trip. Values that
 // fail are stored verbatim as exceptions.
 //
-// Rounding a scaled value just under the limit can still reach 2^31, which a
-// FLOAT vector cannot store: readers rebuild its integers in int32. Such a
-// value is an exception even though it would round-trip in int64.
+// The integer always fits the type a vector stores, int32 for FLOAT and int64
+// for DOUBLE: encode only rounds what lies within the limits, which are whole
+// numbers, so rounding cannot carry a value past them.
 func (s *alpScaling[T]) tryEncode(v T) (encoded int64, ok bool) {
 	encoded = s.encode(v)
-	if encoded < s.intMin || encoded > s.intMax {
-		return encoded, false
-	}
 	return encoded, s.decode(encoded) == v
 }
