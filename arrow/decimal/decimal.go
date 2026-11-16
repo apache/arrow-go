@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
 )
 
 // DecimalTypes is a generic constraint representing the implemented decimal types
@@ -180,14 +181,46 @@ func (n Decimal64) ToString(scale int32) string {
 	return n.ToBigFloat(scale).Text('f', int(scale))
 }
 
-var pt5 = big.NewFloat(0.5)
-
 func decimalFromString[T interface {
 	Decimal32 | Decimal64
 	FitsInPrecision(int32) bool
 }](v string, prec, scale int32) (n T, err error) {
 	var nbits = uint(unsafe.Sizeof(T(0))) * 8
+	if lit, ok := decimalstr.Parse(v); ok {
+		return fromDecimalLiteral[T](lit, prec, scale, nbits)
+	}
+	return fromFloatLiteral[T](v, prec, scale, nbits)
+}
 
+func fromDecimalLiteral[T interface {
+	Decimal32 | Decimal64
+	FitsInPrecision(int32) bool
+}](lit decimalstr.Parsed, prec, scale int32, nbits uint) (n T, err error) {
+	if scale < 0 {
+		// Check the unscaled magnitude before using the scale, matching the
+		// previous MantExp > nbits bound (|x| >= 2^nbits).
+		if lit.AtLeastTwoPower(0, int(nbits)) {
+			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+		}
+	} else if lit.AtLeastTwoPower(int64(scale), int(nbits)) {
+		return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+	}
+
+	val, ok := lit.ScaleAndRound(int64(scale))
+	if !ok || val.BitLen() >= int(nbits) {
+		return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+	}
+	n = T(val.Int64())
+	if !n.FitsInPrecision(prec) {
+		err = fmt.Errorf("val %v doesn't fit in precision %d", n, prec)
+	}
+	return
+}
+
+func fromFloatLiteral[T interface {
+	Decimal32 | Decimal64
+	FitsInPrecision(int32) bool
+}](v string, prec, scale int32, nbits uint) (n T, err error) {
 	var out *big.Float
 	out, _, err = big.ParseFloat(v, 10, nbits, big.ToNearestEven)
 	if err != nil {
@@ -203,46 +236,25 @@ func decimalFromString[T interface {
 		if out.MantExp(nil) > int(nbits) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
+	}
 
-		// |val| < 2^64 < 10^20, so a larger divisor gives the same quotient.
-		div := new(big.Int).Exp(big.NewInt(10), big.NewInt(min(-int64(scale), 20)), nil)
-		n = T(val.Quo(val, div).Int64())
-	} else {
-		// Clamp before converting, since converting an out of range float to
-		// uint is implementation specific. SetPrec caps at big.MaxPrec anyway.
+	if scale != 0 {
 		bitsNeeded := math.Round(float64(int64(prec)+int64(scale)+1) / math.Log10(2))
 		var precInBits = uint(min(max(bitsNeeded, 0), big.MaxPrec-1)) + 1
-
 		mulPow10(out.SetPrec(precInBits), int64(scale))
 		// Reject before rounding and converting, which would allocate as many
 		// bits as the value has.
-		if out.IsInf() || out.MantExp(nil) > int(nbits) {
+		if scale > 0 && (out.IsInf() || out.MantExp(nil) > int(nbits)) {
 			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
 		}
-		// A magnitude below 1/4 rounds to zero. Clearing it skips the
-		// rounding below, which allocates in proportion to the gap between
-		// the value's exponent and 0.5's.
-		if out.MantExp(nil) < -1 {
-			out.SetInt64(0)
-		}
-		if out.Signbit() {
-			out.Sub(out, pt5)
-		} else {
-			out.Add(out, pt5)
-		}
-
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		// This also rejects the signed minimum, which fits the storage but has
-		// more digits than the maximum precision allows.
-		if val.BitLen() >= int(nbits) {
-			return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
-		}
-		n = T(val.Int64())
 	}
-
+	val := decimalstr.RoundScaled(out, v, int64(scale))
+	// This also rejects the signed minimum, which fits the storage but has
+	// more digits than the maximum precision allows.
+	if val.BitLen() >= int(nbits) {
+		return n, fmt.Errorf("bitlen too large for decimal%d", nbits)
+	}
+	n = T(val.Int64())
 	if !n.FitsInPrecision(prec) {
 		err = fmt.Errorf("val %v doesn't fit in precision %d", n, prec)
 	}
