@@ -33,9 +33,10 @@ type Int32ColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *Int32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -73,9 +74,10 @@ type Int64ColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *Int64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -113,9 +115,10 @@ type Int96ColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *Int96ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -153,9 +156,10 @@ type Float32ColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *Float32ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -193,9 +197,10 @@ type Float64ColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *Float64ColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -233,9 +238,10 @@ type BooleanColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *BooleanColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -273,9 +279,10 @@ type ByteArrayColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *ByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }
@@ -320,9 +327,10 @@ type FixedLenByteArrayColumnChunkReader struct {
 // will start reading *after* the skipped values.
 //
 // It returns the number of rows skipped before it stopped, which is less than
-// nvalues when the column ends or an error occurs first. After an error on a
-// repeated column, the count can include a row that continues onto the page
-// that failed.
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *FixedLenByteArrayColumnChunkReader) Skip(nvalues int64) (int64, error) {
 	return cr.columnChunkReader.skipRows(nvalues)
 }

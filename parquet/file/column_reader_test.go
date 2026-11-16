@@ -516,21 +516,45 @@ func TestSkipStopsAtDecodeError(t *testing.T) {
 	require.NoError(t, err)
 	descr := schema.NewColumn(node, 0, 0)
 
-	// the length prefix runs past the data, so only decoding fails
-	body := memory.NewBufferBytes([]byte{3, 0, 0, 0, 'a'})
-	page := file.NewDataPageV1(body, 20, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
-	defer page.Release()
+	t.Run("fails on the first value", func(t *testing.T) {
+		// the length prefix runs past the data, so only decoding fails
+		body := memory.NewBufferBytes([]byte{3, 0, 0, 0, 'a'})
+		page := file.NewDataPageV1(body, 20, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+		defer page.Release()
 
-	pages := new(testutils.MockPageReader)
-	pages.Test(t)
-	pages.TestData().Set("pages", []file.Page{page})
-	pages.On("Err").Return((error)(nil))
-	r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
-	defer r.Close()
+		pages := new(testutils.MockPageReader)
+		pages.Test(t)
+		pages.TestData().Set("pages", []file.Page{page})
+		pages.On("Err").Return((error)(nil))
+		r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
+		defer r.Close()
 
-	n, err := r.Skip(10)
-	require.Error(t, err)
-	assert.Less(t, n, int64(10))
+		n, err := r.Skip(10)
+		require.Error(t, err)
+		assert.EqualValues(t, 0, n)
+	})
+
+	t.Run("valid value before the bad one", func(t *testing.T) {
+		first := memory.NewBufferBytes([]byte{1, 0, 0, 0, 'a', 1, 0, 0, 0, 'b'})
+		firstPage := file.NewDataPageV1(first, 2, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(first.Len()))
+		defer firstPage.Release()
+
+		// the length prefix runs past the data, so only decoding fails
+		second := memory.NewBufferBytes([]byte{1, 0, 0, 0, 'a', 3, 0, 0, 0})
+		secondPage := file.NewDataPageV1(second, 3, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(second.Len()))
+		defer secondPage.Release()
+
+		pages := new(testutils.MockPageReader)
+		pages.Test(t)
+		pages.TestData().Set("pages", []file.Page{firstPage, secondPage})
+		pages.On("Err").Return((error)(nil))
+		r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
+		defer r.Close()
+
+		n, err := r.Skip(4)
+		require.Error(t, err)
+		assert.EqualValues(t, 2, n)
+	})
 }
 
 func TestSkipPastEndOfColumn(t *testing.T) {
