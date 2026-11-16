@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/bits"
 	"sort"
 	"sync"
@@ -737,17 +738,40 @@ func extractStats(dataHeader dataheader) (pageStats metadata.EncodedStatistics) 
 	return
 }
 
+// dictionaryAtDataOffset reports whether the page at data_page_offset may be a
+// dictionary page, which is so when the chunk records no dictionary offset or
+// the same offset as the data offset. Encrypted chunks are excluded because the
+// AAD of a page header depends on the page type, which is unknown before the
+// header is read.
+func (p *serializedPageReader) dictionaryAtDataOffset() bool {
+	return p.dataOffset <= p.baseOffset && p.cryptoCtx.MetaDecryptor == nil
+}
+
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
-	if p.dictOffset > 0 {
+	probe := p.dictOffset == 0 && p.dictionaryAtDataOffset()
+	if p.dictOffset > 0 || probe {
+		span := p.dataOffset - p.baseOffset
+		readBufSize := int(min(span, int64(p.r.BufferSize())))
+		// The dictionary page starts the stream, and the data offset marks its end
+		// only when it is past the dictionary offset. Otherwise the length is
+		// unknown, as it is when no dictionary offset is recorded. Buffer only a
+		// page header, since the stream of a default reader holds the whole chunk.
+		if span <= 0 {
+			span = math.MaxInt64
+			readBufSize = min(p.r.BufferSize(), defaultPageHeaderSize)
+		}
 		hdr := format.NewPageHeader()
-		readBufSize := min(int(p.dataOffset-p.baseOffset), p.r.BufferSize())
-		rd := utils.NewBufferedReader(
-			io.NewSectionReader(p.r.Outer(), p.dictOffset-p.baseOffset, p.dataOffset-p.baseOffset),
-			readBufSize)
+		rd := utils.NewBufferedReader(io.NewSectionReader(p.r.Outer(), 0, span), readBufSize)
 		if err := p.readPageHeader(rd, hdr); err != nil {
+			if probe && errors.Is(err, io.EOF) {
+				return nil, nil
+			}
 			return nil, err
 		}
 
+		if probe && hdr.GetType() != format.PageType_DICTIONARY_PAGE {
+			return nil, nil
+		}
 		dictHeader := hdr.GetDictionaryPageHeader()
 		if dictHeader == nil {
 			return nil, errors.New("parquet: invalid dictionary page header")
@@ -882,7 +906,8 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 		p.rowsSeen = 0
 		p.pageOrd = 0
 
-		for p.Next() && p.rowsSeen < rowIdx {
+		skipDict := p.dictionaryAtDataOffset()
+		for p.Next() && (p.rowsSeen < rowIdx || (skipDict && p.curPageHdr.GetType() == format.PageType_DICTIONARY_PAGE)) {
 		}
 		return p.err
 	}
