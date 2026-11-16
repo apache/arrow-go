@@ -217,6 +217,11 @@ func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSch
 	h := getHandle(self.private_data)
 	defer C.free(self.private_data)
 	defer h.Delete()
+	// the deferred calls above free this state on every path. Clear it so
+	// that release, which a producer calls instead of on_error once
+	// on_schema has failed, does not use it again. On success it is
+	// replaced below.
+	self.private_data = nil
 
 	handler := h.Value().(cAsyncState)
 	defer close(handler.ch)
@@ -278,6 +283,12 @@ func asyncStreamOnError(self *CArrowAsyncDeviceStreamHandler, code C.int, messag
 
 //export asyncStreamRelease
 func asyncStreamRelease(self *CArrowAsyncDeviceStreamHandler) {
+	if self.private_data == nil {
+		// on_schema failed and has already freed the handler's state
+		self.release = nil
+		return
+	}
+
 	h := getHandle(self.private_data)
 	if handler, ok := h.Value().(*cAsyncStreamHandler); ok {
 		handler.release()
