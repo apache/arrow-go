@@ -50,43 +50,65 @@ func alpTestDeltas(rng *rand.Rand, count, bitWidth int) []uint64 {
 	return deltas
 }
 
-// The lengths sit either side of the groups of 4 and of 32 that the loops
-// work in, and include a vector the default size and one past it.
-var alpTestVectorLengths = []int{1, 2, 3, 4, 5, 31, 32, 33, 63, 64, 65, 1000, 1024, 1027}
+// The lengths sit either side of the groups of 4, 8 and 32 that the loops work
+// in, and include a vector the default size and one past it.
+var alpTestVectorLengths = []int{1, 2, 3, 4, 5, 7, 8, 9, 31, 32, 33, 63, 64, 65, 1000, 1024, 1027}
+
+// alpTestRefs returns frames of reference for deltas of bitWidth bits: one at
+// random, and DOUBLE ones either side of each end of the range in which every
+// integer of the vector lies in [-2^51, 2^51), which converts differently.
+func alpTestRefs(rng *rand.Rand, bitWidth int) []uint64 {
+	const limit = 1 << 51
+	refs := []uint64{rng.Uint64()}
+	if bitWidth < 51 {
+		lo, hi := int64(-limit), int64(limit-1<<bitWidth)
+		refs = append(refs, uint64(lo-1), uint64(lo), uint64(hi), uint64(hi+1))
+	}
+	return refs
+}
 
 func TestALPDecodePacked(t *testing.T) {
 	rng := rand.New(rand.NewPCG(3, 4))
 	scratch := make([]uint32, 1027)
 	for bitWidth := 1; bitWidth <= 64; bitWidth++ {
 		for _, count := range alpTestVectorLengths {
-			deltas := alpTestDeltas(rng, count, bitWidth)
-			ref := rng.Uint64()
-			// What follows the deltas must not reach the values: the loops
-			// load it, and discard it.
-			src := make([]byte, alpUnpackSize(count, bitWidth))
-			for i := copy(src, alpTestPack(deltas, bitWidth)); i < len(src); i++ {
-				src[i] = 0xFF
-			}
-
-			got := make([]float64, count)
-			alpDecodePacked64(got, src, uint(bitWidth), ref, 1e3, 1e-7, scratch)
-			for i, d := range deltas {
-				want := float64(int64(d+ref)) * 1e3 * 1e-7
-				require.Equal(t, math.Float64bits(want), math.Float64bits(got[i]),
-					"double bitWidth=%d count=%d i=%d", bitWidth, count, i)
-			}
-
-			if bitWidth > 32 {
-				continue
-			}
-			got32 := make([]float32, count)
-			alpDecodePacked32(got32, src, uint(bitWidth), uint32(ref), 1e3, 1e-7, scratch)
-			for i, d := range deltas {
-				want := float32(int32(uint32(d)+uint32(ref))) * float32(1e3) * float32(1e-7)
-				require.Equal(t, math.Float32bits(want), math.Float32bits(got32[i]),
-					"float bitWidth=%d count=%d i=%d", bitWidth, count, i)
+			for _, ref := range alpTestRefs(rng, bitWidth) {
+				alpTestDecodePacked(t, rng, scratch, bitWidth, count, ref)
 			}
 		}
+	}
+}
+
+func alpTestDecodePacked(t *testing.T, rng *rand.Rand, scratch []uint32, bitWidth, count int, ref uint64) {
+	deltas := alpTestDeltas(rng, count, bitWidth)
+	// Some vectors have their deltas at both extremes.
+	if count > 2 {
+		deltas[0], deltas[count-1] = 0, ^uint64(0)>>(64-bitWidth)
+	}
+	// What follows the deltas must not reach the values: the loops load it,
+	// and discard it.
+	src := make([]byte, alpUnpackSize(count, bitWidth))
+	for i := copy(src, alpTestPack(deltas, bitWidth)); i < len(src); i++ {
+		src[i] = 0xFF
+	}
+
+	got := make([]float64, count)
+	alpDecodePacked64(got, src, uint(bitWidth), ref, 1e3, 1e-7, scratch)
+	for i, d := range deltas {
+		want := float64(int64(d+ref)) * 1e3 * 1e-7
+		require.Equal(t, math.Float64bits(want), math.Float64bits(got[i]),
+			"double bitWidth=%d count=%d ref=%d i=%d", bitWidth, count, int64(ref), i)
+	}
+
+	if bitWidth > 32 {
+		return
+	}
+	got32 := make([]float32, count)
+	alpDecodePacked32(got32, src, uint(bitWidth), uint32(ref), 1e3, 1e-7, scratch)
+	for i, d := range deltas {
+		want := float32(int32(uint32(d)+uint32(ref))) * float32(1e3) * float32(1e-7)
+		require.Equal(t, math.Float32bits(want), math.Float32bits(got32[i]),
+			"float bitWidth=%d count=%d ref=%d i=%d", bitWidth, count, int32(ref), i)
 	}
 }
 

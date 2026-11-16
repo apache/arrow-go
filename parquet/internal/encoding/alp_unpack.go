@@ -40,17 +40,32 @@ func alpUnpackSize(count, bitWidth int) int {
 	return (count-1)*bitWidth/8 + alpUnpackSlack
 }
 
+// alpDecodeGroups64 and alpDecodeGroups32 are the platform's kernels that
+// unpack, add the frame of reference and scale in one pass, as many whole
+// groups of 8 deltas as they can from the front of src, and return how many
+// values that was. They are nil where there are none.
+var (
+	alpDecodeGroups64 func(out []float64, src []byte, bitWidth uint, ref uint64, fac, exp float64) int
+	alpDecodeGroups32 func(out []float32, src []byte, bitWidth uint, ref uint32, fac, exp float32) int
+)
+
 // alpDecodePacked64 unpacks len(out) deltas of bitWidth bits from the front of
 // src, adds the frame of reference to each and scales it. bitWidth is 1 to 64,
 // and src holds alpUnpackSize bytes.
 //
-// Deltas of up to 32 bits are unpacked 32 at a time into scratch, which holds
+// The platform's kernel, where there is one, decodes what it can. Of the rest,
+// deltas of up to 32 bits are unpacked 32 at a time into scratch, which holds
 // len(out) values, and scaled in a second pass. Where the unpacking is
 // vectorized, that is faster than doing both in one pass.
 //
 // Wider deltas, the few left of a short vector, and every delta on a platform
 // without a vectorized unpacker are unpacked and scaled one at a time.
 func alpDecodePacked64(out []float64, src []byte, bitWidth uint, ref uint64, fac, exp float64, scratch []uint32) {
+	if alpDecodeGroups64 != nil {
+		// A group of 8 values ends on a byte boundary at any width.
+		n := alpDecodeGroups64(out, src, bitWidth, ref, fac, exp)
+		out, src = out[n:], src[n*int(bitWidth)/8:]
+	}
 	if bitWidth <= 32 {
 		n := utils.Unpack32Vectorized(src, scratch[:len(out)], int(bitWidth))
 		head := out[:n]
@@ -103,6 +118,10 @@ func alpDecodePacked64(out []float64, src []byte, bitWidth uint, ref uint64, fac
 // alpDecodePacked32 is the FLOAT form of alpDecodePacked64, with bitWidth from
 // 1 to 32. The frame of reference is added in 32 bits, as it was subtracted.
 func alpDecodePacked32(out []float32, src []byte, bitWidth uint, ref uint32, fac, exp float32, scratch []uint32) {
+	if alpDecodeGroups32 != nil {
+		n := alpDecodeGroups32(out, src, bitWidth, ref, fac, exp)
+		out, src = out[n:], src[n*int(bitWidth)/8:]
+	}
 	n := utils.Unpack32Vectorized(src, scratch[:len(out)], int(bitWidth))
 	head := out[:n]
 	for i, d := range scratch[:n] {
