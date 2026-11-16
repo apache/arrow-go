@@ -73,6 +73,40 @@ func TestDecodeByteStreamSplitWidth4(t *testing.T) {
 	}
 }
 
+// Decoding past the last value of a page reads nothing rather than panicking,
+// with or without the SIMD implementations.
+func TestByteStreamSplitDecodeExhausted(t *testing.T) {
+	t.Run("int32", func(t *testing.T) {
+		col := schema.NewColumn(schema.NewInt32Node("v", parquet.Repetitions.Required, -1), 0, 0)
+		dec := NewDecoder(parquet.Types.Int32, parquet.Encodings.ByteStreamSplit, col, memory.DefaultAllocator).(Int32Decoder)
+		require.NoError(t, dec.SetData(2, []byte{1, 2, 0, 0, 0, 0, 0, 0}))
+
+		out := make([]int32, 4)
+		n, err := dec.Decode(out)
+		require.NoError(t, err)
+		require.Equal(t, []int32{1, 2}, out[:n])
+
+		n, err = dec.Decode(out)
+		require.NoError(t, err)
+		require.Zero(t, n)
+	})
+
+	t.Run("int64", func(t *testing.T) {
+		col := schema.NewColumn(schema.NewInt64Node("v", parquet.Repetitions.Required, -1), 0, 0)
+		dec := NewDecoder(parquet.Types.Int64, parquet.Encodings.ByteStreamSplit, col, memory.DefaultAllocator).(Int64Decoder)
+		require.NoError(t, dec.SetData(2, []byte{1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}))
+
+		out := make([]int64, 4)
+		n, err := dec.Decode(out)
+		require.NoError(t, err)
+		require.Equal(t, []int64{1, 2}, out[:n])
+
+		n, err = dec.Decode(out)
+		require.NoError(t, err)
+		require.Zero(t, n)
+	})
+}
+
 func BenchmarkDecodeByteStreamSplitBatchWidth4(b *testing.B) {
 	const width = 4
 	sizes := []int{8, 10, 64, 100, 512, 1000, 4096, 10000, 32768, 100000, 2097152, 10000000, 16777216}

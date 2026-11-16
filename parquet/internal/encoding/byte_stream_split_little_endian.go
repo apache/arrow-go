@@ -30,6 +30,9 @@ import (
 // byte order and are be decoded into the 'out' array in machine's native endianness.
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
+	if nValues == 0 {
+		return
+	}
 	const width = 4
 	debug.Assert(len(out) >= nValues*width, "not enough space in output buffer for decoding")
 	// the beginning of the data slice can be truncated, but for valid encoding we need at least (width-1)*stride+nValues bytes
@@ -50,6 +53,9 @@ func decodeByteStreamSplitBatchWidth4InByteOrderDefault(data []byte, nValues, st
 // byte order and are be decoded into the 'out' array in machine's native endianness.
 // 'out' must have space for at least len(data) bytes.
 func decodeByteStreamSplitBatchWidth8InByteOrderDefault(data []byte, nValues, stride int, out []byte) {
+	if nValues == 0 {
+		return
+	}
 	const width = 8
 	debug.Assert(len(out) >= nValues*width, "not enough space in output buffer for decoding")
 	debug.Assert(len(data) >= 7*stride+nValues, "not enough data for decoding")
