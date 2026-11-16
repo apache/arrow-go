@@ -1037,7 +1037,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		defer mem.AssertSize(t, 0)
 
 		lists, _, err := array.FromJSON(mem, arrow.ListOf(arrow.BinaryTypes.Binary),
-			strings.NewReader(`[["YQ=="], ["Yg==", "Yw=="]]`))
+			strings.NewReader(`[["YQ==", "Yg=="], ["Yw==", "ZA=="]]`))
 		require.NoError(t, err)
 
 		result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: 1},
@@ -1046,11 +1046,10 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		lists.Release()
 		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
 
-		expected, _, err := array.FromJSON(mem, arrow.BinaryTypes.Binary, strings.NewReader(`["Yg==", "Yw=="]`))
+		expected, _, err := array.FromJSON(mem, arrow.BinaryTypes.Binary, strings.NewReader(`["Yg==", "ZA=="]`))
 		require.NoError(t, err)
 		defer expected.Release()
-		assert.Truef(t, array.Equal(expected, result.(*compute.ScalarDatum).Value.(*scalar.List).Value),
-			"got %s", result)
+		assertEqual(t, expected, result)
 		result.Release()
 	})
 
@@ -1069,6 +1068,122 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
 		assert.Equal(t, []byte("hello"), result.(*scalar.Binary).Data())
 		result.(scalar.Releasable).Release()
+	})
+}
+
+func TestListElementRefPerRow(t *testing.T) {
+	str := arrow.BinaryTypes.String
+
+	tests := []struct {
+		name     string
+		dt       arrow.DataType
+		json     string
+		slice    [2]int64
+		offset   int32
+		expected string
+	}{
+		{"offset beyond the row count", arrow.ListOf(str), `[["a", "b", "c"], ["d", "e", "f"]]`, [2]int64{}, 2, `["c", "f"]`},
+		{"null row", arrow.ListOf(str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`},
+		{"sliced", arrow.ListOf(str), `[["a", "b"], ["c", "d"], null, ["g", "h"]]`, [2]int64{1, 4}, 1, `["d", null, "h"]`},
+		{"large list", arrow.LargeListOf(str), `[["a", "b"], ["c", "d"]]`, [2]int64{}, 1, `["b", "d"]`},
+		{"fixed size list", arrow.FixedSizeListOf(2, str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			lists, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.json))
+			require.NoError(t, err)
+			if tt.slice != [2]int64{} {
+				sliced := array.NewSlice(lists, tt.slice[0], tt.slice[1])
+				lists.Release()
+				lists = sliced
+			}
+			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
+				compute.NewDatumWithoutOwning(lists), extSet)
+			require.NoError(t, err)
+			lists.Release()
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, str, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
+		})
+	}
+
+	errTests := []struct {
+		name   string
+		json   string
+		offset int32
+	}{
+		{"past the end of one row", `[["a", "b"], ["c"]]`, 1},
+		{"negative offset", `[["a", "b"], ["c", "d"]]`, -1},
+	}
+	for _, tt := range errTests {
+		t.Run("error "+tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			lists, _, err := array.FromJSON(mem, arrow.ListOf(str), strings.NewReader(tt.json))
+			require.NoError(t, err)
+			defer lists.Release()
+			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
+				compute.NewDatumWithoutOwning(lists), extSet)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, "out of bounds")
+			assert.Nil(t, result)
+		})
+	}
+
+	t.Run("nested field after the element", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.ListOf(arrow.StructOf(arrow.Field{Name: "x", Type: str, Nullable: true}))
+		lists, _, err := array.FromJSON(mem, dt,
+			strings.NewReader(`[[{"x": "a"}, {"x": "b"}], null, [{"x": "d"}, {"x": "e"}]]`))
+		require.NoError(t, err)
+		result, err := exprs.GetReferencedValue(mem,
+			&expr.ListElementRef{Offset: 1, Child: &expr.StructFieldRef{Field: 0}},
+			compute.NewDatumWithoutOwning(lists), extSet)
+		require.NoError(t, err)
+		lists.Release()
+		defer result.Release()
+
+		expected, _, err := array.FromJSON(mem, str, strings.NewReader(`["b", null, "e"]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
+	})
+
+	t.Run("dot path on a record", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		schema := arrow.NewSchema([]arrow.Field{{Name: "l", Type: arrow.ListOf(str), Nullable: true}}, nil)
+		rec, _, err := array.RecordFromJSON(mem, schema,
+			strings.NewReader(`[{"l": ["a", "b"]}, {"l": ["c", "d"]}, {"l": ["e", "f"]}]`))
+		require.NoError(t, err)
+		defer rec.Release()
+
+		ref, err := exprs.NewFieldRefFromDotPath(".l[1]", schema)
+		require.NoError(t, err)
+		st, err := exprs.ToSubstraitType(arrow.StructOf(schema.Fields()...), false, extSet)
+		require.NoError(t, err)
+		e, err := expr.NewRootFieldRef(ref, types.NewRecordTypeFromStruct(*st.(*types.StructType)))
+		require.NoError(t, err)
+
+		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := exprs.ExecuteScalarExpression(ctx, schema, e, compute.NewDatumWithoutOwning(rec))
+		require.NoError(t, err)
+		defer result.Release()
+
+		expected, _, err := array.FromJSON(mem, str, strings.NewReader(`["b", "d", "f"]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
 	})
 }
 
