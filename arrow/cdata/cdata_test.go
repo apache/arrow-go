@@ -1617,6 +1617,50 @@ func TestAsyncSchemaError(t *testing.T) {
 	<-wait
 }
 
+// After on_schema fails, a producer calls release on the handler instead of
+// on_error, and that release must not touch the state on_schema freed.
+func TestAsyncReleaseAfterOnSchemaFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		cpu    bool
+		errMsg string
+	}{
+		{"unsupported device", "i", false, "unsupported device type"},
+		{"invalid schema", "~bogus", true, "unimplemented type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := testAsyncHandler()
+			defer freeAsyncHandler(handler)
+
+			ch := CreateAsyncDeviceStreamHandler(context.Background(), 1, handler)
+			schema := testPrimitive(tt.format)
+
+			type result struct {
+				status   int
+				released bool
+			}
+			done := make(chan result, 1)
+			go func() {
+				status, released := asyncOnSchemaThenRelease(handler, &schema, tt.cpu)
+				done <- result{status, released}
+			}()
+
+			asyncStream := <-ch
+			assert.ErrorContains(t, asyncStream.Err, tt.errMsg)
+
+			res := <-done
+			assert.Equal(t, 22, res.status)
+			assert.True(t, res.released)
+			if !schemaIsReleased(&schema) {
+				releaseSchema(&schema)
+			}
+		})
+	}
+}
+
 func TestAsyncPropagateError(t *testing.T) {
 	reclist := arrdata.Records["primitives"]
 
