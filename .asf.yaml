@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# https://github.com/apache/infrastructure-asfyaml/blob/main/README.md
+# https://cwiki.apache.org/confluence/display/INFRA/Git+-+.asf.yaml+features
 
 github:
   description: "Official Go implementation of Apache Arrow"
@@ -29,11 +29,13 @@ github:
     rebase: false
     squash: true
   features:
+    discussions: true
     issues: true
   protected_branches:
     main:
       required_linear_history: true
 notifications:
+  discussions: user@arrow.apache.org
   commits: commits@arrow.apache.org
   issues_status: issues@arrow.apache.org
   issues_comment: github@arrow.apache.org
