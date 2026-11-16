@@ -551,7 +551,7 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 				out.Release()
 			}
 			return nil, fmt.Errorf("%w: referenced field %s was %s, but should have been %s",
-				arrow.ErrInvalid, ref, dt, expectedType)
+				arrow.ErrInvalid, e.Reference, dt, expectedType)
 		}
 	}
 

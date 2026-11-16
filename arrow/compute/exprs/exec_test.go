@@ -867,11 +867,13 @@ func TestFieldRefTypeMismatchReleases(t *testing.T) {
 		exprType, dataType arrow.DataType
 		json               string
 		path               []any
+		wantMsg            string
 	}{
 		{"top level", arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32,
-			`[{"col": 1}, {"col": 2}]`, []any{"col"}},
+			`[{"col": 1}, {"col": 2}]`, []any{"col"}, "referenced field .field(0) was int32"},
 		{"nested", structOf(arrow.BinaryTypes.String), structOf(arrow.PrimitiveTypes.Int32),
-			`[{"col": {"a": 1}}, {"col": {"a": 2}}]`, []any{"col", "a"}},
+			`[{"col": {"a": 1}}, {"col": {"a": 2}}]`, []any{"col", "a"},
+			"referenced field .field(0).field(0) was int32"},
 	}
 
 	for _, tt := range tests {
@@ -894,6 +896,7 @@ func TestFieldRefTypeMismatchReleases(t *testing.T) {
 			ctx := compute.WithAllocator(context.Background(), mem)
 			result, err := exprs.ExecuteScalarExpression(ctx, dataSchema, e, compute.NewDatumWithoutOwning(rec))
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, tt.wantMsg)
 			assert.Nil(t, result)
 		})
 	}
