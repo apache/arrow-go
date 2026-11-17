@@ -262,7 +262,7 @@ func TestMakeExecBatchErrorKeepsNestedStructInput(t *testing.T) {
 func TestExecuteFieldRefNullStructSurvivesBatch(t *testing.T) {
 	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
 	reg := NewExtensionIDRegistry()
-	require.NoError(t, reg.RegisterType(extensions.ID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
+	require.NoError(t, reg.RegisterType(ExtensionID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
 	extSet := NewExtensionSet(expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()), reg)
 	_, anchor, ok := extSet.EncodeType(dictType)
 	require.True(t, ok)
@@ -348,7 +348,7 @@ func TestLiteralToDatumIntervalYearToMonth(t *testing.T) {
 func TestLiteralToDatumNullUserDefinedRelease(t *testing.T) {
 	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
 	reg := NewExtensionIDRegistry()
-	require.NoError(t, reg.RegisterType(extensions.ID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
+	require.NoError(t, reg.RegisterType(ExtensionID{URN: "extension:test:dictionary", Name: "dict"}, dictType))
 	extSet := NewExtensionSet(expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()), reg)
 	_, anchor, ok := extSet.EncodeType(dictType)
 	require.True(t, ok)
