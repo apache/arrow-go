@@ -651,10 +651,11 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 		c.readNewPage()
 	}
 
-	return c.skipRows(rowIdx - c.curPage.(DataPage).FirstRowIndex())
+	_, err = c.skipRows(rowIdx - c.curPage.(DataPage).FirstRowIndex())
+	return err
 }
 
-func (c *columnChunkReader) skipRows(nrows int64) error {
+func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 	toSkip := nrows
 	for c.HasNext() && toSkip > 0 {
 		// if there are no repetition levels, then this is easy! each level
@@ -670,13 +671,13 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 			ndefs, nvals, err := c.determineNumToRead(toSkip, nil, nil)
 			if err != nil {
 				c.err = err
-				return err
+				return nrows - toSkip, err
 			}
 
 			skipped, err := c.curDecoder.Discard(int(nvals))
 			if err != nil {
 				c.err = err
-				return err
+				return nrows - toSkip, err
 			}
 
 			skipped = max(ndefs, skipped)
@@ -693,7 +694,7 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 			nreps, _, err := c.repetitionDecoder.Decode(repLvls)
 			if err != nil {
 				c.err = err
-				return err
+				return nrows - toSkip, err
 			}
 
 			rowsSkipped := int64(0)
@@ -720,7 +721,7 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 				_, valuesToSkip, err = c.readDefinitionLevels(defLvls)
 				if err != nil {
 					c.err = err
-					return err
+					return nrows - toSkip, err
 				}
 			} else {
 				valuesToSkip = int64(levelsToSkip)
@@ -729,14 +730,14 @@ func (c *columnChunkReader) skipRows(nrows int64) error {
 			_, err = c.curDecoder.Discard(int(valuesToSkip))
 			if err != nil {
 				c.err = err
-				return err
+				return nrows - toSkip, err
 			}
 
 			toSkip -= rowsSkipped
 			c.consumeBufferedValues(int64(levelsToSkip))
 		}
 	}
-	return c.err
+	return nrows - toSkip, c.err
 }
 
 type readerFunc func(int64, int64) (int, error)
