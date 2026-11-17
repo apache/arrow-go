@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -231,6 +232,37 @@ func TestDiv(t *testing.T) {
 			if got, want := rem, tc.want_rem; got != want {
 				t.Fatalf("invalid rem value. got=%v, want=%v", got, want)
 			}
+		})
+	}
+}
+
+func TestRescale(t *testing.T) {
+	fiveE76 := decimal256.FromBigInt(new(big.Int).Mul(big.NewInt(5), new(big.Int).Exp(big.NewInt(10), big.NewInt(76), nil)))
+	for _, tc := range []struct {
+		n                  int64
+		original, newScale int32
+		want               decimal256.Num
+		wantErr            bool
+	}{
+		{111, 0, 2, decimal256.FromI64(11100), false},
+		{-11100, 2, 0, decimal256.FromI64(-111), false},
+		{555, 2, 1, decimal256.Num{}, true},
+		{5, 0, 76, fiveE76, false},
+		{-6, 0, 76, decimal256.Num{}, true},
+		{0, -9, 76, decimal256.Num{}, false},
+		{0, 76, -9, decimal256.Num{}, false},
+		{12, 0, 77, decimal256.Num{}, true},
+		{-12, 77, 0, decimal256.Num{}, true},
+		{10, math.MinInt32, math.MaxInt32, decimal256.Num{}, true},
+	} {
+		t.Run(fmt.Sprintf("%d_%d_%d", tc.n, tc.original, tc.newScale), func(t *testing.T) {
+			got, err := decimal256.FromI64(tc.n).Rescale(tc.original, tc.newScale)
+			if tc.wantErr {
+				assert.EqualError(t, err, "rescale data loss")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -549,6 +581,31 @@ func TestDecimalFromFloat(t *testing.T) {
 				assert.Equal(t, "1230", n.BigInt().String())
 			}
 		})
+
+		t.Run("scaled past float32 range", func(t *testing.T) {
+			// decimal256 can hold values far larger than math.MaxFloat32,
+			// so scaling a float32 up must not overflow the conversion
+			tests := []struct {
+				val              float32
+				precision, scale int32
+			}{
+				{456.78, 38, 30}, // stays below math.MaxFloat32 once scaled
+				{123.5, 76, 38},
+				{-123.5, 76, 38},
+				{1, 76, 39},
+				{1e30, 60, 20},
+				{3.4e38, 50, 5},
+				{-3.4e38, 50, 5},
+				{math.MaxFloat32, 40, 1},
+			}
+
+			for _, tt := range tests {
+				n, err := decimal256.FromFloat32(tt.val, tt.precision, tt.scale)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.val, n.ToFloat32(tt.scale), "FromFloat32(%v, %d, %d) = %s",
+					tt.val, tt.precision, tt.scale, n.ToString(tt.scale))
+			}
+		})
 	})
 }
 
@@ -581,6 +638,14 @@ func TestFromString(t *testing.T) {
 		{"2112.33", 211233, 2},
 		{"-2112.33", -211233, 2},
 		{"12E2", 12, -2},
+		{"0", 0, 0},
+		{"0.24", 0, 0},
+		{"0.5", 1, 0},
+		{"-0.5", -1, 0},
+		{"0.51", 1, 0},
+		{"-0.51", -1, 0},
+		{"0.0051", 1, 2},
+		{"-0.0051", -1, 2},
 	}
 
 	for _, tt := range tests {
@@ -592,6 +657,42 @@ func TestFromString(t *testing.T) {
 			assert.Equal(t, ex, n)
 		})
 	}
+
+	for _, s := range []string{"Inf", "+Inf", "-inf"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal256.FromString(s, 35, scale)
+			assert.ErrorContains(t, err, "cannot convert", "%s at scale %d", s, scale)
+		}
+	}
+
+	// These used to overflow big.ParseFloat to ±Inf ("cannot convert"). The
+	// digit path reports the same overflow as other huge finite literals.
+	for _, s := range []string{"1e1000000000", "-1e1000000000"} {
+		for _, scale := range []int32{2, -2} {
+			_, err := decimal256.FromString(s, 35, scale)
+			assert.ErrorContains(t, err, "bitlen too large for decimal256", "%s at scale %d", s, scale)
+		}
+	}
+
+	for _, tc := range []struct {
+		s     string
+		scale int32
+	}{
+		{"1e646456990", 76},
+		{"-1e600000000", -2},
+	} {
+		_, err := decimal256.FromString(tc.s, 35, tc.scale)
+		assert.ErrorContains(t, err, "bitlen too large for decimal256", "%s at scale %d", tc.s, tc.scale)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tiny, err := decimal256.FromString("-1e-20000000", 37, 0)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	assert.Equal(t, decimal256.Num{}, tiny)
+	// Rounding this value directly would allocate about 16 MB.
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 // Test issues from GH-38395
@@ -637,6 +738,37 @@ func TestToStringRejectsInvalidScale(t *testing.T) {
 	}
 }
 
+func TestToBigFloatRejectsInvalidScale(t *testing.T) {
+	for _, scale := range []int32{77, -77, math.MinInt32} {
+		assert.PanicsWithValue(t, "arrow/decimal256: scale out of range", func() { decimal256.FromI64(12345).ToBigFloat(scale) }, "scale %d", scale)
+	}
+}
+
+func TestFromStringScaleOutOfRange(t *testing.T) {
+	for _, tc := range []struct {
+		s     string
+		scale int32
+		want  string
+	}{
+		{"1e-77", 77, "scale 77 out of range for decimal256, must be between -76 and 76"},
+		{"1", -77, "scale -77 out of range for decimal256, must be between -76 and 76"},
+		{"1", math.MinInt32, "scale -2147483648 out of range for decimal256, must be between -76 and 76"},
+	} {
+		_, err := decimal256.FromString(tc.s, 76, tc.scale)
+		assert.EqualError(t, err, tc.want, "%s at scale %d", tc.s, tc.scale)
+	}
+
+	n, err := decimal256.FromString("1e76", 76, -76)
+	require.NoError(t, err)
+	assert.Equal(t, decimal256.FromI64(1), n)
+
+	// Errors found before the scale is used take precedence.
+	_, err = decimal256.FromString("1e78", 76, -77)
+	assert.EqualError(t, err, "bitlen too large for decimal256")
+	_, err = decimal256.FromString("Inf", 76, 77)
+	assert.EqualError(t, err, "cannot convert Inf to decimal256")
+}
+
 // Test issues from GH-38395
 func TestHexFromString(t *testing.T) {
 	const decStr = "11111111111111111111111111111111111111.00000000000000000000000000000000000000"
@@ -667,4 +799,71 @@ func TestBitLen(t *testing.T) {
 	assert.ErrorContains(t, err, "bitlen too large for decimal256")
 	_, err = decimal256.FromString(b.String(), decimal256.MaxPrecision, -1)
 	assert.ErrorContains(t, err, "bitlen too large for decimal256")
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 255)
+	_, err = decimal256.FromString(limit.String(), decimal256.MaxPrecision, -1)
+	assert.ErrorContains(t, err, "bitlen too large for decimal256")
+	limit.Sub(limit, big.NewInt(1))
+	got, err := decimal256.FromString(limit.String(), decimal256.MaxPrecision, -1)
+	require.NoError(t, err)
+	// (2^255-1)/10 has remainder 7 and rounds away from zero.
+	want := new(big.Int).Quo(new(big.Int).Set(limit), big.NewInt(10))
+	want.Add(want, big.NewInt(1))
+	assert.Equal(t, want.String(), got.BigInt().String())
+}
+
+func TestFromStringRoundsExactTies(t *testing.T) {
+	// These halfway values are not exact in binary, so rounding a binary
+	// approximation sent some of them down. Ties round away from zero.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0.35", 1, 4},
+		{"0.15", 1, 2},
+		{"2.675", 1, 27},
+		{"2.675", 2, 268},
+		{"1.005", 2, 101},
+		{"-0.35", 1, -4},
+		{"-1.005", 2, -101},
+		{"0.349999", 1, 3},
+		{"35e-2", 1, 4},
+		{"19", -1, 2},
+		{"15", -1, 2},
+		{"14", -1, 1},
+		{"-15", -1, -2},
+		{"-19", -1, -2},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%d", tt.s, tt.scale), func(t *testing.T) {
+			n, err := decimal256.FromString(tt.s, 76, tt.scale)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, n.BigInt().Int64())
+		})
+	}
+}
+
+func TestFromStringLongFraction(t *testing.T) {
+	// Fractions longer than 1024 digits must still round from the first
+	// dropped digit instead of being rejected as too large.
+	tests := []struct {
+		s        string
+		scale    int32
+		expected int64
+	}{
+		{"0." + strings.Repeat("7", 1000), 2, 78},
+		{"0." + strings.Repeat("7", 1030), 2, 78},
+		{"0." + strings.Repeat("7", 5000), 2, 78},
+		{"-0." + strings.Repeat("7", 5000), 2, -78},
+		{"0.125" + strings.Repeat("0", 2000), 2, 13},
+		{"0.124" + strings.Repeat("9", 2000), 2, 12},
+	}
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("%d_%d", i, len(tt.s)), func(t *testing.T) {
+			n, err := decimal256.FromString(tt.s, 76, tt.scale)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, n.BigInt().Int64())
+		})
+	}
 }

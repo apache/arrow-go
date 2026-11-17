@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/internal"
 )
 
 // #include <stdlib.h>
@@ -31,6 +32,7 @@ import (
 // #include "abi.h"
 // #include "helpers.h"
 //
+// extern const uint8_t kGoCdataZeroRegion[8];
 // typedef const char cchar_t;
 // extern int streamGetSchema(struct ArrowArrayStream*, struct ArrowSchema*);
 // extern int streamGetNext(struct ArrowArrayStream*, struct ArrowArray*);
@@ -125,7 +127,15 @@ func releaseExportedArray(arr *CArrowArray) {
 	}
 	defer C.ArrowArrayMarkReleased(arr)
 
+	h := getHandle(arr.private_data)
+	data := h.Value().(arrow.ArrayData)
+
 	if arr.n_buffers > 0 {
+		if internal.HasBufferSizesBuffer(data.DataType().ID()) {
+			if sizes := unsafe.Slice(arr.buffers, arr.n_buffers)[arr.n_buffers-1]; sizes != unsafe.Pointer(&C.kGoCdataZeroRegion) {
+				C.free(sizes)
+			}
+		}
 		C.free(unsafe.Pointer(arr.buffers))
 	}
 
@@ -144,8 +154,7 @@ func releaseExportedArray(arr *CArrowArray) {
 		C.free(unsafe.Pointer(arr.children))
 	}
 
-	h := getHandle(arr.private_data)
-	h.Value().(arrow.ArrayData).Release()
+	data.Release()
 	h.Delete()
 	C.free(unsafe.Pointer(arr.private_data))
 }
@@ -208,6 +217,11 @@ func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSch
 	h := getHandle(self.private_data)
 	defer C.free(self.private_data)
 	defer h.Delete()
+	// the deferred calls above free this state on every path. Clear it so
+	// that release, which a producer calls instead of on_error once
+	// on_schema has failed, does not use it again. On success it is
+	// replaced below.
+	self.private_data = nil
 
 	handler := h.Value().(cAsyncState)
 	defer close(handler.ch)
@@ -269,6 +283,12 @@ func asyncStreamOnError(self *CArrowAsyncDeviceStreamHandler, code C.int, messag
 
 //export asyncStreamRelease
 func asyncStreamRelease(self *CArrowAsyncDeviceStreamHandler) {
+	if self.private_data == nil {
+		// on_schema failed and has already freed the handler's state
+		self.release = nil
+		return
+	}
+
 	h := getHandle(self.private_data)
 	if handler, ok := h.Value().(*cAsyncStreamHandler); ok {
 		handler.release()

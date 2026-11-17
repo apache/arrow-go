@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,4 +108,64 @@ func TestSerializedPageWriterRejectsShortWrites(t *testing.T) {
 			require.Zero(t, serialized.DataPageoffset())
 		})
 	}
+}
+
+type discardTellSink struct {
+	pos int64
+}
+
+func (s *discardTellSink) Tell() int64 { return s.pos }
+func (s *discardTellSink) Write(p []byte) (int, error) {
+	s.pos += int64(len(p))
+	return len(p), nil
+}
+
+func TestSerializedPageWriterDataPageOffsetPageOrdinalWrap(t *testing.T) {
+	sink := &discardTellSink{pos: 4}
+	writer, err := NewPageWriter(sink, compress.Codecs.Uncompressed,
+		compress.DefaultCompressionLevel, nil, -1, -1, memory.DefaultAllocator, false, nil, nil)
+	require.NoError(t, err)
+
+	buf := memory.NewBufferBytes([]byte("page body"))
+	defer buf.Release()
+
+	page := NewDataPageV1(buf, 1, parquet.Encodings.Plain,
+		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(buf.Len()))
+
+	for i := 0; i < 65537; i++ {
+		_, err := writer.WriteDataPage(page)
+		require.NoError(t, err)
+	}
+
+	serialized := writer.(*serializedPageWriter)
+	require.Equal(t, int64(4), serialized.DataPageoffset())
+	require.Equal(t, int32(65537), serialized.pageOrdinal)
+}
+
+func TestSerializedPageWriterEncryptionRejectsMoreThanMaxInt16Pages(t *testing.T) {
+	const key = "0123456789012345"
+	encProps := parquet.NewFileEncryptionProperties(key)
+	fileEnc := encryption.NewFileEncryptor(encProps, memory.DefaultAllocator)
+
+	sink := &discardTellSink{pos: 4}
+	writer, err := NewPageWriter(sink, compress.Codecs.Uncompressed,
+		compress.DefaultCompressionLevel, nil, 0, 0, memory.DefaultAllocator, false,
+		fileEnc.GetColumnMetaEncryptor("col"), fileEnc.GetColumnDataEncryptor("col"))
+	require.NoError(t, err)
+
+	serialized := writer.(*serializedPageWriter)
+	serialized.pageOrdinal = math.MaxInt16
+
+	buf := memory.NewBufferBytes([]byte("page body"))
+	defer buf.Release()
+	page := NewDataPageV1(buf, 1, parquet.Encodings.Plain,
+		parquet.Encodings.RLE, parquet.Encodings.RLE, int32(buf.Len()))
+
+	_, err = writer.WriteDataPage(page)
+	require.NoError(t, err)
+	require.Equal(t, int32(math.MaxInt16+1), serialized.pageOrdinal)
+
+	_, err = writer.WriteDataPage(page)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "encrypted parquet files cannot have more than 32767 pages per chunk")
 }

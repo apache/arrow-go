@@ -115,8 +115,29 @@ type columnWriter struct {
 	repEncoder encoding.LevelEncoder
 	mem        memory.Allocator
 
-	pageStatistics     metadata.TypedStatistics
-	chunkStatistics    metadata.TypedStatistics
+	pageStatistics  metadata.TypedStatistics
+	chunkStatistics metadata.TypedStatistics
+
+	// geoStatistics holds the bounding box stats for GEOMETRY
+	// columns, and is nil for all other columns. Since Geospatial
+	// types have an UNKNOWN sort order, they never get typed
+	// statistics and are stored separately from other statistics.
+	// It is tracked once per column chunk (i.e. per row group), never per
+	// page since Parquet format defines GeospatialStatistics only on
+	// ColumnMetaData
+	geoStatistics *metadata.GeoStatistics
+
+	// countGeoNulls is set for GEOMETRY and GEOGRAPHY columns with
+	// statistics enabled. Their sort order is undefined, so they have no
+	// typed statistics, but the chunk still gets a Statistics block holding
+	// only null_count (the spec forbids min/max for these types, but says
+	// writers should still write null_count). Some readers, such as DuckDB,
+	// ignore geospatial_statistics unless a Statistics block is present.
+	countGeoNulls bool
+	// geoNullCount is the number of null values written to this chunk,
+	// counted from the definition levels when countGeoNulls is set.
+	geoNullCount int64
+
 	bloomFilter        metadata.BloomFilterBuilder
 	dictBloomPopulated bool
 
@@ -135,6 +156,10 @@ type columnWriter struct {
 	// the total number of stored values in the current page. for repeated or optional
 	// values. this number may be lower than numBuffered
 	numDataValues int64
+
+	// the number of levels in the current page below the maximum definition
+	// level, which a V2 page header reports as num_nulls
+	numBufferedNulls int64
 
 	rowsWritten       int
 	totalBytesWritten int64
@@ -175,6 +200,16 @@ func newColumnWriterBase(metaData *metadata.ColumnChunkMetaDataBuilder, pager Pa
 	if props.StatisticsEnabledFor(ret.descr.Path()) && ret.descr.SortOrder() != schema.SortUNKNOWN {
 		ret.pageStatistics = metadata.NewStatistics(ret.descr, props.Allocator())
 		ret.chunkStatistics = metadata.NewStatistics(ret.descr, props.Allocator())
+	}
+
+	if props.StatisticsEnabledFor(ret.descr.Path()) && ret.descr.PhysicalType() == parquet.Types.ByteArray {
+		switch ret.descr.LogicalType().(type) {
+		case schema.GeometryLogicalType:
+			ret.geoStatistics = metadata.NewGeoStatistics()
+			ret.countGeoNulls = true
+		case schema.GeographyLogicalType:
+			ret.countGeoNulls = true
+		}
 	}
 
 	ret.defEncoder.Init(parquet.Encodings.RLE, ret.descr.MaxDefinitionLevel(), ret.defLevelSink)
@@ -228,6 +263,16 @@ func (w *columnWriter) WriteDataPage(page DataPage) error {
 }
 
 func (w *columnWriter) WriteDefinitionLevels(levels []int16) {
+	if w.countGeoNulls {
+		// every level below the max definition level is a null value, which
+		// matches how typed statistics count nulls (levels minus values)
+		maxDefLevel := w.descr.MaxDefinitionLevel()
+		for _, v := range levels {
+			if v < maxDefLevel {
+				w.geoNullCount++
+			}
+		}
+	}
 	w.defEncoder.EncodeNoFlush(levels)
 }
 
@@ -334,7 +379,7 @@ func (w *columnWriter) FlushCurrentPage() error {
 
 	w.reset()
 	w.rowsWritten += w.numBufferedRows
-	w.numBufferedValues, w.numDataValues, w.numBufferedRows = 0, 0, 0
+	w.numBufferedValues, w.numDataValues, w.numBufferedRows, w.numBufferedNulls = 0, 0, 0, 0
 	return err
 }
 
@@ -424,7 +469,7 @@ func (w *columnWriter) buildDataPageV2(defLevelsRLESize, repLevelsRLESize, uncom
 
 	numValues := int32(w.numBufferedValues)
 	numRows := int32(w.numBufferedRows)
-	nullCount := int32(pageStats.NullCount)
+	nullCount := int32(w.numBufferedNulls)
 	defLevelsByteLen := int32(defLevelsRLESize)
 	repLevelsByteLen := int32(repLevelsRLESize)
 	firstRowIndex := int64(w.rowsWritten)
@@ -488,6 +533,7 @@ func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16
 			}
 		}
 		w.WriteDefinitionLevels(defLevels[:numValues])
+		w.numBufferedNulls += numValues - toWrite
 	} else {
 		toWrite = numValues
 	}
@@ -509,8 +555,9 @@ func (w *columnWriter) writeLevels(numValues int64, defLevels, repLevels []int16
 	return toWrite
 }
 
-func (w *columnWriter) writeLevelsSpaced(numLevels int64, defLevels, repLevels []int16) {
+func (w *columnWriter) writeLevelsSpaced(numLevels int64, info batchWriteInfo, defLevels, repLevels []int16) {
 	if w.descr.MaxDefinitionLevel() > 0 {
+		w.numBufferedNulls += numLevels - info.batchNum
 		w.WriteDefinitionLevels(defLevels[:numLevels])
 	}
 
@@ -698,7 +745,10 @@ func (w *columnWriter) resetPageStatistics() {
 func (w *columnWriter) Close() (err error) {
 	if !w.closed {
 		w.closed = true
-		defer func() { w.uncompressedData = bytes.Buffer{} }()
+		// release and reset everything even if a flush or the chunk
+		// statistics handling fails
+		defer w.release()
+
 		if w.hasDict && !w.fallbackToNonDict {
 			if err = w.WriteDictionaryPage(); err != nil {
 				return err
@@ -708,20 +758,6 @@ func (w *columnWriter) Close() (err error) {
 		if err = w.FlushBufferedDataPages(); err != nil {
 			return err
 		}
-
-		// ensure we release and reset everything even if we
-		// error out from the chunk statistics handling
-		defer func() {
-			w.defLevelSink.Reset(0)
-			w.repLevelSink.Reset(0)
-			if w.bitsBuffer != nil {
-				w.bitsBuffer.Release()
-				w.bitsBuffer = nil
-			}
-
-			w.currentEncoder.Release()
-			w.currentEncoder = nil
-		}()
 
 		var chunkStats metadata.EncodedStatistics
 		chunkStats, err = w.getChunkStatistics()
@@ -735,6 +771,15 @@ func (w *columnWriter) Close() (err error) {
 		if w.rowsWritten > 0 && chunkStats.IsSet() {
 			w.metaData.SetStats(chunkStats)
 		}
+		if w.rowsWritten > 0 && w.countGeoNulls {
+			// null_count only: min/max must not be written for a type whose
+			// sort order is undefined
+			var nullStats metadata.EncodedStatistics
+			w.metaData.SetStats(*nullStats.SetNullCount(w.geoNullCount))
+		}
+		if w.rowsWritten > 0 && w.geoStatistics != nil {
+			w.metaData.SetGeoStatistics(w.geoStatistics)
+		}
 		// Only advertise PLAIN_DICTIONARY / fallback encodings in the column
 		// chunk's encoding list when a dictionary page was actually written.
 		// When fallback discards the dictionary before any dict-encoded page
@@ -745,6 +790,31 @@ func (w *columnWriter) Close() (err error) {
 		err = w.pager.Close(advertiseDict, advertiseFallback)
 	}
 	return err
+}
+
+// discard releases the writer's buffers without writing anything to the sink.
+func (w *columnWriter) discard() {
+	if w.closed {
+		return
+	}
+	w.closed = true
+	w.release()
+	if p, ok := w.pager.(interface{ release() }); ok {
+		p.release()
+	}
+}
+
+func (w *columnWriter) release() {
+	w.uncompressedData = bytes.Buffer{}
+	w.defLevelSink.Reset(0)
+	w.repLevelSink.Reset(0)
+	if w.bitsBuffer != nil {
+		w.bitsBuffer.Release()
+		w.bitsBuffer = nil
+	}
+
+	w.currentEncoder.Release()
+	w.currentEncoder = nil
 }
 
 func (w *columnWriter) doBatches(total int64, repLevels []int16, action func(offset, batch int64)) {

@@ -19,7 +19,12 @@ package pqarrow_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -351,4 +356,135 @@ func TestWriteOnClosedFileWriter(t *testing.T) {
 	require.ErrorContains(t, writer.Write(nil), "already closed")
 	require.ErrorContains(t, writer.WriteColumnChunked(nil, 0, 0), "already closed")
 	require.ErrorContains(t, writer.WriteColumnData(nil), "already closed")
+}
+
+type byteLimitSink struct {
+	buf    bytes.Buffer
+	limit  int
+	closed bool
+}
+
+func (s *byteLimitSink) Close() error {
+	s.closed = true
+	return nil
+}
+
+var errSinkFull = errors.New("sink full")
+
+func (s *byteLimitSink) Write(p []byte) (int, error) {
+	if room := s.limit - s.buf.Len(); len(p) > room {
+		s.buf.Write(p[:max(room, 0)])
+		return max(room, 0), errSinkFull
+	}
+	return s.buf.Write(p)
+}
+
+func TestFileWriterCloseReleasesBuffersWhenSinkFails(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "num", Nullable: true, Type: arrow.PrimitiveTypes.Int8},
+		{Name: "dict", Nullable: true, Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}},
+		{Name: "str", Nullable: true, Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	buildRecord := func(mem memory.Allocator) arrow.RecordBatch {
+		bldr := array.NewRecordBuilder(mem, schema)
+		defer bldr.Release()
+		num := bldr.Field(0).(*array.Int8Builder)
+		dict := bldr.Field(1).(*array.BinaryDictionaryBuilder)
+		str := bldr.Field(2).(*array.StringBuilder)
+		for i := 0; i < 300; i++ {
+			require.NoError(t, dict.AppendString("value-"+strconv.Itoa(i%10)))
+			str.Append("row-" + strconv.Itoa(i))
+			num.Append(int8(i))
+		}
+		return bldr.NewRecordBatch()
+	}
+
+	writeFile := func(t *testing.T, mem memory.Allocator, sink io.Writer, buffered bool) error {
+		rec := buildRecord(mem)
+		defer rec.Release()
+
+		writer, err := pqarrow.NewFileWriter(schema, sink,
+			parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithDictionaryFor("str", false),
+				parquet.WithDataPageSize(1024), parquet.WithBatchSize(100)),
+			pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem), pqarrow.WithStoreSchema()))
+		require.NoError(t, err)
+
+		if buffered {
+			err = writer.WriteBuffered(rec)
+		} else {
+			err = writer.Write(rec)
+		}
+		return errors.Join(err, writer.Close())
+	}
+
+	for _, buffered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
+			var full writeOffsetsSink
+			require.NoError(t, writeFile(t, memory.DefaultAllocator, &full, buffered))
+
+			for _, limit := range sinkFailureLimits(t, &full) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				sink := &byteLimitSink{limit: limit}
+				err := writeFile(t, mem, sink, buffered)
+				require.ErrorIs(t, err, errSinkFull, "limit %d", limit)
+				require.True(t, sink.closed, "sink not closed, limit %d", limit)
+				mem.AssertSize(t, 0)
+				if t.Failed() {
+					t.Fatalf("buffers leaked when the sink fails after %d of %d bytes", limit, full.Len())
+				}
+			}
+		})
+	}
+}
+
+// writeOffsetsSink records where each Write starts, which marks every page
+// header, page body and footer boundary of the written file.
+type writeOffsetsSink struct {
+	bytes.Buffer
+	starts []int
+}
+
+func (s *writeOffsetsSink) Write(p []byte) (int, error) {
+	s.starts = append(s.starts, s.Len())
+	return s.Buffer.Write(p)
+}
+
+// sinkFailureLimits returns the byte counts after which to fail the sink:
+// one byte either side of every page and column chunk boundary of the file
+// in full, plus a stride sample of everything in between.
+func sinkFailureLimits(t *testing.T, full *writeOffsetsSink) []int {
+	t.Helper()
+	const stride = 37
+	boundaries := slices.Clone(full.starts)
+	rdr, err := file.NewParquetReader(bytes.NewReader(full.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+	for i := 0; i < rdr.NumRowGroups(); i++ {
+		rg := rdr.MetaData().RowGroup(i)
+		for j := 0; j < rg.NumColumns(); j++ {
+			col, err := rg.ColumnChunk(j)
+			require.NoError(t, err)
+			start := col.DataPageOffset()
+			if col.HasDictionaryPage() {
+				boundaries = append(boundaries, int(col.DictionaryPageOffset()))
+				start = min(start, col.DictionaryPageOffset())
+			}
+			boundaries = append(boundaries, int(col.DataPageOffset()), int(start+col.TotalCompressedSize()))
+		}
+	}
+	for off := 0; off < full.Len(); off += stride {
+		boundaries = append(boundaries, off)
+	}
+
+	var limits []int
+	for _, b := range boundaries {
+		for _, limit := range []int{b - 1, b, b + 1} {
+			if limit >= 4 && limit < full.Len() {
+				limits = append(limits, limit)
+			}
+		}
+	}
+	slices.Sort(limits)
+	return slices.Compact(limits)
 }

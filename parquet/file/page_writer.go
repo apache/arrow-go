@@ -68,7 +68,7 @@ type serializedPageWriter struct {
 	dataPageOffset    int64
 	totalUncompressed int64
 	totalCompressed   int64
-	pageOrdinal       int16
+	pageOrdinal       int32
 	rgOrdinal         int16
 	columnOrdinal     int16
 
@@ -184,14 +184,17 @@ func (pw *serializedPageWriter) initEncryption() {
 }
 
 func (pw *serializedPageWriter) updateEncryption(moduleType int8) error {
+	if (moduleType == encryption.DataPageModule || moduleType == encryption.DataPageHeaderModule) && pw.pageOrdinal > math.MaxInt16 {
+		return fmt.Errorf("parquet: encrypted parquet files cannot have more than %d pages per chunk: got %d", math.MaxInt16, pw.pageOrdinal)
+	}
 	switch moduleType {
 	case encryption.ColumnMetaModule:
 		pw.metaEncryptor.UpdateAad(encryption.CreateModuleAad(pw.metaEncryptor.FileAad(), moduleType, pw.rgOrdinal, pw.columnOrdinal, -1))
 	case encryption.DataPageModule:
-		encryption.QuickUpdatePageAad(pw.dataPageAAD, pw.pageOrdinal)
+		encryption.QuickUpdatePageAad(pw.dataPageAAD, int16(pw.pageOrdinal))
 		pw.dataEncryptor.UpdateAad(string(pw.dataPageAAD))
 	case encryption.DataPageHeaderModule:
-		encryption.QuickUpdatePageAad(pw.dataPageHeaderAAD, pw.pageOrdinal)
+		encryption.QuickUpdatePageAad(pw.dataPageHeaderAAD, int16(pw.pageOrdinal))
 		pw.metaEncryptor.UpdateAad(string(pw.dataPageHeaderAAD))
 	case encryption.DictPageHeaderModule:
 		pw.metaEncryptor.UpdateAad(encryption.CreateModuleAad(pw.metaEncryptor.FileAad(), moduleType, pw.rgOrdinal, pw.columnOrdinal, -1))
@@ -526,6 +529,10 @@ func (bw *bufferedPageWriter) Close(hasDict, fallback bool) error {
 		return io.ErrShortWrite
 	}
 	return nil
+}
+
+func (bw *bufferedPageWriter) release() {
+	bw.inMemSink.Release()
 }
 
 func (bw *bufferedPageWriter) WriteDataPage(page DataPage) (int64, error) {

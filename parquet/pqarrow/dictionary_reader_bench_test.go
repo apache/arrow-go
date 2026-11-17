@@ -30,12 +30,17 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 )
 
-func BenchmarkReadDictionaryColumn(b *testing.B) {
+func BenchmarkReadDictionaryColumn(b *testing.B) { benchmarkReadDictionaryColumn(b, false) }
+
+// BenchmarkReadOptionalDictionaryColumn reads an optional column that holds no nulls.
+func BenchmarkReadOptionalDictionaryColumn(b *testing.B) { benchmarkReadDictionaryColumn(b, true) }
+
+func benchmarkReadDictionaryColumn(b *testing.B, nullable bool) {
 	const rows = 1 << 18
 
 	for _, distinct := range []int{100, 10_000, 100_000} {
 		b.Run(fmt.Sprintf("distinct=%d", distinct), func(b *testing.B) {
-			parquetData := writeDictionaryStringColumn(b, memory.DefaultAllocator, rows, distinct)
+			parquetData := writeDictionaryStringColumn(b, memory.DefaultAllocator, rows, distinct, nullable)
 
 			for _, batchSize := range []int64{8192, 65536} {
 				b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
@@ -54,10 +59,11 @@ func BenchmarkReadDictionaryColumn(b *testing.B) {
 
 // writeDictionaryStringColumn writes rows 25-byte strings with the given number
 // of distinct values to one row group whose data pages are all dictionary
-// encoded.
-func writeDictionaryStringColumn(tb testing.TB, mem memory.Allocator, rows, distinct int) []byte {
+// encoded. The column holds no nulls; nullable makes it optional rather than
+// required.
+func writeDictionaryStringColumn(tb testing.TB, mem memory.Allocator, rows, distinct int, nullable bool) []byte {
 	tb.Helper()
-	schema := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.BinaryTypes.String}}, nil)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "s", Type: arrow.BinaryTypes.String, Nullable: nullable}}, nil)
 
 	bldr := array.NewStringBuilder(mem)
 	defer bldr.Release()

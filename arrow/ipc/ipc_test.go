@@ -783,6 +783,39 @@ func TestZeroSizeFixedSizeListRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNullArrayRoundTripValidateFull(t *testing.T) {
+	for _, dt := range []arrow.DataType{
+		arrow.Null,
+		arrow.StructOf(arrow.Field{Name: "n", Type: arrow.Null, Nullable: true}),
+		arrow.ListOf(arrow.Null),
+	} {
+		t.Run(dt.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			arr, _, err := array.FromJSON(mem, dt, strings.NewReader(`[null, null, null]`))
+			require.NoError(t, err)
+			defer arr.Release()
+			schema := arrow.NewSchema([]arrow.Field{{Name: "col", Type: dt, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
+			defer rec.Release()
+
+			var buf bytes.Buffer
+			writer := ipc.NewWriter(&buf, ipc.WithSchema(schema), ipc.WithAllocator(mem))
+			defer writer.Close()
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+
+			reader, err := ipc.NewReader(&buf, ipc.WithAllocator(mem))
+			require.NoError(t, err)
+			defer reader.Release()
+			require.True(t, reader.Next())
+			got := reader.RecordBatch()
+			require.NoError(t, array.ValidateFull(got.Column(0)))
+			assert.True(t, array.RecordEqual(rec, got))
+		})
+	}
+}
+
 func TestRecordBatchCustomMetadataRoundtrip(t *testing.T) {
 	mem := memory.NewGoAllocator()
 	schema := arrow.NewSchema(

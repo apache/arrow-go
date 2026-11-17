@@ -719,7 +719,8 @@ func (imp *cimporter) doImport() error {
 			return err
 		}
 
-		imp.data = array.NewData(dt, int(imp.arr.length), nil, nil, int(imp.arr.null_count), int(imp.arr.offset))
+		// NullType's layout has one always-null buffer, which C Data does not export.
+		imp.data = array.NewData(dt, int(imp.arr.length), []*memory.Buffer{nil}, nil, int(imp.arr.null_count), int(imp.arr.offset))
 	case arrow.FixedWidthDataType:
 		return imp.importFixedSizePrimitive()
 	case *arrow.StringType:
@@ -743,6 +744,14 @@ func (imp *cimporter) doImport() error {
 	case *arrow.LargeListViewType:
 		return imp.importListViewLike()
 	case *arrow.MapType:
+		entries := imp.children[0].data.(*array.Data)
+		if resolveNullCount(entries) != 0 {
+			return fmt.Errorf("%w: map array child array should have no nulls", arrow.ErrInvalid)
+		}
+		keys := entries.Children()[0].(*array.Data)
+		if resolveNullCount(keys) != 0 {
+			return fmt.Errorf("%w: map array keys array should have no nulls", arrow.ErrInvalid)
+		}
 		return imp.importListLike()
 	case *arrow.FixedSizeListType:
 		if err := imp.checkNumChildren(1); err != nil {
@@ -970,6 +979,21 @@ func (imp *cimporter) importListLike() (err error) {
 
 	imp.data = array.NewData(imp.dt, int(imp.arr.length), []*memory.Buffer{nulls, offsets}, []arrow.ArrayData{imp.children[0].data}, int(imp.arr.null_count), int(imp.arr.offset))
 	return
+}
+
+// Map validation rejects unknown (-1) null counts.
+func resolveNullCount(d *array.Data) int {
+	nulls := d.NullN()
+	if nulls < 0 {
+		bufs := d.Buffers()
+		if len(bufs) > 0 && bufs[0] != nil {
+			nulls = d.Len() - bitutil.CountSetBits(bufs[0].Bytes(), d.Offset(), d.Len())
+		} else {
+			nulls = 0
+		}
+		d.SetNullN(nulls)
+	}
+	return nulls
 }
 
 func (imp *cimporter) importListViewLike() (err error) {

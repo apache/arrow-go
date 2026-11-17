@@ -166,6 +166,7 @@ func RegisterScalarComparisons(reg FunctionRegistry) {
 
 	isOrNotNullKns := kernels.IsNullNotNullKernels()
 	isNullFn := NewScalarFunction("is_null", Unary(), EmptyFuncDoc)
+	isNullFn.SetDefaultOptions(&NullOptions{})
 	if err := isNullFn.AddKernel(isOrNotNullKns[0]); err != nil {
 		panic(err)
 	}

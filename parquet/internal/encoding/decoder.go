@@ -99,6 +99,12 @@ func (d *decoder) SetData(nvals int, data []byte) error {
 // ValuesLeft returns the number of remaining values that can be decoded
 func (d *decoder) ValuesLeft() int { return d.nvals }
 
+// dataLen returns the number of encoded bytes left to decode.
+func (d *decoder) dataLen() int { return len(d.data) }
+
+// fixedLen returns the value width for a FixedLenByteArray column, or -1.
+func (d *decoder) fixedLen() int { return d.typeLen }
+
 // Encoding returns the encoding type used by this decoder to decode the bytes.
 func (d *decoder) Encoding() parquet.Encoding { return parquet.Encoding(d.encoding) }
 

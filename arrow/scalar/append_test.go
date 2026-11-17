@@ -240,3 +240,49 @@ func TestAppendMapScalar(t *testing.T) {
 
 	assert.Truef(t, array.Equal(expected, result), "expected: %s, got: %s", expected, result)
 }
+
+func TestAppendNullScalars(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	unionFields := []arrow.Field{
+		{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "s", Type: arrow.BinaryTypes.String, Nullable: true},
+	}
+	tests := []struct {
+		name string
+		dt   arrow.DataType
+		json string
+	}{
+		{"null fixed_size_binary", &arrow.FixedSizeBinaryType{ByteWidth: 4}, `["YWJjZA==", null, "ZWZnaA=="]`},
+		{"null fixed_size_list", arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32), `[[1, 2], null]`},
+		{"null struct", arrow.StructOf(arrow.Field{Name: "s", Type: arrow.BinaryTypes.String, Nullable: true}), `[{"s": "a"}, null, {"s": "b"}]`},
+		{"sparse union", arrow.SparseUnionOf(unionFields, []arrow.UnionTypeCode{0, 1}), `[[0, 5], [1, null]]`},
+		{"dense union", arrow.DenseUnionOf(unionFields, []arrow.UnionTypeCode{0, 1}), `[[0, 5], [1, null]]`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			expected, _, err := array.FromJSON(mem, tc.dt, strings.NewReader(tc.json))
+			require.NoError(t, err)
+			defer expected.Release()
+
+			scalars := make([]scalar.Scalar, expected.Len())
+			for i := range scalars {
+				sc, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				defer releaseScalar(sc)
+				scalars[i] = sc
+			}
+
+			bldr := array.NewBuilder(mem, tc.dt)
+			defer bldr.Release()
+			require.NoError(t, scalar.AppendSlice(bldr, scalars))
+			result := bldr.NewArray()
+			defer result.Release()
+
+			require.NoError(t, array.ValidateFull(result))
+			assert.Truef(t, array.Equal(expected, result), "expected: %s, got: %s", expected, result)
+		})
+	}
+}

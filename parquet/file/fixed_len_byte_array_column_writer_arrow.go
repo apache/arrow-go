@@ -140,7 +140,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedArrow(values []byte
 
 	w.doBatches(int64(length), repLevels, func(offset, batch int64) {
 		info := w.maybeCalculateValidityBits(levelSliceOrNil(defLevels, offset, batch), batch)
-		w.writeLevelsSpaced(batch, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
+		w.writeLevelsSpaced(batch, info, levelSliceOrNil(defLevels, offset, batch), levelSliceOrNil(repLevels, offset, batch))
 
 		start := int(valueOffset) * typeLen
 		end := int(valueOffset+info.numSpaced()) * typeLen

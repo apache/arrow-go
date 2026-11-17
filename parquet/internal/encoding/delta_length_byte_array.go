@@ -100,6 +100,11 @@ func (enc *DeltaLengthByteArrayEncoder) FlushValues() (Buffer, error) {
 	return poolBuffer{output}, nil
 }
 
+func (enc *DeltaLengthByteArrayEncoder) Reset() {
+	enc.encoder.Reset()
+	enc.lengthEncoder.Reset()
+}
+
 // DeltaLengthByteArrayDecoder is a decoder for handling data produced by the corresponding
 // encoder which expects delta packed lengths followed by the bytes of data.
 type DeltaLengthByteArrayDecoder struct {

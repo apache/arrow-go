@@ -761,7 +761,8 @@ func (ctx *arrayLoaderContext) loadChild(dt arrow.DataType) arrow.ArrayData {
 
 func (ctx *arrayLoaderContext) loadNull() arrow.ArrayData {
 	field := ctx.field()
-	return array.NewData(arrow.Null, int(field.Length()), nil, nil, int(field.NullCount()), 0)
+	// NullType's layout has one always-null buffer, which IPC does not encode.
+	return array.NewData(arrow.Null, int(field.Length()), []*memory.Buffer{nil}, nil, int(field.NullCount()), 0)
 }
 
 func (ctx *arrayLoaderContext) loadPrimitive(dt arrow.DataType) arrow.ArrayData {

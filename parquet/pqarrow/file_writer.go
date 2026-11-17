@@ -494,10 +494,9 @@ func (fw *FileWriter) AppendKeyValueMetadata(key string, value string) error {
 func (fw *FileWriter) Close() error {
 	if !fw.closed {
 		fw.closed = true
+		var rgErr error
 		if fw.rgw != nil {
-			if err := fw.rgw.Close(); err != nil {
-				return err
-			}
+			rgErr = fw.rgw.Close()
 		}
 
 		writeCtx := arrowCtxFromContext(fw.ctx)
@@ -506,7 +505,13 @@ func (fw *FileWriter) Close() error {
 			writeCtx.dataBuffer = nil
 		}
 
-		return fw.wr.Close()
+		// close the file writer even after a row group failure so the
+		// sink is closed
+		err := fw.wr.Close()
+		if rgErr != nil {
+			return rgErr
+		}
+		return err
 	}
 	return nil
 }

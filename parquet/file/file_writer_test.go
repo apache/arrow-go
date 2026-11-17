@@ -24,6 +24,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 	"unsafe"
 
@@ -1673,4 +1674,199 @@ func TestPqarrowNewFileWriter_PropagatesShortWrite(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, writer)
 	require.Contains(t, err.Error(), "short write of magic number")
+}
+
+type byteLimitSink struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+var errSinkFull = errors.New("sink full")
+
+func (s *byteLimitSink) Write(p []byte) (int, error) {
+	if room := s.limit - s.buf.Len(); len(p) > room {
+		s.buf.Write(p[:max(room, 0)])
+		return max(room, 0), errSinkFull
+	}
+	return s.buf.Write(p)
+}
+
+func newPlainAndDictStringSchema(t *testing.T) *schema.GroupNode {
+	t.Helper()
+	fields := schema.FieldList{
+		schema.Must(schema.NewPrimitiveNodeLogical("plain", parquet.Repetitions.Optional,
+			schema.StringLogicalType{}, parquet.Types.ByteArray, -1, -1)),
+		schema.Must(schema.NewPrimitiveNodeLogical("dict", parquet.Repetitions.Optional,
+			schema.StringLogicalType{}, parquet.Types.ByteArray, -1, -1)),
+	}
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, 0)
+	require.NoError(t, err)
+	return sc
+}
+
+func writeStringColumn(cw file.ColumnChunkWriter) error {
+	const n = 300
+	values := make([]parquet.ByteArray, n)
+	defLevels := make([]int16, n)
+	for i := range values {
+		values[i] = parquet.ByteArray("value-" + strconv.Itoa(i%10))
+		defLevels[i] = 1
+	}
+	_, err := cw.(*file.ByteArrayColumnChunkWriter).WriteBatch(values, defLevels, nil)
+	return err
+}
+
+func TestWriterReleasesBuffersWhenSinkFails(t *testing.T) {
+	writeFile := func(t *testing.T, mem memory.Allocator, sink io.Writer, buffered bool) error {
+		props := parquet.NewWriterProperties(
+			parquet.WithAllocator(mem),
+			parquet.WithDictionaryDefault(true),
+			parquet.WithDictionaryFor("plain", false),
+			parquet.WithDataPageSize(1024),
+			parquet.WithBatchSize(100),
+		)
+		writer, err := file.NewParquetWriterWithError(sink, newPlainAndDictStringSchema(t), file.WithWriterProps(props))
+		require.NoError(t, err)
+
+		if buffered {
+			rgw, err := writer.AppendBufferedRowGroupChecked()
+			require.NoError(t, err)
+			for i := 0; i < rgw.NumColumns(); i++ {
+				cw, err := rgw.Column(i)
+				require.NoError(t, err)
+				require.NoError(t, writeStringColumn(cw))
+			}
+		} else {
+			rgw, err := writer.AppendRowGroupChecked()
+			require.NoError(t, err)
+			for i := 0; i < rgw.NumColumns(); i++ {
+				cw, err := rgw.NextColumn()
+				if err == nil {
+					err = writeStringColumn(cw)
+				}
+				if err != nil {
+					return errors.Join(err, writer.Close())
+				}
+			}
+		}
+		return writer.Close()
+	}
+
+	for _, buffered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
+			var full writeOffsetsSink
+			require.NoError(t, writeFile(t, memory.DefaultAllocator, &full, buffered))
+
+			for _, limit := range sinkFailureLimits(t, &full) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				err := writeFile(t, mem, &byteLimitSink{limit: limit}, buffered)
+				require.ErrorIs(t, err, errSinkFull, "limit %d", limit)
+				mem.AssertSize(t, 0)
+				if t.Failed() {
+					t.Fatalf("buffers leaked when the sink fails after %d of %d bytes", limit, full.Len())
+				}
+			}
+		})
+	}
+}
+
+func TestRowGroupCloseDiscardsColumnsOnRowMismatch(t *testing.T) {
+	for _, buffered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("buffered=%t", buffered), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			props := parquet.NewWriterProperties(
+				parquet.WithAllocator(mem),
+				parquet.WithDictionaryFor("plain", false),
+				parquet.WithDataPageSize(1024),
+				parquet.WithBatchSize(100),
+			)
+			var sink bytes.Buffer
+			writer, err := file.NewParquetWriterWithError(&sink, newPlainAndDictStringSchema(t), file.WithWriterProps(props))
+			require.NoError(t, err)
+
+			var rgw file.RowGroupWriter
+			nextColumn := func(i int) file.ColumnChunkWriter {
+				var cw file.ColumnChunkWriter
+				if buffered {
+					cw, err = rgw.(file.BufferedRowGroupWriter).Column(i)
+				} else {
+					cw, err = rgw.(file.SerialRowGroupWriter).NextColumn()
+				}
+				require.NoError(t, err)
+				return cw
+			}
+			if buffered {
+				rgw, err = writer.AppendBufferedRowGroupChecked()
+			} else {
+				rgw, err = writer.AppendRowGroupChecked()
+			}
+			require.NoError(t, err)
+
+			first := nextColumn(0)
+			require.NoError(t, writeStringColumn(first))
+			last := nextColumn(1)
+			_, err = last.(*file.ByteArrayColumnChunkWriter).WriteBatch(
+				[]parquet.ByteArray{parquet.ByteArray("a")}, []int16{1}, nil)
+			require.NoError(t, err)
+
+			written := sink.Len()
+			require.ErrorContains(t, rgw.Close(), "row mismatch")
+			require.NoError(t, first.Close())
+			require.NoError(t, last.Close())
+			require.ErrorContains(t, writer.Close(), "row mismatch")
+			require.Equal(t, written, sink.Len(), "bytes written after the row count mismatch")
+			mem.AssertSize(t, 0)
+		})
+	}
+}
+
+// writeOffsetsSink records where each Write starts, which marks every page
+// header, page body and footer boundary of the written file.
+type writeOffsetsSink struct {
+	bytes.Buffer
+	starts []int
+}
+
+func (s *writeOffsetsSink) Write(p []byte) (int, error) {
+	s.starts = append(s.starts, s.Len())
+	return s.Buffer.Write(p)
+}
+
+// sinkFailureLimits returns the byte counts after which to fail the sink:
+// one byte either side of every page and column chunk boundary of the file
+// in full, plus a stride sample of everything in between.
+func sinkFailureLimits(t *testing.T, full *writeOffsetsSink) []int {
+	t.Helper()
+	const stride = 37
+	boundaries := slices.Clone(full.starts)
+	rdr, err := file.NewParquetReader(bytes.NewReader(full.Bytes()))
+	require.NoError(t, err)
+	defer rdr.Close()
+	for i := 0; i < rdr.NumRowGroups(); i++ {
+		rg := rdr.MetaData().RowGroup(i)
+		for j := 0; j < rg.NumColumns(); j++ {
+			col, err := rg.ColumnChunk(j)
+			require.NoError(t, err)
+			start := col.DataPageOffset()
+			if col.HasDictionaryPage() {
+				boundaries = append(boundaries, int(col.DictionaryPageOffset()))
+				start = min(start, col.DictionaryPageOffset())
+			}
+			boundaries = append(boundaries, int(col.DataPageOffset()), int(start+col.TotalCompressedSize()))
+		}
+	}
+	for off := 0; off < full.Len(); off += stride {
+		boundaries = append(boundaries, off)
+	}
+
+	var limits []int
+	for _, b := range boundaries {
+		for _, limit := range []int{b - 1, b, b + 1} {
+			if limit >= 4 && limit < full.Len() {
+				limits = append(limits, limit)
+			}
+		}
+	}
+	slices.Sort(limits)
+	return slices.Compact(limits)
 }

@@ -115,6 +115,17 @@ func TestBufferSlice(t *testing.T) {
 	slice.Release()
 }
 
+func TestBufferSliceInvalidRangeDoesNotLeak(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	buf := memory.NewResizableBuffer(mem)
+	buf.Resize(64)
+	defer buf.Release()
+
+	assert.Panics(t, func() { memory.SliceBuffer(buf, -1, 1) })
+}
+
 func TestBufferResetFromOwnedSlice(t *testing.T) {
 	mem := memory.NewCheckedAllocator(&movingAllocator{})
 	defer mem.AssertSize(t, 0)

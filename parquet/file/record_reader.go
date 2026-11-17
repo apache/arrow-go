@@ -329,35 +329,43 @@ func (pr *primitiveRecordReader) ReserveValues(extra int64, hasNullable bool) er
 }
 
 func (pr *primitiveRecordReader) ReadValuesDense(toRead int64) (err error) {
+	var n int
 	switch cr := pr.ColumnChunkReader.(type) {
 	case *BooleanColumnChunkReader:
-		_, err = cr.curDecoder.(encoding.BooleanBitmapDecoder).DecodeToBitmap(
+		n, err = cr.curDecoder.(encoding.BooleanBitmapDecoder).DecodeToBitmap(
 			pr.values.Bytes(), pr.valuesWritten, int(toRead))
 	case *Int32ColumnChunkReader:
 		values := arrow.Int32Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.Int32Decoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.Int32Decoder).Decode(values[:toRead])
 	case *Int64ColumnChunkReader:
 		values := arrow.Int64Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.Int64Decoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.Int64Decoder).Decode(values[:toRead])
 	case *Int96ColumnChunkReader:
 		values := parquet.Int96Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.Int96Decoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.Int96Decoder).Decode(values[:toRead])
 	case *ByteArrayColumnChunkReader:
 		values := parquet.ByteArrayTraits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.ByteArrayDecoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.ByteArrayDecoder).Decode(values[:toRead])
 	case *FixedLenByteArrayColumnChunkReader:
 		values := parquet.FixedLenByteArrayTraits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.FixedLenByteArrayDecoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.FixedLenByteArrayDecoder).Decode(values[:toRead])
 	case *Float32ColumnChunkReader:
 		values := arrow.Float32Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.Float32Decoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.Float32Decoder).Decode(values[:toRead])
 	case *Float64ColumnChunkReader:
 		values := arrow.Float64Traits.CastFromBytes(pr.values.Bytes())[int(pr.valuesWritten):]
-		_, err = cr.curDecoder.(encoding.Float64Decoder).Decode(values[:toRead])
+		n, err = cr.curDecoder.(encoding.Float64Decoder).Decode(values[:toRead])
 	default:
 		panic("invalid type for record reader")
 	}
-	return
+	return checkDecoded(n, err, toRead)
+}
+
+func checkDecoded(n int, err error, want int64) error {
+	if err == nil && int64(n) != want {
+		return errors.New("parquet: number of values / definition levels read did not match")
+	}
+	return err
 }
 
 func (pr *primitiveRecordReader) ReadValuesSpaced(valuesWithNulls, nullCount int64) (err error) {
@@ -679,9 +687,11 @@ func (rr *recordReader) ReadRecordData(numRecords int64) (int64, error) {
 		DefLevelsToBitmap(rr.DefLevels()[startPos:int(rr.levelsPos)], rr.leafInfo, &validityIO)
 		valuesToRead = validityIO.Read - validityIO.NullCount
 		nullCount = validityIO.NullCount
-		err = rr.ReadValuesSpaced(validityIO.Read, nullCount)
-	} else {
+	}
+	if nullCount == 0 {
 		err = rr.ReadValuesDense(valuesToRead)
+	} else {
+		err = rr.ReadValuesSpaced(valuesToRead+nullCount, nullCount)
 	}
 	if err != nil {
 		return 0, err
@@ -832,8 +842,8 @@ func (fr *flbaRecordReader) ReadValuesDense(toRead int64) error {
 	values := fr.valueBuf[:toRead]
 	dec := fr.ColumnChunkReader.(*FixedLenByteArrayColumnChunkReader).curDecoder.(encoding.FixedLenByteArrayDecoder)
 
-	_, err := dec.Decode(values)
-	if err != nil {
+	n, err := dec.Decode(values)
+	if err = checkDecoded(n, err, toRead); err != nil {
 		return err
 	}
 
@@ -967,8 +977,8 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 	values := br.valueBuf[:toRead]
 	dec := br.ColumnChunkReader.(*ByteArrayColumnChunkReader).curDecoder.(encoding.ByteArrayDecoder)
 
-	_, err := dec.Decode(values)
-	if err != nil {
+	n, err := dec.Decode(values)
+	if err = checkDecoded(n, err, toRead); err != nil {
 		return err
 	}
 
@@ -1108,8 +1118,8 @@ func (bd *byteArrayDictRecordReader) ReadValuesDense(toRead int64) error {
 		}
 
 		rdr := bd.ColumnChunkReader.(*ByteArrayColumnChunkReader)
-		_, err := rdr.curDecoder.(*encoding.DictByteArrayDecoder).DecodeIndices(int(toRead), bd.bldr)
-		return err
+		n, err := rdr.curDecoder.(*encoding.DictByteArrayDecoder).DecodeIndices(int(toRead), bd.bldr)
+		return checkDecoded(n, err, toRead)
 	}
 	return bd.byteArrayRecordReader.ReadValuesDense(toRead)
 }
@@ -1125,9 +1135,8 @@ func (bd *byteArrayDictRecordReader) ReadValuesSpaced(valuesWithNulls, nullCount
 		}
 
 		rdr := bd.ColumnChunkReader.(*ByteArrayColumnChunkReader)
-		_, err := rdr.curDecoder.(*encoding.DictByteArrayDecoder).DecodeIndicesSpaced(int(valuesWithNulls), int(nullCount), validBits, offset, bd.bldr)
-		return err
-
+		n, err := rdr.curDecoder.(*encoding.DictByteArrayDecoder).DecodeIndicesSpaced(int(valuesWithNulls), int(nullCount), validBits, offset, bd.bldr)
+		return checkDecoded(n, err, valuesWithNulls)
 	}
 
 	return bd.byteArrayRecordReader.ReadValuesSpaced(valuesWithNulls, int64(nullCount))
