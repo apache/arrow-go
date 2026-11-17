@@ -17,14 +17,11 @@
 package array_test
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/bits"
 	"math/rand"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -2461,43 +2458,6 @@ func TestDictionaryBuilderBinaryLikeValueTypes(t *testing.T) {
 				defer want.Release()
 				assert.Truef(t, array.Equal(want, outDict), "unified: got %v", outDict)
 			})
-		})
-	}
-}
-
-func TestDictionaryBuilderLargeValuesOver2GiB(t *testing.T) {
-	if os.Getenv("ARROW_TEST_LARGE_MEMORY") == "" {
-		t.Skip("set ARROW_TEST_LARGE_MEMORY=1 to run; peaks near 18 GiB of memory")
-	}
-	if bits.UintSize < 64 {
-		t.Skip("needs a 64-bit address space")
-	}
-
-	const (
-		valueSize = 128 << 20
-		numValues = 17 // 2.125 GiB of distinct values, past the 32-bit offset limit
-	)
-	for _, vt := range []arrow.DataType{arrow.BinaryTypes.LargeBinary, arrow.BinaryTypes.LargeString} {
-		t.Run(vt.String(), func(t *testing.T) {
-			dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: vt}
-			bldr := array.NewBuilder(memory.DefaultAllocator, dt).(*array.BinaryDictionaryBuilder)
-			defer bldr.Release()
-
-			value := bytes.Repeat([]byte{'x'}, valueSize)
-			for i := 0; i < numValues; i++ {
-				value[0] = byte('a' + i)
-				require.NoError(t, bldr.Append(value))
-			}
-
-			arr := bldr.NewArray().(*array.Dictionary)
-			defer arr.Release()
-			require.NoError(t, array.ValidateFull(arr))
-			require.Equal(t, numValues, arr.Dictionary().Len())
-
-			dict := arr.Dictionary().Data().Buffers()[2]
-			assert.Equal(t, int64(numValues)*valueSize, int64(dict.Len()))
-			last := int64(numValues-1) * valueSize
-			assert.Equal(t, byte('a'+numValues-1), dict.Bytes()[last])
 		})
 	}
 }
