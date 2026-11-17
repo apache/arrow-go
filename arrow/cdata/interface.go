@@ -277,10 +277,12 @@ func ExportArrowArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema
 
 // ExportRecordReader populates the CArrowArrayStream that is passed in with the appropriate
 // callbacks to be a working ArrowArrayStream utilizing the passed in RecordReader. The
-// CArrowArrayStream takes ownership of the RecordReader until the consumer calls the release
-// callback, as such it is unnecessary to call Release on the passed in reader unless it has
-// previously been retained. To call that release callback and prevent a memory leak, you can
-// call ReleaseCArrowArrayStream on the CArrowArrayStream once it is no longer needed.
+// CArrowArrayStream retains its own reference to the RecordReader until the consumer calls
+// the stream's release callback. The caller remains responsible for calling Release on its
+// own reference to the reader and may do so immediately after ExportRecordReader returns.
+// To release the stream's reference and prevent a memory leak, the consumer must call the
+// stream's release callback, for example by calling ReleaseCArrowArrayStream once the
+// CArrowArrayStream is no longer needed.
 //
 // WARNING: the output ArrowArrayStream MUST BE ZERO INITIALIZED, or the Go garbage
 // collector may error at runtime, due to CGO rules ("the current implementation may
