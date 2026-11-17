@@ -56,20 +56,62 @@ type alpEncodingParams struct {
 	factor   int
 }
 
-// alpSample appends up to alpSamplerSamples values to out, one from each
-// stride-wide block. The position within the block shifts from one block to
-// the next, so data that repeats with the stride's period, such as a NaN at
-// every 128th value, can't fill the whole sample.
+// alpSamplePosition returns where in a vector of n values the i-th sampled
+// value is, for i up to (n-1)/stride with stride from alpSampleStride. There is
+// one from each stride-wide block, and the position within the block shifts
+// from one block to the next, so data that repeats with the stride's period,
+// such as a NaN at every 128th value, can't fill the whole sample.
+func alpSamplePosition(i, stride, n int) int {
+	block := i * stride
+	if idx := block + i%stride; idx < n {
+		return idx
+	}
+	return block
+}
+
+// alpSampleStride returns the block width that samples up to alpSamplerSamples
+// of n values.
+func alpSampleStride(n int) int {
+	return max(1, (n+alpSamplerSamples-1)/alpSamplerSamples)
+}
+
+// alpSample appends the sampled values to out, up to alpSamplerSamples of them.
 func alpSample[T alpFloat](values []T, out []T) []T {
-	stride := max(1, (len(values)+alpSamplerSamples-1)/alpSamplerSamples)
-	for i, block := 0, 0; block < len(values); i, block = i+1, block+stride {
-		idx := block + i%stride
-		if idx >= len(values) {
-			idx = block
-		}
-		out = append(out, values[idx])
+	stride := alpSampleStride(len(values))
+	for i := 0; i*stride < len(values); i++ {
+		out = append(out, values[alpSamplePosition(i, stride, len(values))])
 	}
 	return out
+}
+
+// alpSampledSizeBits is alpEstimateSizeBits over the sample of a vector that
+// is scaled already: encoded holds the integer of every value, and excPos the
+// positions of the exceptions, in order. It also returns the size of the
+// sample. Reading the sample's size off the scaled vector costs no arithmetic
+// on the values, which scaling the sample a second time would.
+func alpSampledSizeBits[T alpFloat](encoded []int64, excPos []uint16) (sizeBits int64, sampled int) {
+	stride := alpSampleStride(len(encoded))
+	minEncoded, maxEncoded := int64(math.MaxInt64), int64(math.MinInt64)
+	numExceptions := 0
+	for ; sampled*stride < len(encoded); sampled++ {
+		idx := alpSamplePosition(sampled, stride, len(encoded))
+		// The sampled positions only move forward, as the exceptions do.
+		for len(excPos) > 0 && int(excPos[0]) < idx {
+			excPos = excPos[1:]
+		}
+		if len(excPos) > 0 && int(excPos[0]) == idx {
+			numExceptions++
+			continue
+		}
+		minEncoded, maxEncoded = min(minEncoded, encoded[idx]), max(maxEncoded, encoded[idx])
+	}
+
+	sizeBits = int64(numExceptions) * int64(alpExceptionBits[T]())
+	if numExceptions < sampled {
+		width := bits.Len64(uint64(maxEncoded) - uint64(minEncoded))
+		sizeBits += int64(sampled) * int64(width)
+	}
+	return sizeBits, sampled
 }
 
 // alpExceptionBits is what one exception costs: the value at its full width,
@@ -78,31 +120,55 @@ func alpExceptionBits[T alpFloat]() int {
 	return 8*alpEncodedBytes[T]() + 16
 }
 
+// alpEstimateBlock is how many values a size estimate scales between checks of
+// whether the scaling can still matter.
+const alpEstimateBlock = 32
+
 // alpEstimateSizeBits estimates the encoded size for a parameter pair and
 // reports how many values it can encode. The cost includes the packed integers
 // at the width left by the frame of reference and every exception.
 func alpEstimateSizeBits[T alpFloat](values []T, exponent, factor int) (sizeBits int64, numEncodable int) {
+	return alpEstimateSizeBitsWithin(values, exponent, factor, math.MaxInt64)
+}
+
+// alpEstimateSizeBitsWithin is alpEstimateSizeBits for a caller with no use
+// for a scaling larger than limit. Neither the exceptions nor the packing width
+// can shrink as more values are scaled, so the size of the values scaled so far
+// is a lower bound on the whole. Once that passes limit the scan stops, and
+// reports a size above limit with numEncodable 0. Most scalings turn nearly
+// every value into an exception, so most scans stop within a block or two of a
+// search that would otherwise scale every value for every scaling.
+func alpEstimateSizeBitsWithin[T alpFloat](values []T, exponent, factor int, limit int64) (sizeBits int64, numEncodable int) {
+	var (
+		encoded [alpEstimateBlock]int64
+		excPos  [alpEstimateBlock]uint16
+	)
+	excBits := int64(alpExceptionBits[T]())
 	minEncoded, maxEncoded := int64(math.MaxInt64), int64(math.MinInt64)
 	numExceptions := 0
-	s := newALPScaling[T](exponent, factor)
-	for _, v := range values {
-		e, ok := s.tryEncode(v)
-		if !ok {
-			numExceptions++
-			continue
+	for len(values) > numEncodable+numExceptions {
+		start := numEncodable + numExceptions
+		block := values[start:min(start+alpEstimateBlock, len(values))]
+		n := alpScale(block, exponent, factor, encoded[:], excPos[:])
+		numExceptions += n
+		numEncodable += len(block) - n
+		if n < len(block) {
+			lo, hi := alpIntRange(encoded[:len(block)], excPos[:n])
+			minEncoded, maxEncoded = min(minEncoded, lo), max(maxEncoded, hi)
 		}
-		minEncoded, maxEncoded = min(minEncoded, e), max(maxEncoded, e)
-	}
 
-	sizeBits = int64(numExceptions) * int64(alpExceptionBits[T]())
-	numEncodable = len(values) - numExceptions
-	if numEncodable == 0 {
-		return sizeBits, 0
+		sizeBits = int64(numExceptions) * excBits
+		if numEncodable > 0 {
+			// The encoded range can exceed int64, so compute its width in
+			// unsigned arithmetic.
+			width := bits.Len64(uint64(maxEncoded) - uint64(minEncoded))
+			sizeBits += int64(len(values)) * int64(width)
+		}
+		if sizeBits > limit {
+			return sizeBits, 0
+		}
 	}
-	// The encoded range can exceed int64, so compute its width in unsigned
-	// arithmetic.
-	width := bits.Len64(uint64(maxEncoded) - uint64(minEncoded))
-	return sizeBits + int64(len(values))*int64(width), numEncodable
+	return sizeBits, numEncodable
 }
 
 // For equal-size estimates, the ALP paper prefers the larger exponent,
@@ -133,7 +199,9 @@ func alpFindBestParams[T alpFloat](values []T) (alpEncodingParams, int64) {
 
 	for e := range maxExponent + 1 {
 		for f := range e + 1 {
-			sizeBits, numEncodable := alpEstimateSizeBits(values, e, f)
+			// A scaling the same size as the best can still win the tie, so
+			// only one that is larger is cut short.
+			sizeBits, numEncodable := alpEstimateSizeBitsWithin(values, e, f, bestBits)
 			// A scaling that turns almost everything into an exception tells us
 			// nothing about how wide the rest would pack.
 			if numEncodable < 2 {
@@ -159,7 +227,9 @@ func alpFindBestParamsWithPresets[T alpFloat](values []T, presets []alpEncodingP
 	for _, p := range presets {
 		// Only the size counts here. Every shortlisted scaling already encoded
 		// enough values during sampling to be worth trying.
-		sizeBits, _ := alpEstimateSizeBits(values, p.exponent, p.factor)
+		// Here a tie goes to the earlier scaling, so one that can only
+		// match the best is cut short too.
+		sizeBits, _ := alpEstimateSizeBitsWithin(values, p.exponent, p.factor, bestBits-1)
 		if sizeBits >= bestBits {
 			notImproved++
 			if notImproved == alpPresetGiveUpAfter {

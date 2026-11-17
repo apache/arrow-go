@@ -77,28 +77,84 @@ func alpPackedSize(count, bitWidth int) int {
 	return (count*bitWidth + 7) / 8
 }
 
-// alpAppendPackedBits appends values to dst, packed at bitWidth bits each,
-// least significant bit first.
-func alpAppendPackedBits(dst []byte, values []uint64, bitWidth int) []byte {
-	if bitWidth == 0 || len(values) == 0 {
-		return dst
+// alpPack packs each integer's distance above minValue into dst at bitWidth
+// bits, least significant bit first. The distances collect in words that are
+// stored whole, so dst needs room for 8 bytes past the alpPackedSize ones.
+//
+// A group of 8 values ends on a byte boundary at any width. The integers are
+// therefore cut into four runs of whole groups, which are packed side by side:
+// no run's word waits for another's. What is left after the four runs is
+// packed on its own.
+func alpPack(dst []byte, encoded []int64, minValue int64, bitWidth uint) {
+	if bitWidth == 0 {
+		return
 	}
-
-	// BitWriter flushes eight bytes at a time, so it needs room past the last
-	// packed byte. The return drops those bytes again.
-	start, size := len(dst), alpPackedSize(len(values), bitWidth)
-	dst = slices.Grow(dst, size+8)[:start+size+8]
-	clear(dst[start:])
-
-	bw := utils.NewBitWriter(utils.NewWriterAtBuffer(dst[start:]))
-	for _, v := range values {
-		bw.WriteValue(v, uint(bitWidth))
+	run := len(encoded) / 4 &^ 7
+	if run == 0 {
+		alpPackRun(dst, encoded, minValue, bitWidth)
+		return
 	}
-	bw.Flush(true)
-	return dst[:start+size]
+	size := run * int(bitWidth) / 8
+	e0, e1, e2, e3 := encoded[:run], encoded[run:2*run], encoded[2*run:3*run], encoded[3*run:4*run]
+	d0, d1, d2, d3 := dst[:size], dst[size:2*size], dst[2*size:3*size], dst[3*size:4*size]
+
+	var w0, w1, w2, w3 uint64
+	var used uint
+	base, pos := uint64(minValue), 0
+	for i := range e0 {
+		// The distance between two int64 values can exceed int64. Unsigned
+		// arithmetic wraps, and the decoder adds the distance back the same way.
+		v0, v1, v2, v3 := uint64(e0[i])-base, uint64(e1[i])-base, uint64(e2[i])-base, uint64(e3[i])-base
+		w0 |= v0 << used
+		w1 |= v1 << used
+		w2 |= v2 << used
+		w3 |= v3 << used
+		used += bitWidth
+		if used >= 64 {
+			binary.LittleEndian.PutUint64(d0[pos:], w0)
+			binary.LittleEndian.PutUint64(d1[pos:], w1)
+			binary.LittleEndian.PutUint64(d2[pos:], w2)
+			binary.LittleEndian.PutUint64(d3[pos:], w3)
+			pos += 8
+			used -= 64
+			// The bits the full words had no room for.
+			rest := bitWidth - used
+			w0, w1, w2, w3 = v0>>rest, v1>>rest, v2>>rest, v3>>rest
+		}
+	}
+	// A whole word here would run into the next run, which is already
+	// written, so the last bytes of each run go out one at a time.
+	for ; pos < size; pos++ {
+		d0[pos], d1[pos], d2[pos], d3[pos] = byte(w0), byte(w1), byte(w2), byte(w3)
+		w0, w1, w2, w3 = w0>>8, w1>>8, w2>>8, w3>>8
+	}
+	alpPackRun(dst[4*size:], encoded[4*run:], minValue, bitWidth)
 }
 
-// alpUnpackBits reverses alpAppendPackedBits into out, which must hold as many
+// alpPackRun packs one run of integers. The distances collect in a word that
+// is stored whole each time it fills, and once more at the end.
+func alpPackRun(dst []byte, encoded []int64, minValue int64, bitWidth uint) {
+	if len(encoded) == 0 {
+		return
+	}
+	var word uint64
+	var used uint
+	base, pos := uint64(minValue), 0
+	for _, e := range encoded {
+		d := uint64(e) - base
+		word |= d << used
+		used += bitWidth
+		if used >= 64 {
+			binary.LittleEndian.PutUint64(dst[pos:], word)
+			pos += 8
+			used -= 64
+			word = d >> (bitWidth - used)
+		}
+	}
+	binary.LittleEndian.PutUint64(dst[pos:], word)
+}
+
+// alpUnpackBits reverses alpPack into out, which must hold as many
 // values as were packed. The reader is reset onto packed, so one reader serves
 // every vector of a page.
 func alpUnpackBits(br *utils.BitReader, packed *bytes.Reader, data []byte, out []uint64, bitWidth int) error {
@@ -117,13 +173,6 @@ func alpUnpackBits(br *utils.BitReader, packed *bytes.Reader, data []byte, out [
 		return fmt.Errorf("parquet: ALP unpacked %d of %d values", n, len(out))
 	}
 	return nil
-}
-
-func alpAppendInt[T alpFloat](dst []byte, v uint64) []byte {
-	if alpEncodedBytes[T]() == 4 {
-		return binary.LittleEndian.AppendUint32(dst, uint32(v))
-	}
-	return binary.LittleEndian.AppendUint64(dst, v)
 }
 
 func alpReadInt[T alpFloat](src []byte) int64 {
@@ -158,9 +207,7 @@ type alpEncoder[T alpFloat] struct {
 
 	// Scratch reused across vectors, calls, and pages.
 	encodedScratch []int64
-	deltaScratch   []uint64
 	excPositions   []uint16
-	excValues      []T
 	sampleScratch  []T
 	spacedScratch  []T
 	pageHeader     []byte
@@ -193,7 +240,7 @@ func (enc *alpEncoder[T]) setVectorSize(logSize int) {
 	enc.vectorSize = 1 << logSize
 	enc.vectorBuf = make([]T, enc.vectorSize)
 	enc.encodedScratch = make([]int64, enc.vectorSize)
-	enc.deltaScratch = make([]uint64, enc.vectorSize)
+	enc.excPositions = make([]uint16, enc.vectorSize)
 }
 
 // SetVectorSize sets how many values each vector holds: a power of two from
@@ -221,6 +268,14 @@ func (enc *alpEncoder[T]) Type() parquet.Type {
 // final partial vector.
 func (enc *alpEncoder[T]) Put(in []T) {
 	for len(in) > 0 {
+		if enc.bufCount == 0 && len(in) >= enc.vectorSize {
+			// A whole vector is here already: encode it where it is rather
+			// than copy it into the buffer first.
+			enc.encodeVector(in[:enc.vectorSize])
+			enc.totalCount += enc.vectorSize
+			in = in[enc.vectorSize:]
+			continue
+		}
 		n := copy(enc.vectorBuf[enc.bufCount:], in)
 		enc.bufCount += n
 		enc.totalCount += n
@@ -296,69 +351,113 @@ func (enc *alpEncoder[T]) research(sample []T, presetBits int64) (alpEncodingPar
 	return full, true
 }
 
+// scaleVector scales values with params into the encoder's scratch: every
+// integer, and the positions of the exceptions. It returns how many exceptions
+// there are, the frame of reference, and the width the integers pack at.
+func (enc *alpEncoder[T]) scaleVector(values []T, params alpEncodingParams) (numExc int, minValue int64, bitWidth int) {
+	// Scaling a value also determines whether it is an exception, so one pass
+	// collects both the integers and the exceptions.
+	encoded := enc.encodedScratch[:len(values)]
+	numExc = alpScale(values, params.exponent, params.factor, encoded, enc.excPositions)
+
+	// When nothing encodes, nothing constrains the frame of reference, and a
+	// width of zero packs nothing. Otherwise the range leaves each exception's
+	// slot holding the frame of reference itself, which costs no bits, so the
+	// exceptions cannot widen the packing.
+	var maxValue int64
+	if numExc < len(values) {
+		minValue, maxValue = alpIntRange(encoded, enc.excPositions[:numExc])
+	}
+	// The difference between two int64 values can exceed int64. Compute it in
+	// unsigned arithmetic; the decoder adds the wrapped difference back.
+	return numExc, minValue, bits.Len64(uint64(maxValue) - uint64(minValue))
+}
+
 func (enc *alpEncoder[T]) encodeVector(values []T) {
-	params := enc.findParams(values)
+	n := len(values)
+	var (
+		params   alpEncodingParams
+		numExc   int
+		minValue int64
+		bitWidth int
+	)
+	if len(enc.cachedPresets) == 1 {
+		// With one scaling on the shortlist there is nothing to choose, so
+		// the vector is scaled straight away. What the sample would have
+		// estimated is read off the result, and a sample is only taken when
+		// that is no better than PLAIN, to check whether the data has changed
+		// scale.
+		params = enc.cachedPresets[0]
+		numExc, minValue, bitWidth = enc.scaleVector(values, params)
+		sampleBits, sampled := alpSampledSizeBits[T](enc.encodedScratch[:n], enc.excPositions[:numExc])
+		if sampleBits >= int64(sampled)*int64(8*alpEncodedBytes[T]()) {
+			sample := alpSample(values, enc.sampleScratch[:0])
+			if full, ok := enc.research(sample, sampleBits); ok {
+				params = full
+				numExc, minValue, bitWidth = enc.scaleVector(values, params)
+			}
+		}
+	} else {
+		params = enc.findParams(values)
+		numExc, minValue, bitWidth = enc.scaleVector(values, params)
+	}
+	encoded := enc.encodedScratch[:n]
+	excPositions := enc.excPositions[:numExc]
 
 	enc.vectorsProcessed++
 	if enc.cachedPresets == nil && enc.vectorsProcessed >= alpSamplerVectors {
 		enc.buildPresetCache()
 	}
 
-	encoded := enc.encodedScratch[:len(values)]
-	enc.excPositions = enc.excPositions[:0]
-	enc.excValues = enc.excValues[:0]
-
-	// Encoding a value also determines whether it is an exception, so collect
-	// both results in one pass.
-	s := newALPScaling[T](params.exponent, params.factor)
-	minValue := int64(math.MaxInt64)
-	for i, v := range values {
-		e, ok := s.tryEncode(v)
-		if !ok {
-			enc.excPositions = append(enc.excPositions, uint16(i))
-			enc.excValues = append(enc.excValues, v)
-			continue
+	// The packing stores whole words, so it needs room for one past the end of
+	// the vector. The exceptions overwrite what it leaves after the packed
+	// bytes, and the final reslice drops the rest.
+	valueBytes := alpEncodedBytes[T]()
+	packedSize := alpPackedSize(n, bitWidth)
+	if packedSize+numExc*(2+valueBytes) > n*(2+valueBytes) {
+		// A few integers far apart among many exceptions make the vector
+		// larger packed than it is with every value stored verbatim. Stored
+		// that way, no vector takes more than an exception's size per value.
+		excPositions = enc.excPositions[:n]
+		for i := range excPositions {
+			excPositions[i] = uint16(i)
 		}
-		encoded[i] = e
-		minValue = min(e, minValue)
+		numExc, minValue, bitWidth, packedSize = n, 0, 0, 0
+	}
+	size := alpVectorHeaderSize[T]() + packedSize + numExc*(2+valueBytes)
+	start := len(enc.encodedBuf)
+	enc.encodedBuf = slices.Grow(enc.encodedBuf, size+8)[:start+size]
+	out := enc.encodedBuf[start : start+size+8]
+
+	out[0], out[1] = byte(params.exponent), byte(params.factor)
+	binary.LittleEndian.PutUint16(out[2:], uint16(numExc))
+	if valueBytes == 4 {
+		binary.LittleEndian.PutUint32(out[4:], uint32(minValue))
+	} else {
+		binary.LittleEndian.PutUint64(out[4:], uint64(minValue))
+	}
+	out[4+valueBytes] = byte(bitWidth)
+	out = out[alpVectorHeaderSize[T]():]
+
+	alpPack(out, encoded, minValue, uint(bitWidth))
+	out = out[packedSize:]
+
+	for i, pos := range excPositions {
+		binary.LittleEndian.PutUint16(out[2*i:], pos)
+	}
+	out = out[2*numExc:]
+	switch values := any(values).(type) {
+	case []float64:
+		for i, pos := range excPositions {
+			binary.LittleEndian.PutUint64(out[8*i:], math.Float64bits(values[pos]))
+		}
+	case []float32:
+		for i, pos := range excPositions {
+			binary.LittleEndian.PutUint32(out[4*i:], math.Float32bits(values[pos]))
+		}
 	}
 
-	if len(enc.excValues) == len(values) {
-		// Nothing encoded, so nothing constrains the frame of reference.
-		minValue = 0
-	}
-	// An exception still takes up a slot among the packed integers. Filling the
-	// slot with the frame of reference itself costs no bits, so the exceptions
-	// cannot widen the packing.
-	for _, pos := range enc.excPositions {
-		encoded[pos] = minValue
-	}
-
-	// The difference between two int64 values can exceed int64. Compute it in
-	// unsigned arithmetic; the decoder adds the wrapped difference back.
-	deltas := enc.deltaScratch[:len(values)]
-	var maxDelta uint64
-	for i, e := range encoded {
-		deltas[i] = uint64(e) - uint64(minValue)
-		maxDelta = max(deltas[i], maxDelta)
-	}
-	bitWidth := bits.Len64(maxDelta)
-
-	startLen := len(enc.encodedBuf)
-	enc.encodedBuf = append(enc.encodedBuf, byte(params.exponent), byte(params.factor))
-	enc.encodedBuf = binary.LittleEndian.AppendUint16(enc.encodedBuf, uint16(len(enc.excPositions)))
-	enc.encodedBuf = alpAppendInt[T](enc.encodedBuf, uint64(minValue))
-	enc.encodedBuf = append(enc.encodedBuf, byte(bitWidth))
-	enc.encodedBuf = alpAppendPackedBits(enc.encodedBuf, deltas, bitWidth)
-
-	for _, pos := range enc.excPositions {
-		enc.encodedBuf = binary.LittleEndian.AppendUint16(enc.encodedBuf, pos)
-	}
-	for _, v := range enc.excValues {
-		enc.encodedBuf = alpAppendInt[T](enc.encodedBuf, alpFloatToBits(v))
-	}
-
-	enc.vectorSizes = append(enc.vectorSizes, len(enc.encodedBuf)-startLen)
+	enc.vectorSizes = append(enc.vectorSizes, size)
 }
 
 // buildPresetCache keeps the scaling pairs the sampled vectors chose most often,
@@ -396,15 +495,13 @@ func (enc *alpEncoder[T]) buildPresetCache() {
 
 // EstimatedDataEncodedSize counts the encoded vectors and their offsets, plus
 // an upper bound for the vector still being buffered: its offset and header,
-// every slot packed at the full integer width, and every value also stored as
-// an exception with its 2-byte position. A vector that mixes exceptions with
-// wide packed values can approach that bound, so nothing smaller is safe; the
-// overestimate is limited to one vector.
+// and every value stored as an exception with its 2-byte position. No vector
+// is written larger than that, so nothing more is needed, and the overestimate
+// is limited to one vector.
 func (enc *alpEncoder[T]) EstimatedDataEncodedSize() int64 {
 	size := len(enc.encodedBuf) + 4*len(enc.vectorSizes)
 	if enc.bufCount > 0 {
-		width := alpEncodedBytes[T]()
-		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(2*width+2)
+		size += 4 + alpVectorHeaderSize[T]() + enc.bufCount*(alpEncodedBytes[T]()+2)
 	}
 	return int64(size)
 }
