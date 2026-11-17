@@ -134,6 +134,7 @@ type FileWriter struct {
 	ctx        context.Context
 	colIdx     int
 	closed     bool
+	closeErr   error
 }
 
 // NewFileWriter returns a writer for writing Arrow directly to a parquetfile, rather than
@@ -509,11 +510,12 @@ func (fw *FileWriter) Close() error {
 		// sink is closed
 		err := fw.wr.Close()
 		if rgErr != nil {
-			return rgErr
+			fw.closeErr = rgErr
+		} else {
+			fw.closeErr = err
 		}
-		return err
 	}
-	return nil
+	return fw.closeErr
 }
 
 // WriteColumnChunked will write the data provided to the underlying file, using the provided

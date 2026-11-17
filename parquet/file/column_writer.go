@@ -166,6 +166,7 @@ type columnWriter struct {
 	// records the current number of compressed bytes in a column
 	totalCompressedBytes int64
 	closed               bool
+	writeErr             error
 	fallbackToNonDict    bool
 	dictPageWritten      bool
 
@@ -259,7 +260,7 @@ func (w *columnWriter) RowsWritten() int {
 func (w *columnWriter) WriteDataPage(page DataPage) error {
 	written, err := w.pager.WriteDataPage(page)
 	w.totalBytesWritten += written
-	return err
+	return w.recordError(err)
 }
 
 func (w *columnWriter) WriteDefinitionLevels(levels []int16) {
@@ -587,7 +588,7 @@ func (w *columnWriter) WriteDictionaryPage() error {
 	written, err := w.pager.WriteDictionaryPage(page)
 	w.totalBytesWritten += written
 	w.dictPageWritten = err == nil
-	return err
+	return w.recordError(err)
 }
 
 func (w *columnWriter) populateBloomFilterFromEncoder(dictEncoder encoding.DictEncoder) error {
@@ -742,12 +743,25 @@ func (w *columnWriter) resetPageStatistics() {
 	}
 }
 
+func (w *columnWriter) recordError(err error) error {
+	if w.writeErr == nil {
+		w.writeErr = err
+	}
+	return w.writeErr
+}
+
 func (w *columnWriter) Close() (err error) {
 	if !w.closed {
 		w.closed = true
 		// release and reset everything even if a flush or the chunk
 		// statistics handling fails
-		defer w.release()
+		defer func() {
+			err = w.recordError(err)
+			w.release()
+		}()
+		if w.writeErr != nil {
+			return w.writeErr
+		}
 
 		if w.hasDict && !w.fallbackToNonDict {
 			if err = w.WriteDictionaryPage(); err != nil {
@@ -788,8 +802,9 @@ func (w *columnWriter) Close() (err error) {
 		advertiseDict := w.hasDict && w.dictPageWritten
 		advertiseFallback := w.fallbackToNonDict && w.dictPageWritten
 		err = w.pager.Close(advertiseDict, advertiseFallback)
+		return err
 	}
-	return err
+	return w.writeErr
 }
 
 // discard releases the writer's buffers without writing anything to the sink.
@@ -799,12 +814,16 @@ func (w *columnWriter) discard() {
 	}
 	w.closed = true
 	w.release()
-	if p, ok := w.pager.(interface{ release() }); ok {
-		p.release()
-	}
 }
 
 func (w *columnWriter) release() {
+	for _, p := range w.pages {
+		p.Release()
+	}
+	w.pages = nil
+	if p, ok := w.pager.(interface{ release() }); ok {
+		p.release()
+	}
 	w.uncompressedData = bytes.Buffer{}
 	w.defLevelSink.Reset(0)
 	w.repLevelSink.Reset(0)

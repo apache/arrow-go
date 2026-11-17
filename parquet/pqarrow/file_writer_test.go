@@ -488,3 +488,32 @@ func sinkFailureLimits(t *testing.T, full *writeOffsetsSink) []int {
 	slices.Sort(limits)
 	return slices.Compact(limits)
 }
+
+func TestFileWriterEncryptedPageLimitClose(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	builder := array.NewInt32Builder(mem)
+	builder.AppendValues(make([]int32, 32770), nil)
+	values := builder.NewArray()
+	builder.Release()
+	sc := arrow.NewSchema([]arrow.Field{{Name: "col", Type: arrow.PrimitiveTypes.Int32}}, nil)
+	rec := array.NewRecordBatch(sc, []arrow.Array{values}, int64(values.Len()))
+	values.Release()
+	defer rec.Release()
+	const key = "0123456789012345"
+	props := parquet.NewWriterProperties(parquet.WithAllocator(mem),
+		parquet.WithEncryptionProperties(parquet.NewFileEncryptionProperties(key)),
+		parquet.WithDictionaryDefault(false), parquet.WithBatchSize(1), parquet.WithDataPageSize(1))
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(sc, &buf, props, pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+	writeErr := writer.Write(rec)
+	require.ErrorContains(t, writeErr, "more than 32767 pages")
+	for i := 0; i < 2; i++ {
+		assert.ErrorContains(t, writer.Close(), "more than 32767 pages", "file close %d", i)
+	}
+	readProps := parquet.NewReaderProperties(memory.DefaultAllocator)
+	readProps.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(key))
+	_, readErr := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(readProps))
+	assert.Error(t, readErr, "failed writes must not produce a readable footer")
+}
