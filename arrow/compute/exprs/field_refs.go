@@ -278,7 +278,7 @@ func arrayStep(mem memory.Allocator, ref expr.ReferenceSegment, v *compute.Array
 		return &compute.ArrayDatum{Value: field}, nil
 	case *expr.ListElementRef:
 		switch v.Type().ID() {
-		case arrow.LIST, arrow.LARGE_LIST, arrow.FIXED_SIZE_LIST:
+		case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW, arrow.FIXED_SIZE_LIST:
 		default:
 			return nil, fmt.Errorf("%w: cannot reference list element in non-list array type %s",
 				arrow.ErrInvalid, v.Type())
