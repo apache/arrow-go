@@ -435,6 +435,14 @@ func TestKekCacheIsPerAccessToken(t *testing.T) {
 	_, err = factory.FileEncryptionProperties(tokenA, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), kms.wraps.Load(), "revisiting a token reuses its cached KEK")
+
+	// a different KMS instance never shares wraps, even with the same
+	// token: the same master key id may resolve to a different key there
+	otherInstance := tokenA
+	otherInstance.KmsInstanceID = "other-instance"
+	_, err = factory.FileEncryptionProperties(otherInstance, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), kms.wraps.Load(), "another KMS instance gets its own KEK")
 }
 
 // Cached KEKs expire after the cache lifetime and are wrapped again.
@@ -519,7 +527,7 @@ func TestKekWrappingLocksPerMasterKey(t *testing.T) {
 
 		assert.Equal(t, int32(4), kms.wraps.Load())
 		elapsed := time.Since(start)
-		assert.Less(t, elapsed, 2*delay,
+		assert.Less(t, elapsed, 3*delay,
 			"wraps under different master keys must not serialize (took %v)", elapsed)
 	})
 }

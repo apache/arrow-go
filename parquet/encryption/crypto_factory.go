@@ -108,13 +108,15 @@ type EncryptionConfiguration struct {
 // that KmsKeyRetriever (and parquet-cpp/pyarrow readers) resolve.
 //
 // In double wrapping mode the factory keeps one key encryption key per
-// (key access token, master key) and reuses it across files, matching
-// parquet-cpp's per-token KEK write cache: writing many files costs one
-// KEK wrap per master key per token. Entries expire after the cache
-// lifetime (DefaultKekCacheLifetime, tunable with WithKekCacheLifetime)
-// and are then wrapped again. Generation is serialized per cache entry,
-// so files under different master keys wrap concurrently; only writers
-// sharing a KEK wait for one another.
+// (KMS instance, key access token, master key) and reuses it across
+// files, so writing many files costs one KEK wrap per master key per
+// token — parquet-cpp's per-token KEK write cache, additionally scoped
+// to the KMS instance so wraps are never shared across deployments.
+// Entries expire after the cache lifetime (DefaultKekCacheLifetime,
+// tunable with WithKekCacheLifetime) and are then wrapped again.
+// Generation is serialized per cache entry, so files under different
+// master keys wrap concurrently; only writers sharing a KEK wait for
+// one another.
 type CryptoFactory struct {
 	clientFactory KmsClientFactory
 	kekLifetime   time.Duration
@@ -123,11 +125,14 @@ type CryptoFactory struct {
 	keks map[kekReuseKey]*cachedKek
 }
 
-// kekReuseKey identifies the KEK cached for a master key under one key
-// access token, as in parquet-cpp's two-level write cache.
+// kekReuseKey identifies the KEK cached for a master key under one KMS
+// instance and key access token: the token separates tenants the KMS
+// authenticates, the instance keeps wraps from being shared across KMS
+// deployments that may bind the same master key id to different keys.
 type kekReuseKey struct {
-	accessToken string
-	masterKeyID string
+	kmsInstanceID string
+	accessToken   string
+	masterKeyID   string
 }
 
 // cachedKek is a generated key encryption key together with its KMS-wrapped
@@ -184,6 +189,9 @@ func (f *CryptoFactory) FileEncryptionProperties(kmsCfg KmsConnectionConfig,
 	}
 	if bits != 128 && bits != 192 && bits != 256 {
 		return nil, fmt.Errorf("parquet: data key length must be 128, 192 or 256 bits, got %d", bits)
+	}
+	if cfg.Algorithm != parquet.AesGcm && cfg.Algorithm != parquet.AesCtr {
+		return nil, fmt.Errorf("parquet: encryption algorithm must be parquet.AesGcm or parquet.AesCtr, got %d", cfg.Algorithm)
 	}
 	keyBytes := bits / 8
 	if f.clientFactory == nil {
@@ -314,7 +322,11 @@ func (f *CryptoFactory) wrapDataKey(client KmsClient, kmsCfg KmsConnectionConfig
 // is never held across a KMS call.
 func (f *CryptoFactory) kekFor(client KmsClient, kmsCfg KmsConnectionConfig,
 	masterKeyID string) (*cachedKek, error) {
-	key := kekReuseKey{accessToken: kmsCfg.KeyAccessToken, masterKeyID: masterKeyID}
+	key := kekReuseKey{
+		kmsInstanceID: kmsCfg.KmsInstanceID,
+		accessToken:   kmsCfg.KeyAccessToken,
+		masterKeyID:   masterKeyID,
+	}
 
 	f.mu.Lock()
 	entry, ok := f.keks[key]

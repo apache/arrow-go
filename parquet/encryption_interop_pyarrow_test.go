@@ -397,6 +397,12 @@ func TestGoKmsWrittenReadByPyarrow(t *testing.T) {
 			ColumnKeys:      map[string][]string{"column_master": {"a", "b"}},
 			PlaintextFooter: true,
 		}},
+		{"ctr_256", encryption.EncryptionConfiguration{
+			FooterKeyID:       "footer_master",
+			ColumnKeys:        map[string][]string{"column_master": {"a", "b"}},
+			DataKeyLengthBits: 256,
+			Algorithm:         parquet.AesCtr,
+		}},
 	}
 
 	for _, config := range configs {
