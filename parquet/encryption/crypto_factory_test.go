@@ -19,10 +19,13 @@ package encryption_test
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -72,8 +75,9 @@ func TestFileEncryptionPropertiesUniformSingleWrapping(t *testing.T) {
 
 	props, err := factory.FileEncryptionProperties(testKmsConfig,
 		encryption.EncryptionConfiguration{
-			FooterKeyID:    "footer_master",
-			SingleWrapping: true,
+			FooterKeyID:       "footer_master",
+			UniformEncryption: true,
+			SingleWrapping:    true,
 		})
 	require.NoError(t, err)
 
@@ -108,7 +112,7 @@ func TestFileEncryptionPropertiesUniformSingleWrapping(t *testing.T) {
 func TestFileEncryptionPropertiesDoubleWrapping(t *testing.T) {
 	kms := &countingBase64KMS{}
 	factory := countingFactory(t, kms)
-	cfg := encryption.EncryptionConfiguration{FooterKeyID: "footer_master"}
+	cfg := encryption.EncryptionConfiguration{FooterKeyID: "footer_master", UniformEncryption: true}
 
 	props, err := factory.FileEncryptionProperties(testKmsConfig, cfg)
 	require.NoError(t, err)
@@ -234,6 +238,26 @@ func TestFileEncryptionPropertiesErrors(t *testing.T) {
 		encryption.EncryptionConfiguration{FooterKeyID: ""})
 	assert.ErrorContains(t, err, "footer key id")
 
+	// an empty ColumnKeys map is a configuration error, not an implicit
+	// uniform layout (the parquet-cpp rule)
+	_, err = factory.FileEncryptionProperties(testKmsConfig,
+		encryption.EncryptionConfiguration{FooterKeyID: "footer_master"})
+	assert.ErrorContains(t, err, "either column keys or uniform encryption")
+
+	_, err = factory.FileEncryptionProperties(testKmsConfig, encryption.EncryptionConfiguration{
+		FooterKeyID:       "footer_master",
+		UniformEncryption: true,
+		ColumnKeys:        map[string][]string{"column_master": {"a"}},
+	})
+	assert.ErrorContains(t, err, "cannot set both")
+
+	_, err = factory.FileEncryptionProperties(testKmsConfig, encryption.EncryptionConfiguration{
+		FooterKeyID:       "footer_master",
+		UniformEncryption: true,
+		DataKeyLengthBits: 100,
+	})
+	assert.ErrorContains(t, err, "128, 192 or 256 bits")
+
 	_, err = factory.FileEncryptionProperties(testKmsConfig, encryption.EncryptionConfiguration{
 		FooterKeyID: "footer_master",
 		ColumnKeys:  map[string][]string{"": {"a"}},
@@ -260,6 +284,7 @@ func TestFileEncryptionPropertiesErrors(t *testing.T) {
 	// parquet-cpp rejects the combination too
 	_, err = factory.FileEncryptionProperties(testKmsConfig, encryption.EncryptionConfiguration{
 		FooterKeyID:             "footer_master",
+		UniformEncryption:       true,
 		DisableAadPrefixStorage: true,
 	})
 	assert.ErrorContains(t, err, "DisableAadPrefixStorage")
@@ -367,4 +392,164 @@ func TestCryptoFactoryWriteReadRoundTrip(t *testing.T) {
 				"KMS unwrap calls while reading")
 		})
 	}
+}
+
+// slowKMS counts wraps like countingBase64KMS but takes delay per call, to
+// observe which KMS wraps the factory actually serializes.
+type slowKMS struct {
+	wraps atomic.Int32
+	delay time.Duration
+}
+
+func (k *slowKMS) WrapKey(key []byte, masterKeyID string) (string, error) {
+	k.wraps.Add(1)
+	time.Sleep(k.delay)
+	return base64.StdEncoding.EncodeToString(key), nil
+}
+
+func (k *slowKMS) UnwrapKey(wrappedKey string, masterKeyID string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(wrappedKey)
+}
+
+// The KEK write cache is per (key access token, master key), as in
+// parquet-cpp's two-level cache: two tokens over one master key get distinct
+// KEKs, and revisiting a token costs nothing new.
+func TestKekCacheIsPerAccessToken(t *testing.T) {
+	kms := &countingBase64KMS{}
+	factory := countingFactory(t, kms)
+	cfg := encryption.EncryptionConfiguration{FooterKeyID: "footer_master", UniformEncryption: true}
+
+	tokenA := testKmsConfig
+	tokenA.KeyAccessToken = "token-a"
+	tokenB := testKmsConfig
+	tokenB.KeyAccessToken = "token-b"
+
+	_, err := factory.FileEncryptionProperties(tokenA, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), kms.wraps.Load())
+
+	_, err = factory.FileEncryptionProperties(tokenB, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), kms.wraps.Load(), "second access token must get its own KEK")
+
+	_, err = factory.FileEncryptionProperties(tokenA, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), kms.wraps.Load(), "revisiting a token reuses its cached KEK")
+}
+
+// Cached KEKs expire after the cache lifetime and are wrapped again.
+func TestKekCacheEntryLifetime(t *testing.T) {
+	kms := &countingBase64KMS{}
+	factory := encryption.NewCryptoFactory(func(encryption.KmsConnectionConfig) (encryption.KmsClient, error) {
+		return kms, nil
+	}, encryption.WithKekCacheLifetime(50*time.Millisecond))
+	cfg := encryption.EncryptionConfiguration{FooterKeyID: "footer_master", UniformEncryption: true}
+
+	first, err := factory.FileEncryptionProperties(testKmsConfig, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), kms.wraps.Load())
+
+	time.Sleep(80 * time.Millisecond)
+
+	second, err := factory.FileEncryptionProperties(testKmsConfig, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), kms.wraps.Load(), "expired KEK must be wrapped again")
+	assert.NotEqual(t, first.FooterKeyMetadata(), second.FooterKeyMetadata(),
+		"the second file carries a fresh KEK")
+}
+
+// KEK generation locks per cache entry: files under different master keys
+// wrap concurrently, while files sharing a master key wait for one wrap.
+func TestKekWrappingLocksPerMasterKey(t *testing.T) {
+	const delay = 100 * time.Millisecond
+	newFactory := func(kms *slowKMS) *encryption.CryptoFactory {
+		return encryption.NewCryptoFactory(func(encryption.KmsConnectionConfig) (encryption.KmsClient, error) {
+			return kms, nil
+		})
+	}
+
+	t.Run("same master key serializes to one wrap", func(t *testing.T) {
+		kms := &slowKMS{delay: delay}
+		factory := newFactory(kms)
+		cfg := encryption.EncryptionConfiguration{FooterKeyID: "footer_master", UniformEncryption: true}
+
+		var wg sync.WaitGroup
+		metas := make([]string, 4)
+		for i := range metas {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				props, err := factory.FileEncryptionProperties(testKmsConfig, cfg)
+				if err == nil {
+					metas[i] = props.FooterKeyMetadata()
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		assert.Equal(t, int32(1), kms.wraps.Load(), "concurrent files sharing a master key get one KEK wrap")
+		firstMaterial, err := encryption.ParseKeyMetadata([]byte(metas[0]))
+		require.NoError(t, err)
+		for _, meta := range metas[1:] {
+			material, err := encryption.ParseKeyMetadata([]byte(meta))
+			require.NoError(t, err)
+			assert.Equal(t, firstMaterial.KeyEncryptionKeyID, material.KeyEncryptionKeyID,
+				"all files carry the same KEK")
+		}
+	})
+
+	t.Run("different master keys wrap concurrently", func(t *testing.T) {
+		kms := &slowKMS{delay: delay}
+		factory := newFactory(kms)
+
+		var wg sync.WaitGroup
+		start := time.Now()
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, err := factory.FileEncryptionProperties(testKmsConfig, encryption.EncryptionConfiguration{
+					FooterKeyID:       fmt.Sprintf("footer_master_%d", i),
+					UniformEncryption: true,
+				})
+				assert.NoError(t, err)
+			}(i)
+		}
+		wg.Wait()
+
+		assert.Equal(t, int32(4), kms.wraps.Load())
+		elapsed := time.Since(start)
+		assert.Less(t, elapsed, 2*delay,
+			"wraps under different master keys must not serialize (took %v)", elapsed)
+	})
+}
+
+// DataKeyLengthBits and Algorithm reach the generated properties: keys get
+// the configured length, the cipher is passed through, and the file still
+// reads back through the key retriever.
+func TestDataKeyLengthAndAlgorithm(t *testing.T) {
+	kms := &countingBase64KMS{}
+	factory := countingFactory(t, kms)
+
+	props, err := factory.FileEncryptionProperties(testKmsConfig, encryption.EncryptionConfiguration{
+		FooterKeyID:       "footer_master",
+		ColumnKeys:        map[string][]string{"column_master": {"double_field"}},
+		DataKeyLengthBits: 256,
+		Algorithm:         parquet.AesCtr,
+	})
+	require.NoError(t, err)
+	assert.Len(t, props.FooterKey(), 32)
+
+	assert.Equal(t, parquet.AesCtr, props.Algorithm().Algo)
+
+	path := filepath.Join(t.TempDir(), "kms_ctr256.parquet")
+	writeKmsEncryptedFile(t, path, props)
+
+	readProps := parquet.NewReaderProperties(memory.DefaultAllocator)
+	readProps.FileDecryptProps = parquet.NewFileDecryptionProperties(
+		parquet.WithKeyRetriever(encryption.NewKmsKeyRetriever(kms)))
+	fr, err := file.OpenParquetFile(path, false, file.WithReadProps(readProps))
+	require.NoError(t, err)
+	defer fr.Close()
+	assert.Equal(t, int64(3), fr.MetaData().NumRows)
 }

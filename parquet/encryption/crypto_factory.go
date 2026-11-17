@@ -25,17 +25,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/apache/arrow-go/v18/parquet"
 )
 
 // Key sizes for generated keys, matching the parquet-cpp/pyarrow
-// CryptoFactory (AES-128 data and key encryption keys).
+// CryptoFactory. Data key length is configurable via
+// EncryptionConfiguration.DataKeyLengthBits; the KEK is always AES-128,
+// as in parquet-cpp (kKekLength = 16).
 const (
-	dataKeySize = 16
 	kekSize     = 16
 	kekIDSize   = 16
+	defaultBits = 128
 )
+
+// DefaultKekCacheLifetime is how long a cached key encryption key is
+// reused before it is wrapped again, matching parquet-cpp's
+// cache_lifetime_seconds default of 600.
+const DefaultKekCacheLifetime = 10 * time.Minute
 
 // KmsClientFactory creates KmsClients for a connection configuration,
 // mirroring parquet-cpp's KmsClientFactory.
@@ -57,12 +65,24 @@ type EncryptionConfiguration struct {
 	// uniform encryption, the single key encrypting every column). Required.
 	FooterKeyID string
 
+	// UniformEncryption encrypts every column with the footer key. Either
+	// it or ColumnKeys must be set, never both — an empty ColumnKeys map
+	// is a configuration error, not an implicit uniform layout (the
+	// parquet-cpp rule).
+	UniformEncryption bool
+
 	// ColumnKeys maps a master key id to the column paths it encrypts; every
 	// listed column gets its own data encryption key wrapped by that master
-	// key. Columns not listed stay in plaintext. When empty (or nil) the
-	// configuration is uniform: all columns are encrypted with the footer
-	// key.
+	// key. Columns not listed stay in plaintext.
 	ColumnKeys map[string][]string
+
+	// DataKeyLengthBits is the data encryption key length in bits: 128,
+	// 192 or 256. Zero means 128, the parquet-cpp default.
+	DataKeyLengthBits int
+
+	// Algorithm picks the Parquet cipher: parquet.AesGcm (the zero value
+	// and the parquet-cpp default) or parquet.AesGcmCtr.
+	Algorithm parquet.Cipher
 
 	// SingleWrapping wraps each data encryption key directly with its master
 	// key. The default (false) is double wrapping (the parquet-cpp/pyarrow
@@ -88,39 +108,59 @@ type EncryptionConfiguration struct {
 // that KmsKeyRetriever (and parquet-cpp/pyarrow readers) resolve.
 //
 // In double wrapping mode the factory keeps one key encryption key per
-// (KMS instance, master key) and reuses it across files, so writing many
-// files costs one KEK wrap per master key instead of one per key slot,
-// matching the parquet-cpp/pyarrow CryptoFactory. The cache key does not
-// include the access token: configs sharing a KMS instance id also share
-// KEKs, which is safe when the KMS binds wraps to the master key.
+// (key access token, master key) and reuses it across files, matching
+// parquet-cpp's per-token KEK write cache: writing many files costs one
+// KEK wrap per master key per token. Entries expire after the cache
+// lifetime (DefaultKekCacheLifetime, tunable with WithKekCacheLifetime)
+// and are then wrapped again. Generation is serialized per cache entry,
+// so files under different master keys wrap concurrently; only writers
+// sharing a KEK wait for one another.
 type CryptoFactory struct {
 	clientFactory KmsClientFactory
+	kekLifetime   time.Duration
 
-	mu   sync.Mutex
-	keks map[kekReuseKey]cachedKek
+	mu   sync.Mutex // guards the keks map only
+	keks map[kekReuseKey]*cachedKek
 }
 
-// kekReuseKey identifies the KEK cached for a master key under one KMS
-// instance.
+// kekReuseKey identifies the KEK cached for a master key under one key
+// access token, as in parquet-cpp's two-level write cache.
 type kekReuseKey struct {
-	kmsInstanceID string
-	masterKeyID   string
+	accessToken string
+	masterKeyID string
 }
 
 // cachedKek is a generated key encryption key together with its KMS-wrapped
-// form, ready to be stamped into key material.
+// form, ready to be stamped into key material. Its mutex serializes
+// (re)generation so the KMS call is made once per entry.
 type cachedKek struct {
+	mu        sync.Mutex
+	createdAt time.Time
+
 	id      []byte // raw KEK id; also the AAD for local data key wrapping
 	kek     []byte
 	wrapped string // KmsClient-wrapped KEK
+}
+
+// A CryptoFactoryOption configures a CryptoFactory.
+type CryptoFactoryOption func(*CryptoFactory)
+
+// WithKekCacheLifetime sets how long cached key encryption keys are
+// reused before being wrapped again.
+func WithKekCacheLifetime(d time.Duration) CryptoFactoryOption {
+	return func(f *CryptoFactory) { f.kekLifetime = d }
 }
 
 // NewCryptoFactory returns a factory that creates KmsClients with
 // clientFactory. A single factory can encrypt many files; call
 // FileEncryptionProperties once per file, since the returned properties are
 // single use (the parquet writer wipes their keys).
-func NewCryptoFactory(clientFactory KmsClientFactory) *CryptoFactory {
-	return &CryptoFactory{clientFactory: clientFactory}
+func NewCryptoFactory(clientFactory KmsClientFactory, opts ...CryptoFactoryOption) *CryptoFactory {
+	f := &CryptoFactory{clientFactory: clientFactory}
+	for _, opt := range opts {
+		opt(f)
+	}
+	return f
 }
 
 // FileEncryptionProperties generates fresh data encryption keys for the
@@ -132,6 +172,20 @@ func (f *CryptoFactory) FileEncryptionProperties(kmsCfg KmsConnectionConfig,
 	if cfg.FooterKeyID == "" {
 		return nil, fmt.Errorf("parquet: encryption configuration needs a footer key id")
 	}
+	if cfg.UniformEncryption && len(cfg.ColumnKeys) > 0 {
+		return nil, fmt.Errorf("parquet: cannot set both uniform encryption and column keys")
+	}
+	if !cfg.UniformEncryption && len(cfg.ColumnKeys) == 0 {
+		return nil, fmt.Errorf("parquet: either column keys or uniform encryption must be set")
+	}
+	bits := cfg.DataKeyLengthBits
+	if bits == 0 {
+		bits = defaultBits
+	}
+	if bits != 128 && bits != 192 && bits != 256 {
+		return nil, fmt.Errorf("parquet: data key length must be 128, 192 or 256 bits, got %d", bits)
+	}
+	keyBytes := bits / 8
 	if f.clientFactory == nil {
 		return nil, fmt.Errorf("parquet: CryptoFactory needs a client factory, construct it with NewCryptoFactory")
 	}
@@ -143,7 +197,7 @@ func (f *CryptoFactory) FileEncryptionProperties(kmsCfg KmsConnectionConfig,
 		return nil, fmt.Errorf("parquet: create kms client: %w", err)
 	}
 
-	footerDEK, err := randomKey(dataKeySize)
+	footerDEK, err := randomKey(keyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +215,7 @@ func (f *CryptoFactory) FileEncryptionProperties(kmsCfg KmsConnectionConfig,
 
 	opts := []parquet.EncryptOption{
 		parquet.WithFooterKeyMetadata(string(footerJSON)),
+		parquet.WithAlg(cfg.Algorithm),
 	}
 
 	cols := parquet.ColumnPathToEncryptionPropsMap{}
@@ -172,7 +227,7 @@ func (f *CryptoFactory) FileEncryptionProperties(kmsCfg KmsConnectionConfig,
 			if path == "" {
 				return nil, fmt.Errorf("parquet: column keys for master key %q contain an empty column path", masterKeyID)
 			}
-			dek, err := randomKey(dataKeySize)
+			dek, err := randomKey(keyBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -252,35 +307,50 @@ func (f *CryptoFactory) wrapDataKey(client KmsClient, kmsCfg KmsConnectionConfig
 	return material, nil
 }
 
-// kekFor returns the cached key encryption key for masterKeyID, generating
-// and wrapping a fresh one on first use. The factory lock is held across the
-// KMS call so concurrent files sharing a master key get one wrap.
+// kekFor returns the cached key encryption key for masterKeyID under the
+// config's key access token, generating and wrapping a fresh one on first
+// use or once the cache lifetime has passed. Each cache entry has its own
+// lock, so only writers sharing a KEK wait for its KMS wrap; the map lock
+// is never held across a KMS call.
 func (f *CryptoFactory) kekFor(client KmsClient, kmsCfg KmsConnectionConfig,
-	masterKeyID string) (cachedKek, error) {
-	key := kekReuseKey{kmsInstanceID: kmsCfg.KmsInstanceID, masterKeyID: masterKeyID}
+	masterKeyID string) (*cachedKek, error) {
+	key := kekReuseKey{accessToken: kmsCfg.KeyAccessToken, masterKeyID: masterKeyID}
+
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	if kek, ok := f.keks[key]; ok {
-		return kek, nil
+	entry, ok := f.keks[key]
+	if !ok {
+		entry = &cachedKek{}
+		if f.keks == nil {
+			f.keks = make(map[kekReuseKey]*cachedKek)
+		}
+		f.keks[key] = entry
+	}
+	f.mu.Unlock()
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	lifetime := f.kekLifetime
+	if lifetime <= 0 {
+		lifetime = DefaultKekCacheLifetime
+	}
+	if !entry.createdAt.IsZero() && time.Since(entry.createdAt) <= lifetime {
+		return entry, nil
 	}
 	id, err := randomKey(kekIDSize)
 	if err != nil {
-		return cachedKek{}, err
+		return nil, err
 	}
 	kekKey, err := randomKey(kekSize)
 	if err != nil {
-		return cachedKek{}, err
+		return nil, err
 	}
 	wrapped, err := client.WrapKey(kekKey, masterKeyID)
 	if err != nil {
-		return cachedKek{}, fmt.Errorf("parquet: wrap key encryption key with master key %q: %w", masterKeyID, err)
+		return nil, fmt.Errorf("parquet: wrap key encryption key with master key %q: %w", masterKeyID, err)
 	}
-	kek := cachedKek{id: id, kek: kekKey, wrapped: wrapped}
-	if f.keks == nil {
-		f.keks = make(map[kekReuseKey]cachedKek)
-	}
-	f.keks[key] = kek
-	return kek, nil
+	entry.id, entry.kek, entry.wrapped = id, kekKey, wrapped
+	entry.createdAt = time.Now()
+	return entry, nil
 }
 
 // wrapKeyLocally is parquet-cpp's EncryptKeyLocally: AES-GCM with a
