@@ -363,6 +363,27 @@ func GetDictArrayData(mem memory.Allocator, valueType arrow.DataType, memoTable 
 			valuesz := offsets[len(offsets)-1] - offsets[0]
 			buffers[2].Resize(int(valuesz))
 			tbl.CopyValuesSubset(startOffset, buffers[2].Bytes())
+		case arrow.BINARY_VIEW, arrow.STRING_VIEW:
+			bldr := NewBinaryViewBuilder(mem)
+			defer bldr.Release()
+			bldr.dtype = valueType.(arrow.BinaryDataType)
+			bldr.Reserve(dictLen)
+			nullIdx, hasNull := tbl.GetNull()
+			outOfLine := 0
+			for i := startOffset; i < tbl.Size(); i++ {
+				if n := len(tbl.Value(i)); !arrow.IsViewInline(n) {
+					outOfLine += n
+				}
+			}
+			bldr.ReserveData(outOfLine)
+			for i := startOffset; i < tbl.Size(); i++ {
+				if hasNull && i == nullIdx {
+					bldr.AppendNull()
+				} else {
+					bldr.Append(tbl.Value(i))
+				}
+			}
+			return bldr.newData(), nil
 		default: // fixed size
 			bw := int(bitutil.BytesForBits(int64(valueType.(arrow.FixedWidthDataType).BitWidth())))
 			buffers[1].Resize(dictLen * bw)
