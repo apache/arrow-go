@@ -641,8 +641,8 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		defer buf.Release()
 		return NewFixedSizeBinaryScalar(buf, arr.DataType()), nil
 	case *array.FixedSizeList:
-		size := int(arr.DataType().(*arrow.FixedSizeListType).Len())
-		slice := array.NewSlice(arr.ListValues(), int64(idx*size), int64((idx+1)*size))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewFixedSizeListScalarWithType(slice, arr.DataType()), nil
 	case *array.Float16:
@@ -668,18 +668,18 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 	case *array.Uint64:
 		return NewUint64Scalar(arr.Value(idx)), nil
 	case *array.List:
-		offsets := arr.Offsets()
-		slice := array.NewSlice(arr.ListValues(), int64(offsets[idx]), int64(offsets[idx+1]))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewListScalar(slice), nil
 	case *array.LargeList:
-		offsets := arr.Offsets()
-		slice := array.NewSlice(arr.ListValues(), int64(offsets[idx]), int64(offsets[idx+1]))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewLargeListScalar(slice), nil
 	case *array.Map:
-		offsets := arr.Offsets()
-		slice := array.NewSlice(arr.ListValues(), int64(offsets[idx]), int64(offsets[idx+1]))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewMapScalar(slice), nil
 	case *array.MonthInterval:
