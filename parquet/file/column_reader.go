@@ -496,23 +496,15 @@ func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) err
 		c.curDecoder = decoder
 	} else {
 		switch encoding {
-		case format.Encoding_RLE:
-			if c.descr.PhysicalType() != parquet.Types.Boolean {
-				return fmt.Errorf("parquet: only boolean supports RLE encoding, got %s", c.descr.PhysicalType())
-			}
-			fallthrough
 		case format.Encoding_PLAIN,
+			format.Encoding_RLE,
 			format.Encoding_DELTA_BYTE_ARRAY,
 			format.Encoding_DELTA_LENGTH_BYTE_ARRAY,
 			format.Encoding_DELTA_BINARY_PACKED,
-			format.Encoding_BYTE_STREAM_SPLIT:
-			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
-			c.decoders[encoding] = c.curDecoder
-		case format.Encoding_ALP:
-			// Reject before building a decoder: the traits for a non-float type
-			// have no ALP case and panic on one.
-			if pt := c.descr.PhysicalType(); pt != parquet.Types.Float && pt != parquet.Types.Double {
-				return fmt.Errorf("parquet: only float and double support ALP encoding, got %s", pt)
+			format.Encoding_BYTE_STREAM_SPLIT,
+			format.Encoding_ALP:
+			if err := checkEncodingType(encoding, c.descr.PhysicalType()); err != nil {
+				return err
 			}
 			c.curDecoder = c.decoderTraits.Decoder(parquet.Encoding(encoding), c.descr, false, c.mem)
 			c.decoders[encoding] = c.curDecoder
@@ -525,6 +517,30 @@ func (c *columnChunkReader) initDataDecoder(page DataPage, lvlByteLen int64) err
 
 	c.curEncoding = encoding
 	return c.setDecoderData(page, lvlByteLen)
+}
+
+// checkEncodingType rejects a physical type that the encoding does not apply
+// to. The decoder traits panic on one, so this must run before they are called.
+func checkEncodingType(enc format.Encoding, pt parquet.Type) error {
+	var want string
+	switch {
+	case enc == format.Encoding_RLE && pt != parquet.Types.Boolean:
+		want = "BOOLEAN"
+	case enc == format.Encoding_ALP && pt != parquet.Types.Float && pt != parquet.Types.Double:
+		want = "FLOAT and DOUBLE"
+	case enc == format.Encoding_DELTA_BINARY_PACKED && pt != parquet.Types.Int32 && pt != parquet.Types.Int64:
+		want = "INT32 and INT64"
+	case enc == format.Encoding_DELTA_LENGTH_BYTE_ARRAY && pt != parquet.Types.ByteArray:
+		want = "BYTE_ARRAY"
+	case enc == format.Encoding_DELTA_BYTE_ARRAY && pt != parquet.Types.ByteArray && pt != parquet.Types.FixedLenByteArray:
+		want = "BYTE_ARRAY and FIXED_LEN_BYTE_ARRAY"
+	case enc == format.Encoding_BYTE_STREAM_SPLIT && pt != parquet.Types.Int32 && pt != parquet.Types.Int64 &&
+		pt != parquet.Types.Float && pt != parquet.Types.Double && pt != parquet.Types.FixedLenByteArray:
+		want = "INT32, INT64, FLOAT, DOUBLE and FIXED_LEN_BYTE_ARRAY"
+	default:
+		return nil
+	}
+	return fmt.Errorf("parquet: %s encoding only supports %s, got %s", enc, want, pt)
 }
 
 func (c *columnChunkReader) setDecoderData(page DataPage, lvlByteLen int64) error {
