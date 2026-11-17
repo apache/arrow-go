@@ -232,7 +232,7 @@ func getDecRounding[T decimal128.Num | decimal256.Num](mode RoundMode, opsImpl *
 	case RoundDown:
 		return func(val, remainder, pow10 T, _ int32) T {
 			val = opsImpl.Sub(val, remainder)
-			if opsImpl.Sign(val) < 0 {
+			if opsImpl.Sign(remainder) < 0 {
 				val = opsImpl.Sub(val, pow10)
 			}
 			return val
@@ -240,7 +240,7 @@ func getDecRounding[T decimal128.Num | decimal256.Num](mode RoundMode, opsImpl *
 	case RoundUp:
 		return func(val, remainder, pow10 T, _ int32) T {
 			val = opsImpl.Sub(val, remainder)
-			if opsImpl.Sign(val) > 0 && remainder != z {
+			if opsImpl.Sign(remainder) > 0 {
 				val = opsImpl.Add(val, pow10)
 			}
 			return val
@@ -264,7 +264,7 @@ func getDecRounding[T decimal128.Num | decimal256.Num](mode RoundMode, opsImpl *
 	case HalfDown:
 		return func(val, remainder, pow10 T, _ int32) T {
 			val = opsImpl.Sub(val, remainder)
-			if opsImpl.Sign(val) < 0 {
+			if opsImpl.Sign(remainder) < 0 {
 				val = opsImpl.Sub(val, pow10)
 			}
 			return val
@@ -272,7 +272,7 @@ func getDecRounding[T decimal128.Num | decimal256.Num](mode RoundMode, opsImpl *
 	case HalfUp:
 		return func(val, remainder, pow10 T, _ int32) T {
 			val = opsImpl.Sub(val, remainder)
-			if opsImpl.Sign(val) > 0 && remainder != z {
+			if opsImpl.Sign(remainder) > 0 {
 				val = opsImpl.Add(val, pow10)
 			}
 			return val
