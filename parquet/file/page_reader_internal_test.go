@@ -233,7 +233,7 @@ func TestEncryptedChunkWithoutDictionaryIsNotProbed(t *testing.T) {
 }
 
 // A seek to row 0 of an encrypted chunk with no dictionary page offset still
-// hands the dictionary page to the column reader, because no probe can supply it.
+// loads the dictionary before decoding the first data page.
 func TestSeekToRowZeroOnEncryptedChunkStartingWithDictionaryPage(t *testing.T) {
 	// RLE_DICTIONARY indices 0,1,1,0,0,0,1,0 at bit width 1
 	indices := []byte{1, 3, 0x46}
@@ -247,26 +247,37 @@ func TestSeekToRowZeroOnEncryptedChunkStartingWithDictionaryPage(t *testing.T) {
 	require.Equal(t, []int32{10, 20, 20, 10, 10, 10, 20, 10}, vals[:n])
 }
 
-// With data_page_offset equal to dictionary_page_offset a seek goes back to the
-// dictionary page, whose header takes the dictionary AAD again.
+// A seek goes back to the dictionary page, whose header takes the dictionary AAD
+// again, whether or not the chunk records a dictionary page offset.
 func TestReseekOnEncryptedChunkWithSharedPageOffset(t *testing.T) {
 	// RLE_DICTIONARY indices 0,1,1,0,0,0,1,0 at bit width 1
 	indices := []byte{1, 3, 0x46}
-	p := encryptedChunk(t, true, 8, dictPageSpec(10, 20), dataPageSpec(8, format.Encoding_RLE_DICTIONARY, indices))
-	p.baseOffset, p.dataOffset, p.dictOffset = 1, 1, 1
-	cr := requiredInt32Column(t, p)
-	t.Cleanup(func() { require.NoError(t, cr.Close()) })
-
 	want := []int32{10, 20, 20, 10, 10, 10, 20, 10}
-	vals := make([]int32, 8)
-	_, n, err := cr.ReadBatch(8, vals, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, want, vals[:n])
 
-	require.NoError(t, cr.SeekToRow(0))
-	_, n, err = cr.ReadBatch(8, vals, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, want, vals[:n])
+	for _, tc := range []struct {
+		name                               string
+		baseOffset, dataOffset, dictOffset int64
+	}{
+		{"SharedPageOffset", 1, 1, 1},
+		{"NoDictionaryOffset", 0, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := encryptedChunk(t, true, 8, dictPageSpec(10, 20), dataPageSpec(8, format.Encoding_RLE_DICTIONARY, indices))
+			p.baseOffset, p.dataOffset, p.dictOffset = tc.baseOffset, tc.dataOffset, tc.dictOffset
+			cr := requiredInt32Column(t, p)
+			t.Cleanup(func() { require.NoError(t, cr.Close()) })
+
+			vals := make([]int32, 8)
+			_, n, err := cr.ReadBatch(8, vals, nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, vals[:n])
+
+			require.NoError(t, cr.SeekToRow(0))
+			_, n, err = cr.ReadBatch(8, vals, nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, vals[:n])
+		})
+	}
 }
 
 type countingReader struct {
