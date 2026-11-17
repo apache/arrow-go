@@ -1004,17 +1004,20 @@ func getZeroBasedListViewOffsets[OffsetT int32 | int64](mem memory.Allocator, ar
 
 	valueOffsets = memory.NewResizableBuffer(mem)
 	valueOffsets.Resize(requiredBytes)
+
+	data := arr.Data()
+	offsets := arrow.GetData[OffsetT](data.Buffers()[1].Bytes())[data.Offset() : data.Offset()+arr.Len()]
+	sizes := arrow.GetData[OffsetT](data.Buffers()[2].Bytes())[data.Offset() : data.Offset()+arr.Len()]
 	if arr.Len() > 0 {
-		// max value of int32/int64 based on type
-		minOffset = (^OffsetT(0)) << ((8 * unsafe.Sizeof(minOffset)) - 1)
-		for i := 0; i < arr.Len(); i++ {
-			start, end := arr.ValueOffsets(i)
-			minOffset = utils.Min(minOffset, OffsetT(start))
-			maxEnd = utils.Max(maxEnd, OffsetT(end))
+		// as Arrow C++ does, include null and empty views so that every
+		// rebased offset stays within the sliced values
+		minOffset, maxEnd = offsets[0], offsets[0]+sizes[0]
+		for i := 1; i < len(offsets); i++ {
+			minOffset = min(minOffset, offsets[i])
+			maxEnd = max(maxEnd, offsets[i]+sizes[i])
 		}
 	}
 
-	offsets := arrow.GetData[OffsetT](arr.Data().Buffers()[1].Bytes())[arr.Data().Offset():]
 	destOffset := arrow.GetData[OffsetT](valueOffsets.Bytes())
 	for i := 0; i < arr.Len(); i++ {
 		destOffset[i] = offsets[i] - minOffset
