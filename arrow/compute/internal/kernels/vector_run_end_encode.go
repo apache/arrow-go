@@ -27,8 +27,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	dec "github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -500,7 +500,7 @@ func newEncoder[R RunEndsType](input *exec.ArraySpan) encoder {
 	case arrow.DECIMAL128:
 		return createEncoder[R, decimal128.Num](input)
 	case arrow.DECIMAL256:
-		return createEncoder[R, decimal256.Num](input)
+		return createEncoder[R, dec.Decimal256](input)
 	case arrow.INTERVAL_DAY_TIME:
 		return createEncoder[R, arrow.DayTimeInterval](input)
 	case arrow.INTERVAL_MONTH_DAY_NANO:

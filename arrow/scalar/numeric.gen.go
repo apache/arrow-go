@@ -25,8 +25,8 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 )
 
 type Int8 struct {
@@ -89,7 +89,7 @@ func (s *Int8) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type int8 to type %s", dt)
@@ -159,7 +159,7 @@ func (s *Int16) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type int16 to type %s", dt)
@@ -229,7 +229,7 @@ func (s *Int32) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type int32 to type %s", dt)
@@ -299,7 +299,7 @@ func (s *Int64) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type int64 to type %s", dt)
@@ -369,7 +369,7 @@ func (s *Uint8) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type uint8 to type %s", dt)
@@ -439,7 +439,7 @@ func (s *Uint16) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type uint16 to type %s", dt)
@@ -509,7 +509,7 @@ func (s *Uint32) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromI64(int64(s.Value)), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type uint32 to type %s", dt)
@@ -579,7 +579,7 @@ func (s *Uint64) CastTo(dt arrow.DataType) (Scalar, error) {
 	case *arrow.Decimal128Type:
 		return NewDecimal128Scalar(decimal128.FromU64(s.Value), dt), nil
 	case *arrow.Decimal256Type:
-		return NewDecimal256Scalar(decimal256.FromU64(s.Value), dt), nil
+		return NewDecimal256Scalar(decimal.Decimal256FromU64(s.Value), dt), nil
 	}
 
 	return nil, fmt.Errorf("invalid scalar cast from type uint64 to type %s", dt)
@@ -664,7 +664,7 @@ func (s *Float32) CastTo(dt arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal128Scalar(v, dt), nil
 	case *arrow.Decimal256Type:
-		v, err := decimal256.FromFloat32(s.Value, dt.Precision, dt.Scale)
+		v, err := decimal.Decimal256FromFloat32(s.Value, dt.Precision, dt.Scale)
 		if err != nil {
 			return nil, err
 		}
@@ -753,7 +753,7 @@ func (s *Float64) CastTo(dt arrow.DataType) (Scalar, error) {
 		}
 		return NewDecimal128Scalar(v, dt), nil
 	case *arrow.Decimal256Type:
-		v, err := decimal256.FromFloat64(s.Value, dt.Precision, dt.Scale)
+		v, err := decimal.Decimal256FromFloat(s.Value, dt.Precision, dt.Scale)
 		if err != nil {
 			return nil, err
 		}

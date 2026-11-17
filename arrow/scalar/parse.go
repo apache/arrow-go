@@ -28,7 +28,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -594,7 +593,7 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 				return NewDecimal128Scalar(n, ty), nil
 			case arrow.DECIMAL256:
 				ty := dt.(*arrow.Decimal256Type)
-				n, err := decimal256.FromString(v, ty.Precision, ty.Scale)
+				n, err := decimal.Decimal256FromString(v, ty.Precision, ty.Scale)
 				if err != nil {
 					return nil, err
 				}
@@ -677,7 +676,7 @@ func MakeScalarParam(val interface{}, dt arrow.DataType) (Scalar, error) {
 		}
 
 		return NewDecimal128Scalar(v, dt), nil
-	case decimal256.Num:
+	case decimal.Decimal256:
 		if _, ok := dt.(*arrow.Decimal256Type); !ok {
 			return nil, fmt.Errorf("mismatch cannot create decimal256 scalar with incorrect data type")
 		}
@@ -940,7 +939,7 @@ func ParseScalar(dt arrow.DataType, val string) (Scalar, error) {
 		return NewDecimal128Scalar(n, typ), nil
 	case arrow.DECIMAL256:
 		typ := dt.(*arrow.Decimal256Type)
-		n, err := decimal256.FromString(val, typ.Precision, typ.Scale)
+		n, err := decimal.Decimal256FromString(val, typ.Precision, typ.Scale)
 		if err != nil {
 			return nil, err
 		}

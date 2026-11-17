@@ -29,8 +29,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -1005,7 +1005,7 @@ func transferDecimalIntegerValues[In parquetInteger](values []In, dt arrow.Type)
 		data := make([]byte, arrow.Decimal256Traits.BytesRequired(len(values)))
 		out := arrow.Decimal256Traits.CastFromBytes(data)
 		for i, value := range values {
-			out[i] = decimal256.FromI64(int64(value))
+			out[i] = decimal.Decimal256FromI64(int64(value))
 		}
 		return data
 	}
@@ -1096,14 +1096,14 @@ func bigEndianToDecimal128(buf []byte) (decimal128.Num, error) {
 	return decimal128.New(hi, uint64(lo)), nil
 }
 
-func bigEndianToDecimal256(buf []byte) (decimal256.Num, error) {
+func bigEndianToDecimal256(buf []byte) (decimal.Decimal256, error) {
 	const (
 		minDecimalBytes = 1
 		maxDecimalBytes = 32
 	)
 
 	if len(buf) < minDecimalBytes || len(buf) > maxDecimalBytes {
-		return decimal256.Num{},
+		return decimal.Decimal256{},
 			fmt.Errorf("%w: length of byte array for bigEndianToDecimal256 was %d but must be between %d and %d",
 				arrow.ErrInvalid, len(buf), minDecimalBytes, maxDecimalBytes)
 	}
@@ -1139,7 +1139,7 @@ func bigEndianToDecimal256(buf []byte) (decimal256.Num, error) {
 		buf = buf[:len(buf)-wordLen]
 	}
 
-	return decimal256.New(littleEndian[3], littleEndian[2], littleEndian[1], littleEndian[0]), nil
+	return decimal.NewDecimal256(littleEndian[3], littleEndian[2], littleEndian[1], littleEndian[0]), nil
 }
 
 type varOrFixedBin interface {

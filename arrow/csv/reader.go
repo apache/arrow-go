@@ -31,8 +31,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -840,7 +840,7 @@ func (r *Reader) parseDecimal256(field array.Builder, str string, prec, scale in
 		return
 	}
 
-	val, err := decimal256.FromString(str, prec, scale)
+	val, err := decimal.Decimal256FromString(str, prec, scale)
 	if err != nil {
 		r.setParseError(err)
 		field.AppendNull()

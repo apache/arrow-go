@@ -26,8 +26,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	dec "github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
@@ -70,13 +70,13 @@ func CastIntegerToFloating(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.
 	return nil
 }
 
-type decimal[T decimal128.Num | decimal256.Num] interface {
+type decimal[T decimal128.Num | dec.Decimal256] interface {
 	Less(T) bool
 	Greater(T) bool
 	LowBits() uint64
 }
 
-func decimalToIntImpl[InT decimal128.Num | decimal256.Num, OutT arrow.IntType | arrow.UintType](allowOverflow bool, min, max InT, v decimal[InT], err *error) OutT {
+func decimalToIntImpl[InT decimal128.Num | dec.Decimal256, OutT arrow.IntType | arrow.UintType](allowOverflow bool, min, max InT, v decimal[InT], err *error) OutT {
 	// min and max are the inclusive bounds of the output integer type, so a
 	// value equal to max (e.g. math.MaxInt64) is in range. Use a strict
 	// greater-than check rather than >= so the endpoints are not rejected.
@@ -96,33 +96,33 @@ func CastDecimal256ToInteger[T arrow.IntType | arrow.UintType](ctx *exec.KernelC
 		ex         exec.ArrayKernelExec
 		minLowBits = uint64(MinOf[T]())
 		minHiBits  int64
-		max        = decimal256.FromU64(uint64(MaxOf[T]()))
+		max        = dec.Decimal256FromU64(uint64(MaxOf[T]()))
 	)
 
 	if MinOf[T]() < 0 {
 		minHiBits = -1
 	}
-	min := decimal256.New(uint64(minHiBits), uint64(minHiBits), uint64(minHiBits), minLowBits)
+	min := dec.NewDecimal256(uint64(minHiBits), uint64(minHiBits), uint64(minHiBits), minLowBits)
 	if opts.AllowDecimalTruncate {
 		if inScale < 0 {
-			ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) T {
+			ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) T {
 				v := val.IncreaseScaleBy(-inScale)
-				return decimalToIntImpl[decimal256.Num, T](opts.AllowIntOverflow, min, max, v, err)
+				return decimalToIntImpl[dec.Decimal256, T](opts.AllowIntOverflow, min, max, v, err)
 			})
 		} else {
-			ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) T {
+			ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) T {
 				v := val.ReduceScaleBy(inScale, true)
-				return decimalToIntImpl[decimal256.Num, T](opts.AllowIntOverflow, min, max, v, err)
+				return decimalToIntImpl[dec.Decimal256, T](opts.AllowIntOverflow, min, max, v, err)
 			})
 		}
 	} else {
-		ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) T {
+		ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) T {
 			v, e := val.Rescale(inScale, 0)
 			if e != nil {
 				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 				return T(0)
 			}
-			return decimalToIntImpl[decimal256.Num, T](opts.AllowIntOverflow, min, max, v, err)
+			return decimalToIntImpl[dec.Decimal256, T](opts.AllowIntOverflow, min, max, v, err)
 		})
 	}
 
@@ -188,14 +188,14 @@ func integerToDecimal128[T arrow.IntType | arrow.UintType](inType arrow.Type, ou
 }
 
 func integerToDecimal256[T arrow.IntType | arrow.UintType](inType arrow.Type, outScale int32) exec.ArrayKernelExec {
-	var getDecimal func(v T) decimal256.Num
+	var getDecimal func(v T) dec.Decimal256
 	switch inType {
 	case arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64:
-		getDecimal = func(v T) decimal256.Num { return decimal256.FromU64(uint64(v)) }
+		getDecimal = func(v T) dec.Decimal256 { return dec.Decimal256FromU64(uint64(v)) }
 	default:
-		getDecimal = func(v T) decimal256.Num { return decimal256.FromI64(int64(v)) }
+		getDecimal = func(v T) dec.Decimal256 { return dec.Decimal256FromI64(int64(v)) }
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val T, err *error) decimal256.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val T, err *error) dec.Decimal256 {
 		out, e := getDecimal(val).Rescale(0, outScale)
 		if e != nil {
 			*err = e
@@ -204,7 +204,7 @@ func integerToDecimal256[T arrow.IntType | arrow.UintType](inType arrow.Type, ou
 	})
 }
 
-func CastIntegerToDecimal[OutT decimal128.Num | decimal256.Num, Arg0 arrow.IntType | arrow.UintType](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+func CastIntegerToDecimal[OutT decimal128.Num | dec.Decimal256, Arg0 arrow.IntType | arrow.UintType](ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	var (
 		precision, scale int32
 		executor         exec.ArrayKernelExec
@@ -238,7 +238,7 @@ func CastIntegerToDecimal[OutT decimal128.Num | decimal256.Num, Arg0 arrow.IntTy
 	return executor(ctx, batch, out)
 }
 
-func getCastIntToDecimal[T decimal128.Num | decimal256.Num](inType arrow.Type) exec.ArrayKernelExec {
+func getCastIntToDecimal[T decimal128.Num | dec.Decimal256](inType arrow.Type) exec.ArrayKernelExec {
 	switch inType {
 	case arrow.UINT8:
 		return CastIntegerToDecimal[T, uint8]
@@ -263,11 +263,11 @@ func getCastIntToDecimal[T decimal128.Num | decimal256.Num](inType arrow.Type) e
 
 func unsafeUpscaleDecimal256Out(inputType arrow.Type, by int32) exec.ArrayKernelExec {
 	if inputType == arrow.DECIMAL128 {
-		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) decimal256.Num {
-			return decimal256.FromDecimal128(val).IncreaseScaleBy(by)
+		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) dec.Decimal256 {
+			return dec.Decimal256FromDecimal128(val).IncreaseScaleBy(by)
 		})
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal256.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) dec.Decimal256 {
 		return val.IncreaseScaleBy(by)
 	})
 }
@@ -278,7 +278,7 @@ func unsafeUpscaleDecimal128Out(inputType arrow.Type, by int32) exec.ArrayKernel
 			return val.IncreaseScaleBy(by)
 		})
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal128.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) decimal128.Num {
 		vals := val.IncreaseScaleBy(by).Array()
 		return decimal128.New(int64(vals[1]), vals[0])
 	})
@@ -286,11 +286,11 @@ func unsafeUpscaleDecimal128Out(inputType arrow.Type, by int32) exec.ArrayKernel
 
 func unsafeDownscaleDecimal256Out(inputType arrow.Type, by int32) exec.ArrayKernelExec {
 	if inputType == arrow.DECIMAL128 {
-		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) decimal256.Num {
-			return decimal256.FromDecimal128(val).ReduceScaleBy(by, false)
+		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) dec.Decimal256 {
+			return dec.Decimal256FromDecimal128(val).ReduceScaleBy(by, false)
 		})
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal256.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) dec.Decimal256 {
 		return val.ReduceScaleBy(by, false)
 	})
 }
@@ -301,7 +301,7 @@ func unsafeDownscaleDecimal128Out(inputType arrow.Type, by int32) exec.ArrayKern
 			return val.ReduceScaleBy(by, false)
 		})
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal128.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) decimal128.Num {
 		vals := val.ReduceScaleBy(by, false).Array()
 		return decimal128.New(int64(vals[1]), vals[0])
 	})
@@ -309,11 +309,11 @@ func unsafeDownscaleDecimal128Out(inputType arrow.Type, by int32) exec.ArrayKern
 
 func safeRescaleDecimal256Out(inputType arrow.Type, outScale, outPrecision, inScale int32) exec.ArrayKernelExec {
 	if inputType == arrow.DECIMAL128 {
-		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) decimal256.Num {
-			out, e := decimal256.FromDecimal128(val).Rescale(inScale, outScale)
+		return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) dec.Decimal256 {
+			out, e := dec.Decimal256FromDecimal128(val).Rescale(inScale, outScale)
 			if e != nil {
 				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
-				return decimal256.Num{}
+				return dec.Decimal256{}
 			}
 
 			if out.FitsInPrecision(outPrecision) {
@@ -321,14 +321,14 @@ func safeRescaleDecimal256Out(inputType arrow.Type, outScale, outPrecision, inSc
 			}
 
 			*err = fmt.Errorf("%w: decimal value does not fit in precision", arrow.ErrInvalid)
-			return decimal256.Num{}
+			return dec.Decimal256{}
 		})
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal256.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) dec.Decimal256 {
 		out, e := val.Rescale(inScale, outScale)
 		if e != nil {
 			*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
-			return decimal256.Num{}
+			return dec.Decimal256{}
 		}
 
 		if out.FitsInPrecision(outPrecision) {
@@ -336,7 +336,7 @@ func safeRescaleDecimal256Out(inputType arrow.Type, outScale, outPrecision, inSc
 		}
 
 		*err = fmt.Errorf("%w: decimal value does not fit in precision", arrow.ErrInvalid)
-		return decimal256.Num{}
+		return dec.Decimal256{}
 	})
 }
 
@@ -357,7 +357,7 @@ func safeRescaleDecimal128Out(inputType arrow.Type, outScale, outPrecision, inSc
 			return decimal128.Num{}
 		})
 	}
-	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal256.Num, err *error) decimal128.Num {
+	return ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) decimal128.Num {
 		out, e := val.Rescale(inScale, outScale)
 		if e != nil {
 			*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
@@ -453,8 +453,8 @@ func CastFloat32ToDecimal(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 		})
 	case *arrow.Decimal256Type:
 		prec, scale = dt.Precision, dt.Scale
-		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v float32, err *error) decimal256.Num {
-			out, e := decimal256.FromFloat32(v, prec, scale)
+		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v float32, err *error) dec.Decimal256 {
+			out, e := dec.Decimal256FromFloat32(v, prec, scale)
 			if e == nil {
 				return out
 			}
@@ -462,7 +462,7 @@ func CastFloat32ToDecimal(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 			if !allowTrunc {
 				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 			}
-			return decimal256.Num{}
+			return dec.Decimal256{}
 		})
 	}
 
@@ -494,8 +494,8 @@ func CastFloat64ToDecimal(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 		})
 	case *arrow.Decimal256Type:
 		prec, scale = dt.Precision, dt.Scale
-		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v float64, err *error) decimal256.Num {
-			out, e := decimal256.FromFloat64(v, prec, scale)
+		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v float64, err *error) dec.Decimal256 {
+			out, e := dec.Decimal256FromFloat(v, prec, scale)
 			if e == nil {
 				return out
 			}
@@ -503,7 +503,7 @@ func CastFloat64ToDecimal(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 			if !allowTrunc {
 				*err = fmt.Errorf("%w: %s", arrow.ErrInvalid, e)
 			}
-			return decimal256.Num{}
+			return dec.Decimal256{}
 		})
 	}
 
@@ -523,7 +523,7 @@ func CastDecimalToFloat16(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 		})
 	case *arrow.Decimal256Type:
 		scale := dt.Scale
-		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal256.Num, err *error) float16.Num {
+		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v dec.Decimal256, err *error) float16.Num {
 			return float16.New(v.ToFloat32(scale))
 		})
 	}
@@ -544,7 +544,7 @@ func CastDecimalToFloating[OutT constraints.Float](ctx *exec.KernelCtx, batch *e
 		})
 	case *arrow.Decimal256Type:
 		scale := dt.Scale
-		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v decimal256.Num, err *error) OutT {
+		executor = ScalarUnaryNotNull(func(_ *exec.KernelCtx, v dec.Decimal256, err *error) OutT {
 			return OutT(v.ToFloat64(scale))
 		})
 	}
@@ -957,7 +957,7 @@ func GetCastToDecimal256() []exec.ScalarKernel {
 	for _, inTy := range intTypes {
 		kernels = append(kernels, exec.NewScalarKernel(
 			[]exec.InputType{exec.NewExactInput(inTy)}, outputType,
-			getCastIntToDecimal[decimal256.Num](inTy.ID()), nil))
+			getCastIntToDecimal[dec.Decimal256](inTy.ID()), nil))
 	}
 
 	kernels = append(kernels, exec.NewScalarKernel(

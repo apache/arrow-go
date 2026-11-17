@@ -23,15 +23,15 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"golang.org/x/exp/constraints"
 )
 
 type primitives interface {
 	bool | float16.Num | decimal128.Num |
-		decimal256.Num | constraints.Integer | constraints.Float |
+		decimal.Decimal256 | constraints.Integer | constraints.Float |
 		arrow.DayTimeInterval | arrow.MonthInterval | arrow.MonthDayNanoInterval
 }
 

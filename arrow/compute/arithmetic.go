@@ -25,8 +25,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
 
@@ -1004,7 +1004,7 @@ func RegisterScalarArithmetic(reg FunctionRegistry) {
 	floorFn.AddNewKernel([]exec.InputType{exec.NewIDInput(arrow.DECIMAL128)},
 		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal128.Num](kernels.RoundDown), nil)
 	floorFn.AddNewKernel([]exec.InputType{exec.NewIDInput(arrow.DECIMAL256)},
-		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal256.Num](kernels.RoundDown), nil)
+		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal.Decimal256](kernels.RoundDown), nil)
 	reg.AddFunction(floorFn, false)
 
 	ceilFn := &arithmeticIntegerToFloatingPointFunc{arithmeticFunction{*NewScalarFunction("ceil", Unary(), ceilDoc), decPromoteNone}}
@@ -1017,7 +1017,7 @@ func RegisterScalarArithmetic(reg FunctionRegistry) {
 	ceilFn.AddNewKernel([]exec.InputType{exec.NewIDInput(arrow.DECIMAL128)},
 		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal128.Num](kernels.RoundUp), nil)
 	ceilFn.AddNewKernel([]exec.InputType{exec.NewIDInput(arrow.DECIMAL256)},
-		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal256.Num](kernels.RoundUp), nil)
+		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal.Decimal256](kernels.RoundUp), nil)
 	reg.AddFunction(ceilFn, false)
 
 	truncFn := &arithmeticIntegerToFloatingPointFunc{arithmeticFunction{*NewScalarFunction("trunc", Unary(), truncDoc), decPromoteNone}}
@@ -1030,7 +1030,7 @@ func RegisterScalarArithmetic(reg FunctionRegistry) {
 	truncFn.AddNewKernel([]exec.InputType{exec.NewIDInput(arrow.DECIMAL128)},
 		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal128.Num](kernels.TowardsZero), nil)
 	truncFn.AddNewKernel([]exec.InputType{exec.NewIDInput(arrow.DECIMAL256)},
-		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal256.Num](kernels.TowardsZero), nil)
+		kernels.OutputFirstType, kernels.FixedRoundDecimalExec[decimal.Decimal256](kernels.TowardsZero), nil)
 	reg.AddFunction(truncFn, false)
 
 	roundFn := &arithmeticIntegerToFloatingPointFunc{arithmeticFunction{*NewScalarFunction("round", Unary(), roundDoc), decPromoteNone}}

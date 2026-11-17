@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -88,7 +89,7 @@ func decimal128FitsInt64(val decimal128.Num) bool {
 	}
 }
 
-func decimal256FitsInt32(val decimal256.Num) bool {
+func decimal256FitsInt32(val decimal.Decimal256) bool {
 	words := val.Array()
 	switch {
 	case words[1] == 0 && words[2] == 0 && words[3] == 0:
@@ -100,7 +101,7 @@ func decimal256FitsInt32(val decimal256.Num) bool {
 	}
 }
 
-func decimal256FitsInt64(val decimal256.Num) bool {
+func decimal256FitsInt64(val decimal.Decimal256) bool {
 	words := val.Array()
 	switch {
 	case words[1] == 0 && words[2] == 0 && words[3] == 0:
@@ -131,7 +132,7 @@ func decimal128FitsTargetPrecision(val decimal128.Num, precision int32) bool {
 	return val.FitsInPrecision(precision)
 }
 
-func decimal256FitsTargetPrecision(val decimal256.Num, precision int32) bool {
+func decimal256FitsTargetPrecision(val decimal.Decimal256, precision int32) bool {
 	if precision <= 0 || precision > decimal256.MaxPrecision {
 		return false
 	}
@@ -796,7 +797,7 @@ func writeDenseArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, leafArr 
 			ctx.dataBuffer.ResizeNoShrink((leafArr.Len() - leafArr.NullN()) * dt.BitWidth())
 			scratch := ctx.dataBuffer.Bytes()
 			typeLen := wr.Descr().TypeLength()
-			fixDecimalEndianness := func(in decimal256.Num) parquet.FixedLenByteArray {
+			fixDecimalEndianness := func(in decimal.Decimal256) parquet.FixedLenByteArray {
 				out := scratch[offset : offset+typeLen]
 				vals := in.Array()
 				binary.BigEndian.PutUint64(scratch, vals[3])

@@ -25,8 +25,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	dec "github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"golang.org/x/exp/constraints"
@@ -719,7 +719,7 @@ func SubtractDate32(op ArithmeticOp) exec.ArrayKernelExec {
 	panic("invalid op for subtractDate32")
 }
 
-type decOps[T decimal128.Num | decimal256.Num] struct {
+type decOps[T decimal128.Num | dec.Decimal256] struct {
 	Add  func(T, T) T
 	Sub  func(T, T) T
 	Div  func(T, T) T
@@ -742,20 +742,20 @@ var dec128Ops = decOps[decimal128.Num]{
 	Sign: func(a decimal128.Num) int { return a.Sign() },
 }
 
-var dec256Ops = decOps[decimal256.Num]{
-	Add: func(a, b decimal256.Num) decimal256.Num { return a.Add(b) },
-	Sub: func(a, b decimal256.Num) decimal256.Num { return a.Sub(b) },
-	Mul: func(a, b decimal256.Num) decimal256.Num { return a.Mul(b) },
-	Div: func(a, b decimal256.Num) decimal256.Num {
+var dec256Ops = decOps[dec.Decimal256]{
+	Add: func(a, b dec.Decimal256) dec.Decimal256 { return a.Add(b) },
+	Sub: func(a, b dec.Decimal256) dec.Decimal256 { return a.Sub(b) },
+	Mul: func(a, b dec.Decimal256) dec.Decimal256 { return a.Mul(b) },
+	Div: func(a, b dec.Decimal256) dec.Decimal256 {
 		a, _ = a.Div(b)
 		return a
 	},
-	Abs:  func(a decimal256.Num) decimal256.Num { return a.Abs() },
-	Neg:  func(a decimal256.Num) decimal256.Num { return a.Negate() },
-	Sign: func(a decimal256.Num) int { return a.Sign() },
+	Abs:  func(a dec.Decimal256) dec.Decimal256 { return a.Abs() },
+	Neg:  func(a dec.Decimal256) dec.Decimal256 { return a.Negate() },
+	Sign: func(a dec.Decimal256) int { return a.Sign() },
 }
 
-func getArithmeticOpDecimalImpl[T decimal128.Num | decimal256.Num](op ArithmeticOp, fns decOps[T]) exec.ArrayKernelExec {
+func getArithmeticOpDecimalImpl[T decimal128.Num | dec.Decimal256](op ArithmeticOp, fns decOps[T]) exec.ArrayKernelExec {
 	if op >= OpAddChecked {
 		op -= OpAddChecked // decimal128/256 checked is the same as unchecked
 	}
@@ -799,12 +799,12 @@ func getArithmeticOpDecimalImpl[T decimal128.Num | decimal256.Num](op Arithmetic
 	return nil
 }
 
-func getArithmeticDecimal[T decimal128.Num | decimal256.Num](op ArithmeticOp) exec.ArrayKernelExec {
+func getArithmeticDecimal[T decimal128.Num | dec.Decimal256](op ArithmeticOp) exec.ArrayKernelExec {
 	var def T
 	switch any(def).(type) {
 	case decimal128.Num:
 		return getArithmeticOpDecimalImpl(op, dec128Ops)
-	case decimal256.Num:
+	case dec.Decimal256:
 		return getArithmeticOpDecimalImpl(op, dec256Ops)
 	}
 	panic("should never get here")

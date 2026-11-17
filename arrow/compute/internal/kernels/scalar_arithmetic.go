@@ -25,8 +25,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	dec "github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 )
@@ -76,7 +76,7 @@ func GetDecimalBinaryKernels(op ArithmeticOp) []exec.ScalarKernel {
 	}
 
 	in128, in256 := exec.NewIDInput(arrow.DECIMAL128), exec.NewIDInput(arrow.DECIMAL256)
-	exec128, exec256 := getArithmeticDecimal[decimal128.Num](op), getArithmeticDecimal[decimal256.Num](op)
+	exec128, exec256 := getArithmeticDecimal[decimal128.Num](op), getArithmeticDecimal[dec.Decimal256](op)
 	return []exec.ScalarKernel{
 		exec.NewScalarKernel([]exec.InputType{in128, in128}, outType, exec128, nil),
 		exec.NewScalarKernel([]exec.InputType{in256, in256}, outType, exec256, nil),
@@ -99,7 +99,7 @@ func GetDecimalUnaryKernels(op ArithmeticOp) []exec.ScalarKernel {
 	in128 := exec.NewIDInput(arrow.DECIMAL128)
 	in256 := exec.NewIDInput(arrow.DECIMAL256)
 
-	exec128, exec256 := getArithmeticDecimal[decimal128.Num](op), getArithmeticDecimal[decimal256.Num](op)
+	exec128, exec256 := getArithmeticDecimal[decimal128.Num](op), getArithmeticDecimal[dec.Decimal256](op)
 	return []exec.ScalarKernel{
 		exec.NewScalarKernel([]exec.InputType{in128}, outType, exec128, nil),
 		exec.NewScalarKernel([]exec.InputType{in256}, outType, exec256, nil),
@@ -175,7 +175,7 @@ func GetArithmeticUnaryFixedIntOutKernels(otype arrow.DataType, op ArithmeticOp)
 	kernels = append(kernels, exec.NewScalarKernel(
 		[]exec.InputType{exec.NewIDInput(arrow.DECIMAL256)},
 		exec.NewOutputType(arrow.PrimitiveTypes.Int64),
-		getArithmeticDecimal[decimal256.Num](op), nil))
+		getArithmeticDecimal[dec.Decimal256](op), nil))
 
 	return append(kernels, NullExecKernel(1))
 }

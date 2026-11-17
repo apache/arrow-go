@@ -25,7 +25,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
@@ -361,7 +360,7 @@ func appendDecimalValue(b array.Builder, v reflect.Value) error {
 		}
 		tb.Append(n)
 	case *array.Decimal256Builder:
-		n, ok := reflect.TypeAssert[decimal256.Num](v)
+		n, ok := reflect.TypeAssert[decimal.Decimal256](v)
 		if !ok {
 			return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
