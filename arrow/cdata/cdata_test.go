@@ -1077,6 +1077,48 @@ func TestEmptyListExport(t *testing.T) {
 	assert.NotNil(t, out.children)
 }
 
+func TestSlicedStructRoundTrip(t *testing.T) {
+	for _, childType := range []arrow.DataType{
+		arrow.PrimitiveTypes.Int64,
+		arrow.StructOf(arrow.Field{Name: "x", Type: arrow.PrimitiveTypes.Int64, Nullable: true}),
+	} {
+		for _, childOffset := range []int64{0, 1} {
+			for _, parentOffset := range []int64{0, 1, 4} {
+				t.Run(fmt.Sprintf("%s/child=%d/parent=%d", childType, childOffset, parentOffset), func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+					defer mem.AssertSize(t, 0)
+					json := `[101,202,null,404,505,606]`
+					if childType.ID() == arrow.STRUCT {
+						json = `[{"x":101},{"x":202},null,{"x":404},{"x":505},{"x":606}]`
+					}
+					values, _, err := array.FromJSON(mem, childType, strings.NewReader(json))
+					require.NoError(t, err)
+					defer values.Release()
+					child := array.NewSlice(values, childOffset, int64(values.Len()))
+					defer child.Release()
+					validity := memory.NewBufferBytes([]byte{0b00101101})
+					defer validity.Release()
+					parent, err := array.NewStructArrayWithNulls([]arrow.Array{child}, []string{"value"}, validity, array.UnknownNullCount, 0)
+					require.NoError(t, err)
+					defer parent.Release()
+					sliced := array.NewSlice(parent, parentOffset, 4)
+					defer sliced.Release()
+					var data CArrowArray
+					var schema CArrowSchema
+					ExportArrowArray(sliced, &data, &schema)
+					defer ReleaseCArrowArray(&data)
+					defer ReleaseCArrowSchema(&schema)
+					_, imported, err := ImportCArray(&data, &schema)
+					require.NoError(t, err)
+					defer imported.Release()
+					require.NoError(t, imported.(*array.Struct).ValidateFull())
+					assert.True(t, array.Equal(sliced, imported), "expected %s; got %s", sliced, imported)
+				})
+			}
+		}
+	}
+}
+
 func TestZeroSizeFixedSizeListRoundTrip(t *testing.T) {
 	for _, element := range []arrow.DataType{arrow.Null, arrow.PrimitiveTypes.Int64, arrow.ListOf(arrow.BinaryTypes.String)} {
 		t.Run(element.String(), func(t *testing.T) {

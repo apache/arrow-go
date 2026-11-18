@@ -427,7 +427,11 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 		childPtrs := allocateArrowArrayPtrArr(arr.NumField())
 		children := allocateArrowArrayArr(arr.NumField())
 		for i := 0; i < arr.NumField(); i++ {
-			exportArray(arr.Field(i), &children[i], nil)
+			// Field(i) already applies the parent slice. C Data consumers apply
+			// the exported parent offset, so retain the original child data.
+			child := array.MakeFromData(arr.Data().Children()[i])
+			exportArray(child, &children[i], nil)
+			child.Release()
 			childPtrs[i] = &children[i]
 		}
 		out.children = (**CArrowArray)(unsafe.Pointer(&childPtrs[0]))
