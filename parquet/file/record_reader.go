@@ -567,6 +567,9 @@ func (rr *recordReader) ResetValues() {
 
 func (rr *recordReader) SeekToRow(recordIdx int64) error {
 	err := rr.recordReaderImpl.SeekToRow(recordIdx)
+	if errors.Is(err, errSeekRowOutOfRange) {
+		return err
+	}
 
 	rr.atRecStart = true
 	rr.recordsRead = 0

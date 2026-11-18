@@ -1360,6 +1360,41 @@ func TestSeekToRowToCorruptPageStopsReader(t *testing.T) {
 	assert.Equal(t, []int32{25, 26, 27, 28, 29}, vals[:n])
 }
 
+func TestSeekToRowOutOfRangeKeepsReader(t *testing.T) {
+	for _, row := range []int64{1000, -1} {
+		t.Run(fmt.Sprintf("row %d", row), func(t *testing.T) {
+			icr := newCorruptPageReader(t)
+
+			vals := make([]int32, 30)
+			_, n, err := icr.ReadBatch(5, vals, nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, []int32{0, 1, 2, 3, 4}, vals[:n])
+
+			require.Error(t, icr.SeekToRow(row))
+			assert.True(t, icr.HasNext())
+
+			_, n, err = icr.ReadBatch(3, vals, nil, nil)
+			require.NoError(t, err)
+			assert.Equal(t, []int32{5, 6, 7}, vals[:n])
+		})
+	}
+
+	t.Run("a stopped reader stays stopped", func(t *testing.T) {
+		icr := newCorruptPageReader(t)
+
+		vals := make([]int32, 30)
+		_, _, err := icr.ReadBatch(int64(len(vals)), vals, nil, nil)
+		require.ErrorContains(t, err, "invalid checksum")
+
+		require.ErrorContains(t, icr.SeekToRow(1000), "cannot seek column reader to row index 1000")
+		assert.False(t, icr.HasNext())
+
+		total, _, err2 := icr.ReadBatch(5, vals, nil, nil)
+		assert.Equal(t, err, err2)
+		assert.Zero(t, total)
+	})
+}
+
 type closeErrorPageReader struct {
 	file.PageReader
 }
@@ -1400,6 +1435,30 @@ func TestRecordReaderStopsAfterPageReaderFailure(t *testing.T) {
 			assert.Equal(t, failure, err)
 		})
 	}
+}
+
+// The record reader buffers a whole page of levels, so an out of range seek must
+// not drop the ones it has not consumed yet.
+func TestRecordReaderSeekToRowOutOfRangeKeepsLevels(t *testing.T) {
+	rdr, mem := newCorruptPageFile(t, parquet.Repetitions.Optional)
+	pages, err := rdr.RowGroup(0).GetColumnPageReader(0)
+	require.NoError(t, err)
+	rr := file.NewRecordReader(rdr.MetaData().Schema.Column(0),
+		file.LevelInfo{NullSlotUsage: 1, DefLevel: 1}, arrow.PrimitiveTypes.Int32, mem, rdr.BufferPool()).(file.RecordReaderWithError)
+	defer rr.Release()
+	rr.SetPageReader(pages)
+	require.NoError(t, rr.Reserve(10))
+
+	n, err := rr.ReadRecords(5)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, n)
+
+	require.Error(t, rr.SeekToRow(1000))
+
+	n, err = rr.ReadRecords(5)
+	require.NoError(t, err)
+	assert.EqualValues(t, 5, n)
+	assert.Equal(t, []int32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, arrow.Int32Traits.CastFromBytes(rr.Values())[:10])
 }
 
 // rleLevels is a V1 definition level block holding n defined levels.

@@ -645,11 +645,15 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 // reader will discard values until it reaches the desired row index according
 // to the definition and repetition levels.
 //
-// If the seek fails, the reader stays stopped and returns the error until a
-// later SeekToRow succeeds.
+// If the page reader rejects rowIdx as outside the column chunk, SeekToRow
+// returns that error and leaves the reader as it was. If the seek fails after
+// the page reader has moved, the reader stays stopped and returns the error
+// until a later SeekToRow succeeds.
 func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 	if err := c.pager().SeekToPageWithRow(rowIdx); err != nil {
-		c.err = err
+		if !errors.Is(err, errSeekRowOutOfRange) {
+			c.err = err
+		}
 		return err
 	}
 
