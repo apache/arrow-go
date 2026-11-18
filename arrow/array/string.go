@@ -520,9 +520,9 @@ func (a *StringView) Value(i int) string {
 	if s.IsInline() {
 		return s.InlineString()
 	}
-	start := s.BufferOffset()
+	start := int(s.BufferOffset())
 	buf := a.dataBuffers[s.BufferIndex()]
-	value := buf.Bytes()[start : start+int32(s.Len())]
+	value := buf.Bytes()[start : start+s.Len()]
 	return *(*string)(unsafe.Pointer(&value))
 }
 

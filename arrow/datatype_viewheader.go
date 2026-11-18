@@ -126,8 +126,8 @@ func (sh *ViewHeader) Equals(buffers []*memory.Buffer, other *ViewHeader, otherB
 }
 
 func (sh *ViewHeader) getBufferBytes(buffers []*memory.Buffer) []byte {
-	offset := sh.BufferOffset()
-	return buffers[sh.BufferIndex()].Bytes()[offset : offset+sh.size]
+	offset := int(sh.BufferOffset())
+	return buffers[sh.BufferIndex()].Bytes()[offset : offset+sh.Len()]
 }
 
 func (sh *ViewHeader) inlinedAsInt64() int64 {
