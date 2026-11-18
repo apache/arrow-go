@@ -205,6 +205,22 @@ func TestStringValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "not monotonically non-decreasing")
 	})
 
+	t.Run("intermediate offset past the data buffer passes Validate but fails ValidateFull", func(t *testing.T) {
+		arr := makeStringArrayRaw(t, []int32{0, 100, 5}, "hello", 2, 0)
+		assert.NoError(t, arr.Validate())
+		var err error
+		require.NotPanics(t, func() { err = arr.ValidateFull() })
+		assert.EqualError(t, err, "arrow/array: string offset 100 at index 1 out of bounds of data buffer (length 5)")
+	})
+
+	t.Run("sliced array offset past the data buffer passes Validate but fails ValidateFull", func(t *testing.T) {
+		arr := makeStringArrayRaw(t, []int32{0, 3, 100, 5}, "hello", 2, 1)
+		assert.NoError(t, arr.Validate())
+		var err error
+		require.NotPanics(t, func() { err = arr.ValidateFull() })
+		assert.EqualError(t, err, "arrow/array: string offset 100 at index 2 out of bounds of data buffer (length 5)")
+	})
+
 	t.Run("negative first offset passes Validate but fails ValidateFull", func(t *testing.T) {
 		arr := makeStringArrayRaw(t, []int32{-1, 2, 5}, "hello", 2, 0)
 		assert.NoError(t, arr.Validate())
@@ -227,6 +243,22 @@ func TestLargeStringValidate(t *testing.T) {
 		err := arr.ValidateFull()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not monotonically non-decreasing")
+	})
+
+	t.Run("intermediate offset past the data buffer passes Validate but fails ValidateFull", func(t *testing.T) {
+		arr := makeLargeStringArrayRaw(t, []int64{0, 100, 5}, "hello", 2, 0)
+		assert.NoError(t, arr.Validate())
+		var err error
+		require.NotPanics(t, func() { err = arr.ValidateFull() })
+		assert.EqualError(t, err, "arrow/array: large string offset 100 at index 1 out of bounds of data buffer (length 5)")
+	})
+
+	t.Run("sliced array offset past the data buffer passes Validate but fails ValidateFull", func(t *testing.T) {
+		arr := makeLargeStringArrayRaw(t, []int64{0, 3, 100, 5}, "hello", 2, 1)
+		assert.NoError(t, arr.Validate())
+		var err error
+		require.NotPanics(t, func() { err = arr.ValidateFull() })
+		assert.EqualError(t, err, "arrow/array: large string offset 100 at index 2 out of bounds of data buffer (length 5)")
 	})
 
 	t.Run("negative first offset passes Validate but fails ValidateFull", func(t *testing.T) {

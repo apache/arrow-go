@@ -212,7 +212,8 @@ func (a *String) Validate() error {
 
 // ValidateFull performs a full O(n) consistency check on the array data.
 // In addition to the checks performed by Validate, it also verifies that
-// all offsets are non-negative and monotonically non-decreasing.
+// all offsets are non-negative, monotonically non-decreasing, and within the
+// data buffer.
 func (a *String) ValidateFull() error {
 	if err := a.Validate(); err != nil {
 		return err
@@ -228,6 +229,10 @@ func (a *String) ValidateFull() error {
 		if offsets[i] < offsets[i-1] {
 			return fmt.Errorf("arrow/array: string offsets are not monotonically non-decreasing at index %d: %d < %d",
 				a.data.offset+i, offsets[i], offsets[i-1])
+		}
+		if int(offsets[i]) > len(a.values) {
+			return fmt.Errorf("arrow/array: string offset %d at index %d out of bounds of data buffer (length %d)",
+				offsets[i], a.data.offset+i, len(a.values))
 		}
 		value := a.values[offsets[i-1]:offsets[i]]
 		if !utf8.ValidString(value) {
@@ -430,7 +435,8 @@ func (a *LargeString) Validate() error {
 
 // ValidateFull performs a full O(n) consistency check on the array data.
 // In addition to the checks performed by Validate, it also verifies that
-// all offsets are non-negative and monotonically non-decreasing.
+// all offsets are non-negative, monotonically non-decreasing, and within the
+// data buffer.
 func (a *LargeString) ValidateFull() error {
 	if err := a.Validate(); err != nil {
 		return err
@@ -446,6 +452,10 @@ func (a *LargeString) ValidateFull() error {
 		if offsets[i] < offsets[i-1] {
 			return fmt.Errorf("arrow/array: large string offsets are not monotonically non-decreasing at index %d: %d < %d",
 				a.data.offset+i, offsets[i], offsets[i-1])
+		}
+		if offsets[i] > int64(len(a.values)) {
+			return fmt.Errorf("arrow/array: large string offset %d at index %d out of bounds of data buffer (length %d)",
+				offsets[i], a.data.offset+i, len(a.values))
 		}
 		value := a.values[offsets[i-1]:offsets[i]]
 		if !utf8.ValidString(value) {
