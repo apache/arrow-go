@@ -708,6 +708,70 @@ func TestRecordReaderSeekToRowDictionaryAtDataPageOffset(t *testing.T) {
 	require.Truef(t, array.RecordEqual(want, got), "expected: %s\ngot: %s", want, got)
 }
 
+// A record reader builds a new page reader for each seek, which starts at the
+// dictionary page of an encrypted chunk.
+func TestRecordReaderSeekToRowEncryptedDictionary(t *testing.T) {
+	const (
+		footerKey = "0123456789012345"
+		rowGroups = 2
+		rowsPerRG = 1500
+		row       = 2200
+	)
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt64Builder(mem)
+	defer bldr.Release()
+	for i := range rowGroups * rowsPerRG {
+		bldr.Append(int64((i*31 + i/rowsPerRG) % 97))
+	}
+	arr := bldr.NewArray()
+	defer arr.Release()
+	sc := arrow.NewSchema([]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	tbl := array.NewTableFromSlice(sc, [][]arrow.Array{{arr}})
+	defer tbl.Release()
+
+	var buf bytes.Buffer
+	require.NoError(t, pqarrow.WriteTable(tbl, &buf, rowsPerRG, parquet.NewWriterProperties(
+		parquet.WithEncryptionProperties(parquet.NewFileEncryptionProperties(footerKey)),
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDictionaryCostFallbackFor("x", false),
+		parquet.WithDictionaryPageSizeLimit(1<<20),
+		parquet.WithDataPageSize(400),
+		parquet.WithBatchSize(16)),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))))
+
+	props := parquet.NewReaderProperties(mem)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(footerKey))
+	pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(props))
+	require.NoError(t, err)
+	defer pf.Close()
+	chunk, err := pf.MetaData().RowGroup(rowGroups - 1).ColumnChunk(0)
+	require.NoError(t, err)
+	require.True(t, chunk.HasDictionaryPage())
+
+	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 100}, mem)
+	require.NoError(t, err)
+	seq, err := fr.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer seq.Release()
+	var want []int64
+	for _, c := range seq.Column(0).Data().Chunks() {
+		want = append(want, c.(*array.Int64).Int64Values()...)
+	}
+	require.Len(t, want, rowGroups*rowsPerRG)
+
+	rr, err := fr.GetRecordReader(context.Background(), []int{0}, nil)
+	require.NoError(t, err)
+	defer rr.Release()
+	require.NoError(t, rr.SeekToRow(row))
+	rec, err := rr.Read()
+	require.NoError(t, err)
+	got := rec.Column(0).(*array.Int64).Int64Values()
+	require.NotEmpty(t, got)
+	require.Equal(t, want[row:row+len(got)], got)
+}
+
 func TestRecordReaderSeekToRowRepeated(t *testing.T) {
 	sc := arrow.NewSchema([]arrow.Field{{Name: "x", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32), Nullable: true}}, nil)
 

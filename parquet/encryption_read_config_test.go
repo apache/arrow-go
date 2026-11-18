@@ -622,6 +622,38 @@ func (d *TestDecryptionSuite) TestDecryption() {
 	}
 }
 
+// uniform_encryption.parquet.encrypted was written by Arrow C++, with a
+// dictionary page and an offset index in each chunk.
+func TestSeekToRowEncryptedTestData(t *testing.T) {
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(FooterEncryptionKey))
+	rdr, err := file.OpenParquetFile(path.Join(getDataDir(), "uniform_encryption.parquet.encrypted"), false, file.WithReadProps(props))
+	require.NoError(t, err)
+	defer rdr.Close()
+
+	const col, nrows, row = 1, 50, 24
+	chunk, err := rdr.MetaData().RowGroup(0).ColumnChunk(col)
+	require.NoError(t, err)
+	require.Equal(t, parquet.Types.Int32, chunk.Type())
+	require.True(t, chunk.HasDictionaryPage())
+
+	read := func(seekTo, n int) []int32 {
+		cr, err := rdr.RowGroup(0).Column(col)
+		require.NoError(t, err)
+		defer cr.Close()
+		ir := cr.(*file.Int32ColumnChunkReader)
+		if seekTo > 0 {
+			require.NoError(t, ir.SeekToRow(int64(seekTo)))
+		}
+		vals := make([]int32, n)
+		got, _, err := ir.ReadBatch(int64(n), vals, nil, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, n, got)
+		return vals
+	}
+	require.Equal(t, read(0, nrows)[row:], read(row, nrows-row))
+}
+
 // javaKeyRetriever unwraps keys the way parquet-mr's KeyToolkit does for a file written
 // with external key material and double wrapping: the KMS master key unwraps a key
 // encryption key (KEK), and the KEK unwraps the data key.

@@ -433,6 +433,10 @@ type serializedPageReader struct {
 	dataPageAad       string
 	dataPageHeaderAad string
 
+	// The initial value of cryptoCtx.StartDecryptWithDictionaryPage, which the
+	// reader clears once it is past the dictionary page.
+	chunkStartsWithDict bool
+
 	baseOffset, dataOffset, dictOffset int64
 
 	decompressBuffer *memory.Buffer
@@ -477,6 +481,7 @@ func (p *serializedPageReader) init(compressType compress.Compression, ctx *Cryp
 
 	if ctx != nil {
 		p.cryptoCtx = *ctx
+		p.chunkStartsWithDict = ctx.StartDecryptWithDictionaryPage
 		p.initDecryption()
 	}
 
@@ -520,6 +525,7 @@ func NewPageReader(r parquet.BufferedReader, nrows int64, compressType compress.
 	rdr.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
 	if ctx != nil {
 		rdr.cryptoCtx = *ctx
+		rdr.chunkStartsWithDict = ctx.StartDecryptWithDictionaryPage
 		rdr.initDecryption()
 	}
 	return rdr, nil
@@ -540,9 +546,11 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	}
 	if ctx != nil {
 		p.cryptoCtx = *ctx
+		p.chunkStartsWithDict = ctx.StartDecryptWithDictionaryPage
 		p.initDecryption()
 	} else {
 		p.cryptoCtx = CryptoContext{}
+		p.chunkStartsWithDict = false
 		p.dataPageAad = ""
 		p.dataPageHeaderAad = ""
 	}
@@ -740,16 +748,23 @@ func extractStats(dataHeader dataheader) (pageStats metadata.EncodedStatistics) 
 
 // dictionaryAtDataOffset reports whether the page at data_page_offset may be a
 // dictionary page, which is so when the chunk records no dictionary offset or
-// the same offset as the data offset. Encrypted chunks are excluded because the
-// AAD of a page header depends on the page type, which is unknown before the
-// header is read.
+// the same offset as the data offset. Encrypted chunks whose metadata declares
+// no dictionary page are excluded because the AAD of a page header depends on
+// the page type, which is unknown before the header is read.
 func (p *serializedPageReader) dictionaryAtDataOffset() bool {
-	return p.dataOffset <= p.baseOffset && p.cryptoCtx.MetaDecryptor == nil
+	return p.dataOffset <= p.baseOffset && (p.chunkStartsWithDict || p.cryptoCtx.MetaDecryptor == nil)
 }
 
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 	probe := p.dictOffset == 0 && p.dictionaryAtDataOffset()
 	if p.dictOffset > 0 || probe {
+		// This reads the dictionary page from the start of the chunk, independent of
+		// p.r, so it needs the dictionary AAD. Restore the flag so it still describes
+		// the next page of p.r.
+		atDictionary := p.cryptoCtx.StartDecryptWithDictionaryPage
+		p.cryptoCtx.StartDecryptWithDictionaryPage = true
+		defer func() { p.cryptoCtx.StartDecryptWithDictionaryPage = atDictionary }()
+
 		span := p.dataOffset - p.baseOffset
 		readBufSize := int(min(span, int64(p.r.BufferSize())))
 		// The dictionary page starts the stream, and the data offset marks its end
@@ -777,7 +792,6 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, errors.New("parquet: invalid dictionary page header")
 		}
 
-		p.cryptoCtx.StartDecryptWithDictionaryPage = true
 		if p.cryptoCtx.DataDecryptor != nil {
 			p.updateDecryption(p.cryptoCtx.DataDecryptor, encryption.DictPageModule, p.dataPageAad)
 		}
@@ -787,7 +801,6 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, err
 		}
 
-		p.cryptoCtx.StartDecryptWithDictionaryPage = false
 		if dictHeader.GetNumValues() < 0 {
 			return nil, errors.New("parquet: invalid page header (negative number of values)")
 		}
@@ -905,6 +918,7 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 
 		p.rowsSeen = 0
 		p.pageOrd = 0
+		p.cryptoCtx.StartDecryptWithDictionaryPage = p.dataOffset <= p.baseOffset && p.chunkStartsWithDict
 
 		skipDict := p.dictionaryAtDataOffset()
 		for p.Next() && (p.rowsSeen < rowIdx || (skipDict && p.curPageHdr.GetType() == format.PageType_DICTIONARY_PAGE)) {
@@ -927,6 +941,7 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 
 	p.r.Reset(section)
 	p.rowsSeen, p.pageOrd = pages[index].FirstRowIndex, int16(index)
+	p.cryptoCtx.StartDecryptWithDictionaryPage = false
 	p.Next()
 	return p.err
 }
