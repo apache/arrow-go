@@ -369,7 +369,7 @@ func (a *ArraySpan) FillFromScalar(val scalar.Scalar) {
 		a.Buffers[1].Buf = sc.Data()
 		a.Buffers[1].Owner = sc.Buffer()
 		a.Buffers[1].SelfAlloc = false
-	case arrow.IsListLike(typeID):
+	case arrow.IsListLike(typeID) || typeID == arrow.LIST_VIEW || typeID == arrow.LARGE_LIST_VIEW:
 		sc := val.(scalar.ListScalar)
 		valueLen := 0
 		a.ResizeChildren(1)
@@ -392,6 +392,19 @@ func (a *ArraySpan) FillFromScalar(val scalar.Scalar) {
 			setOffsetsForScalar(a,
 				unsafe.Slice((*int64)(unsafe.Pointer(&a.Scratch[0])), 2),
 				int64(valueLen), 1)
+		case arrow.LIST_VIEW:
+			if valueLen > math.MaxInt32 {
+				// The size is an int32, and this method can't return an error.
+				panic(fmt.Errorf("%w: %s value of %d elements exceeds the list view size limit",
+					arrow.ErrInvalid, val.DataType(), valueLen))
+			}
+			setOffsetsAndSizesForScalar(a,
+				unsafe.Slice((*int32)(unsafe.Pointer(&a.Scratch[0])), 2),
+				int64(valueLen))
+		case arrow.LARGE_LIST_VIEW:
+			setOffsetsAndSizesForScalar(a,
+				unsafe.Slice((*int64)(unsafe.Pointer(&a.Scratch[0])), 2),
+				int64(valueLen))
 		default:
 			// fixed size list has no second buffer
 			a.Buffers[1].Buf, a.Buffers[1].Owner = nil, nil
