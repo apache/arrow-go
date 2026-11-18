@@ -57,27 +57,21 @@ func (n Decimal256) Array() [4]uint64 { return n.arr }
 
 func (n Decimal256) LowBits() uint64 { return n.arr[0] }
 
+// Like Decimal256FromI64, this stays a single composite literal.
 func Decimal256FromDecimal128(n decimal128.Num) Decimal256 {
-	var topBits uint64
-	if n.Sign() < 0 {
-		topBits = math.MaxUint64
-	}
-	return NewDecimal256(topBits, topBits, uint64(n.HighBits()), n.LowBits())
+	top := uint64(n.HighBits() >> 63)
+	return Decimal256{[4]uint64{n.LowBits(), uint64(n.HighBits()), top, top}}
 }
 
 func Decimal256FromU64(v uint64) Decimal256 {
 	return Decimal256{[4]uint64{v, 0, 0, 0}}
 }
 
+// Keep this a single composite literal. Callers that inline it then build the
+// value in place instead of copying it through stack temporaries.
 func Decimal256FromI64(v int64) Decimal256 {
-	switch {
-	case v > 0:
-		return NewDecimal256(0, 0, 0, uint64(v))
-	case v < 0:
-		return NewDecimal256(math.MaxUint64, math.MaxUint64, math.MaxUint64, uint64(v))
-	default:
-		return Decimal256{}
-	}
+	s := uint64(v >> 63)
+	return Decimal256{[4]uint64{uint64(v), s, s, s}}
 }
 
 func (n Decimal256) Negate() Decimal256 {

@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -694,4 +695,46 @@ func TestMaxScale(t *testing.T) {
 	assert.Equal(t, 18, decimal.MaxScale[decimal.Decimal64]())
 	assert.Equal(t, 38, decimal.MaxScale[decimal.Decimal128]())
 	assert.Equal(t, 76, decimal.MaxScale[decimal.Decimal256]())
+}
+
+func TestDecimal256FromI64AndDecimal128(t *testing.T) {
+	ints := []int64{
+		0, 1, -1, 2, -2, math.MaxInt32, math.MinInt32, 1 << 32, -(1 << 32),
+		math.MaxInt64, math.MinInt64, math.MinInt64 + 1,
+	}
+	x := uint64(0x9e3779b97f4a7c15)
+	next := func() uint64 {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		return x
+	}
+	for range 1000 {
+		ints = append(ints, int64(next())>>(next()%63))
+	}
+
+	for _, v := range ints {
+		ext := uint64(0)
+		if v < 0 {
+			ext = math.MaxUint64
+		}
+		n := decimal.Decimal256FromI64(v)
+		if want := [4]uint64{uint64(v), ext, ext, ext}; n.Array() != want {
+			t.Fatalf("Decimal256FromI64(%d).Array() = %x, want %x", v, n.Array(), want)
+		}
+		if n.BigInt().Cmp(big.NewInt(v)) != 0 {
+			t.Fatalf("Decimal256FromI64(%d) = %v", v, n.BigInt())
+		}
+
+		lo := next()
+		for _, d := range []decimal128.Num{decimal128.New(v, lo), decimal128.New(v, 0), decimal128.New(v, math.MaxUint64), decimal128.FromI64(v)} {
+			n := decimal.Decimal256FromDecimal128(d)
+			if want := [4]uint64{d.LowBits(), uint64(d.HighBits()), ext, ext}; n.Array() != want {
+				t.Fatalf("Decimal256FromDecimal128(%v).Array() = %x, want %x", d, n.Array(), want)
+			}
+			if n.BigInt().Cmp(d.BigInt()) != 0 {
+				t.Fatalf("Decimal256FromDecimal128(%v) = %v", d, n.BigInt())
+			}
+		}
+	}
 }
