@@ -211,7 +211,11 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 				if err != nil {
 					return err
 				}
-				if err := Append(bldr.ValueBuilder(), sc); err != nil {
+				err = Append(bldr.ValueBuilder(), sc)
+				if r, ok := sc.(Releasable); ok {
+					r.Release()
+				}
+				if err != nil {
 					return err
 				}
 			}
