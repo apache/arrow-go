@@ -23,6 +23,7 @@ package encoding
 import (
 	"math"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/parquet"
 )
 
@@ -133,16 +134,6 @@ func alpParquetType[T alpFloat]() parquet.Type {
 	panic("parquet: ALP: unsupported float type")
 }
 
-func alpFloatToBits[T alpFloat](v T) uint64 {
-	switch f := any(v).(type) {
-	case float32:
-		return uint64(math.Float32bits(f))
-	case float64:
-		return math.Float64bits(f)
-	}
-	panic("parquet: ALP: unsupported float type")
-}
-
 // alpScaling holds the constants of one exponent and factor pair. Encoding and
 // decoding look them up once per vector rather than once per value.
 type alpScaling[T alpFloat] struct {
@@ -203,4 +194,120 @@ func (s *alpScaling[T]) decode(encoded int64) T {
 func (s *alpScaling[T]) tryEncode(v T) (encoded int64, ok bool) {
 	encoded = s.encode(v)
 	return encoded, s.decode(encoded) == v
+}
+
+// alpScale64 scales every value to the integer alpScaling.encode gives it and
+// checks, as tryEncode does, that the integer decodes back to the value. It
+// writes all the integers to encoded and the positions of the values that
+// fail, in order, to excPos. Both must hold len(values). It returns how many
+// failed.
+//
+// This is the loop every value of a column goes through, so it is written for
+// one type and avoids what alpScaling cannot. Nothing in it branches on the
+// data: an exception costs what any other value costs, where a branch is
+// mispredicted wherever the two mix. And it leaves the range of the integers
+// to alpIntRange, because tracking a minimum and a maximum here would make
+// every value wait for the one before.
+func alpScale64(values []float64, encExp, encFac, decFac, decExp float64, encoded []int64, excPos []uint16) (numExc int) {
+	encoded = encoded[:len(values)]
+	excPos = excPos[:len(values)]
+	// The same values as integers, so that comparing bits does not have to
+	// move each one out of a floating-point register.
+	raw := arrow.Uint64Traits.CastFromBytes(arrow.Float64Traits.CastToBytes(values))[:len(values)]
+	for i, v := range values {
+		bits := raw[i]
+		scaled := float64(v * encExp * encFac)
+		// Rounds as alpScaling.round does.
+		e := int64(math.RoundToEven(scaled))
+		// A NaN fails the comparison too.
+		if !(math.Abs(scaled) <= alpEncodingUpperFloat64) {
+			e = int64(alpEncodingUpperFloat64)
+		}
+		encoded[i] = e
+		excPos[numExc] = uint16(i)
+		// Comparing bits rather than values also rejects -0.0, which scales
+		// to 0 and decodes to 0.0.
+		if math.Float64bits(float64(e)*decFac*decExp) != bits {
+			numExc++
+		}
+	}
+	return numExc
+}
+
+// alpScale32 is the FLOAT form of alpScale64.
+func alpScale32(values []float32, encExp, encFac, decFac, decExp float32, encoded []int64, excPos []uint16) (numExc int) {
+	encoded = encoded[:len(values)]
+	excPos = excPos[:len(values)]
+	raw := arrow.Uint32Traits.CastFromBytes(arrow.Float32Traits.CastToBytes(values))[:len(values)]
+	for i, v := range values {
+		bits := raw[i]
+		scaled := float32(v * encExp * encFac)
+		e := int64(math.RoundToEven(float64(scaled)))
+		if !(float32(math.Abs(float64(scaled))) <= alpEncodingUpperFloat32) {
+			e = int64(alpEncodingUpperFloat32)
+		}
+		encoded[i] = e
+		excPos[numExc] = uint16(i)
+		if math.Float32bits(float32(e)*decFac*decExp) != bits {
+			numExc++
+		}
+	}
+	return numExc
+}
+
+// alpScale runs the loop of T's width with the constants of one exponent and
+// factor pair.
+func alpScale[T alpFloat](values []T, exponent, factor int, encoded []int64, excPos []uint16) (numExc int) {
+	switch values := any(values).(type) {
+	case []float64:
+		return alpScale64(values, alpDoublePow10[exponent], alpDoubleNegPow10[factor],
+			alpDoublePow10[factor], alpDoubleNegPow10[exponent], encoded, excPos)
+	case []float32:
+		return alpScale32(values, alpFloatPow10[exponent], alpFloatNegPow10[factor],
+			alpFloatPow10[factor], alpFloatNegPow10[exponent], encoded, excPos)
+	}
+	panic("parquet: ALP: unsupported float type")
+}
+
+// alpIntRange returns the smallest and the largest of the integers alpScale
+// wrote, leaving out those at the exception positions, of which there must be
+// fewer than there are integers. It overwrites each exception's integer with
+// the smallest.
+func alpIntRange(encoded []int64, excPos []uint16) (minValue, maxValue int64) {
+	if len(excPos) > 0 {
+		// The exceptions are in order, so the first position that is not its
+		// own index in excPos holds an integer that counts. Being within the
+		// range, it stands in for the exceptions while the range is found.
+		keep := 0
+		for keep < len(excPos) && int(excPos[keep]) == keep {
+			keep++
+		}
+		fill := encoded[keep]
+		for _, pos := range excPos {
+			encoded[pos] = fill
+		}
+	}
+
+	// Four of each, so that an integer does not wait for its neighbors.
+	min0, min1, min2, min3 := int64(math.MaxInt64), int64(math.MaxInt64), int64(math.MaxInt64), int64(math.MaxInt64)
+	max0, max1, max2, max3 := int64(math.MinInt64), int64(math.MinInt64), int64(math.MinInt64), int64(math.MinInt64)
+	i := 0
+	for ; i+4 <= len(encoded); i += 4 {
+		q := encoded[i : i+4 : i+4]
+		min0, max0 = min(min0, q[0]), max(max0, q[0])
+		min1, max1 = min(min1, q[1]), max(max1, q[1])
+		min2, max2 = min(min2, q[2]), max(max2, q[2])
+		min3, max3 = min(min3, q[3]), max(max3, q[3])
+	}
+	for ; i < len(encoded); i++ {
+		min0, max0 = min(min0, encoded[i]), max(max0, encoded[i])
+	}
+	minValue, maxValue = min(min0, min1, min2, min3), max(max0, max1, max2, max3)
+
+	// An exception still takes up a slot among the packed integers. The
+	// smallest integer packs to zero there, whatever the width.
+	for _, pos := range excPos {
+		encoded[pos] = minValue
+	}
+	return minValue, maxValue
 }
