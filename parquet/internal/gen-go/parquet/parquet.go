@@ -5043,6 +5043,148 @@ func (p *GeographyType) Validate() error {
 	return nil
 }
 
+// Finite fixed-length vector logical type annotation
+//
+// Annotates the outer group of a three-level structure that is the same as
+// the one used for LIST-annotated groups. Each non-null vector MUST contain
+// exactly num_elements elements.
+//
+// See LogicalTypes.md for details.
+//
+// Attributes:
+//  - NumElements
+//
+type FiniteVectorType struct {
+	NumElements int32 `thrift:"num_elements,1,required" db:"num_elements" json:"num_elements"`
+}
+
+func NewFiniteVectorType() *FiniteVectorType {
+	return &FiniteVectorType{}
+}
+
+
+
+func (p *FiniteVectorType) GetNumElements() int32 {
+	return p.NumElements
+}
+
+func (p *FiniteVectorType) Read(ctx context.Context, iprot thrift.TProtocol) error {
+	if _, err := iprot.ReadStructBegin(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
+	}
+
+	var issetNumElements bool = false;
+
+	for {
+		_, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
+		if err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.I32 {
+				if err := p.ReadField1(ctx, iprot); err != nil {
+					return err
+				}
+				issetNumElements = true
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
+		default:
+			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+				return err
+			}
+		}
+		if err := iprot.ReadFieldEnd(ctx); err != nil {
+			return err
+		}
+	}
+	if err := iprot.ReadStructEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+	}
+	if !issetNumElements{
+		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("Required field NumElements is not set"))
+	}
+	return nil
+}
+
+func (p *FiniteVectorType) ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadI32(ctx); err != nil {
+		return thrift.PrependError("error reading field 1: ", err)
+	} else {
+		p.NumElements = v
+	}
+	return nil
+}
+
+func (p *FiniteVectorType) Write(ctx context.Context, oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin(ctx, "FiniteVectorType"); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+	}
+	if p != nil {
+		if err := p.writeField1(ctx, oprot); err != nil { return err }
+	}
+	if err := oprot.WriteFieldStop(ctx); err != nil {
+		return thrift.PrependError("write field stop error: ", err)
+	}
+	if err := oprot.WriteStructEnd(ctx); err != nil {
+		return thrift.PrependError("write struct stop error: ", err)
+	}
+	return nil
+}
+
+func (p *FiniteVectorType) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if err := oprot.WriteFieldBegin(ctx, "num_elements", thrift.I32, 1); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:num_elements: ", p), err)
+	}
+	if err := oprot.WriteI32(ctx, int32(p.NumElements)); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T.num_elements (1) field write error: ", p), err)
+	}
+	if err := oprot.WriteFieldEnd(ctx); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field end error 1:num_elements: ", p), err)
+	}
+	return err
+}
+
+func (p *FiniteVectorType) Equals(other *FiniteVectorType) bool {
+	if p == other {
+		return true
+	} else if p == nil || other == nil {
+		return false
+	}
+	if p.NumElements != other.NumElements { return false }
+	return true
+}
+
+func (p *FiniteVectorType) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("FiniteVectorType(%+v)", *p)
+}
+
+func (p *FiniteVectorType) LogValue() slog.Value {
+	if p == nil {
+		return slog.AnyValue(nil)
+	}
+	v := thrift.SlogTStructWrapper{
+		Type: "*parquet.FiniteVectorType",
+		Value: p,
+	}
+	return slog.AnyValue(v)
+}
+
+var _ slog.LogValuer = (*FiniteVectorType)(nil)
+
+func (p *FiniteVectorType) Validate() error {
+	return nil
+}
+
 // LogicalType annotations to replace ConvertedType.
 // 
 // To maintain compatibility, implementations using LogicalType for a
@@ -5067,6 +5209,7 @@ func (p *GeographyType) Validate() error {
 //  - VARIANT
 //  - GEOMETRY
 //  - GEOGRAPHY
+//  - FINITE_VECTOR
 // 
 type LogicalType struct {
 	STRING *StringType `thrift:"STRING,1" db:"STRING" json:"STRING,omitempty"`
@@ -5087,6 +5230,8 @@ type LogicalType struct {
 	VARIANT *VariantType `thrift:"VARIANT,16" db:"VARIANT" json:"VARIANT,omitempty"`
 	GEOMETRY *GeometryType `thrift:"GEOMETRY,17" db:"GEOMETRY" json:"GEOMETRY,omitempty"`
 	GEOGRAPHY *GeographyType `thrift:"GEOGRAPHY,18" db:"GEOGRAPHY" json:"GEOGRAPHY,omitempty"`
+	// unused field # 19
+	FINITE_VECTOR *FiniteVectorType `thrift:"FINITE_VECTOR,20" db:"FINITE_VECTOR" json:"FINITE_VECTOR,omitempty"`
 }
 
 func NewLogicalType() *LogicalType {
@@ -5246,6 +5391,15 @@ func (p *LogicalType) GetGEOGRAPHY() *GeographyType {
 	return p.GEOGRAPHY
 }
 
+var LogicalType_FINITE_VECTOR_DEFAULT *FiniteVectorType
+
+func (p *LogicalType) GetFINITE_VECTOR() *FiniteVectorType {
+	if !p.IsSetFINITE_VECTOR() {
+		return LogicalType_FINITE_VECTOR_DEFAULT
+	}
+	return p.FINITE_VECTOR
+}
+
 func (p *LogicalType) CountSetFieldsLogicalType() int {
 	count := 0
 	if (p.IsSetSTRING()) {
@@ -5297,6 +5451,9 @@ func (p *LogicalType) CountSetFieldsLogicalType() int {
 		count++
 	}
 	if (p.IsSetGEOGRAPHY()) {
+		count++
+	}
+	if (p.IsSetFINITE_VECTOR()) {
 		count++
 	}
 	return count
@@ -5369,6 +5526,10 @@ func (p *LogicalType) IsSetGEOMETRY() bool {
 
 func (p *LogicalType) IsSetGEOGRAPHY() bool {
 	return p.GEOGRAPHY != nil
+}
+
+func (p *LogicalType) IsSetFINITE_VECTOR() bool {
+	return p.FINITE_VECTOR != nil
 }
 
 func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
@@ -5556,6 +5717,16 @@ func (p *LogicalType) Read(ctx context.Context, iprot thrift.TProtocol) error {
 					return err
 				}
 			}
+		case 20:
+			if fieldTypeId == thrift.STRUCT {
+				if err := p.ReadField20(ctx, iprot); err != nil {
+					return err
+				}
+			} else {
+				if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+					return err
+				}
+			}
 		default:
 			if err := iprot.Skip(ctx, fieldTypeId); err != nil {
 				return err
@@ -5707,6 +5878,14 @@ func (p *LogicalType) ReadField18(ctx context.Context, iprot thrift.TProtocol) e
 	return nil
 }
 
+func (p *LogicalType) ReadField20(ctx context.Context, iprot thrift.TProtocol) error {
+	p.FINITE_VECTOR = &FiniteVectorType{}
+	if err := p.FINITE_VECTOR.Read(ctx, iprot); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.FINITE_VECTOR), err)
+	}
+	return nil
+}
+
 func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 	if c := p.CountSetFieldsLogicalType(); c != 1 {
 		return thrift.NewTProtocolExceptionWithType(thrift.INVALID_DATA, fmt.Errorf("%T write union: exactly one field must be set (%d set)", p, c))
@@ -5732,6 +5911,7 @@ func (p *LogicalType) Write(ctx context.Context, oprot thrift.TProtocol) error {
 		if err := p.writeField16(ctx, oprot); err != nil { return err }
 		if err := p.writeField17(ctx, oprot); err != nil { return err }
 		if err := p.writeField18(ctx, oprot); err != nil { return err }
+		if err := p.writeField20(ctx, oprot); err != nil { return err }
 	}
 	if err := oprot.WriteFieldStop(ctx); err != nil {
 		return thrift.PrependError("write field stop error: ", err)
@@ -5997,6 +6177,21 @@ func (p *LogicalType) writeField18(ctx context.Context, oprot thrift.TProtocol) 
 	return err
 }
 
+func (p *LogicalType) writeField20(ctx context.Context, oprot thrift.TProtocol) (err error) {
+	if p.IsSetFINITE_VECTOR() {
+		if err := oprot.WriteFieldBegin(ctx, "FINITE_VECTOR", thrift.STRUCT, 20); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 20:FINITE_VECTOR: ", p), err)
+		}
+		if err := p.FINITE_VECTOR.Write(ctx, oprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.FINITE_VECTOR), err)
+		}
+		if err := oprot.WriteFieldEnd(ctx); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 20:FINITE_VECTOR: ", p), err)
+		}
+	}
+	return err
+}
+
 func (p *LogicalType) Equals(other *LogicalType) bool {
 	if p == other {
 		return true
@@ -6020,6 +6215,7 @@ func (p *LogicalType) Equals(other *LogicalType) bool {
 	if !p.VARIANT.Equals(other.VARIANT) { return false }
 	if !p.GEOMETRY.Equals(other.GEOMETRY) { return false }
 	if !p.GEOGRAPHY.Equals(other.GEOGRAPHY) { return false }
+	if !p.FINITE_VECTOR.Equals(other.FINITE_VECTOR) { return false }
 	return true
 }
 
@@ -12928,6 +13124,8 @@ func (p *Int96TimestampOrder) Validate() error {
 //   VARIANT - undefined
 //   GEOMETRY - undefined
 //   GEOGRAPHY - undefined
+//   FILE - undefined
+//   FINITE_VECTOR - undefined
 // 
 // In the absence of logical types, the sort order is determined by the physical type:
 //   BOOLEAN - false, true

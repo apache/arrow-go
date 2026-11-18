@@ -429,12 +429,63 @@ func NewGroupNodeLogical(name string, repetition parquet.Repetition, fields Fiel
 		return
 	}
 
+	if vector, ok := logical.(FiniteVectorLogicalType); ok {
+		if err := validateFiniteVector(n, vector); err != nil {
+			return nil, err
+		}
+	}
+
 	n.nameToIdx = make(strIntMultimap)
 	for idx, f := range n.fields {
 		f.SetParent(n)
 		n.nameToIdx.Add(f.Name(), idx)
 	}
 	return
+}
+
+func validateFiniteVector(n *GroupNode, logical FiniteVectorLogicalType) error {
+	if logical.NumElements() <= 0 {
+		return fmt.Errorf("FINITE_VECTOR %q must have a positive size", n.Name())
+	}
+	if (n.RepetitionType() != parquet.Repetitions.Required && n.RepetitionType() != parquet.Repetitions.Optional) || n.NumFields() != 1 {
+		return fmt.Errorf("FINITE_VECTOR %q must be a required or optional group with one child", n.Name())
+	}
+	list, ok := n.Field(0).(*GroupNode)
+	if !ok || list.Name() != "list" || list.RepetitionType() != parquet.Repetitions.Repeated ||
+		!list.LogicalType().IsNone() || list.NumFields() != 1 {
+		return fmt.Errorf("FINITE_VECTOR %q must contain one unannotated repeated group named list", n.Name())
+	}
+	element := list.Field(0)
+	if element.Name() != "element" || !IsFiniteVectorElement(element) {
+		return fmt.Errorf("FINITE_VECTOR %q must contain a supported required primitive named element", n.Name())
+	}
+	return nil
+}
+
+// IsFiniteVectorElement reports whether the node can be the required primitive
+// element of a FINITE_VECTOR.
+func IsFiniteVectorElement(n Node) bool {
+	p, ok := n.(*PrimitiveNode)
+	if !ok || p.RepetitionType() != parquet.Repetitions.Required {
+		return false
+	}
+	logical := p.LogicalType()
+	switch p.PhysicalType() {
+	case parquet.Types.Boolean, parquet.Types.Float, parquet.Types.Double:
+		return logical.IsNone()
+	case parquet.Types.Int32, parquet.Types.Int64:
+		switch logical.(type) {
+		case IntLogicalType, DecimalLogicalType:
+			return true
+		}
+		return logical.IsNone()
+	case parquet.Types.FixedLenByteArray:
+		switch logical.(type) {
+		case Float16LogicalType, DecimalLogicalType:
+			return true
+		}
+	}
+	return false
 }
 
 // NewGroupNode constructs a new group node with the provided fields,
