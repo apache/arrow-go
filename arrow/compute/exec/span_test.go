@@ -19,7 +19,10 @@
 package exec_test
 
 import (
+	"fmt"
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"unsafe"
@@ -987,6 +990,61 @@ func TestArraySpan_FillFromScalarViewOverwritesSpan(t *testing.T) {
 			assert.Equal(t, "hi", out.(*array.StringView).Value(0))
 		})
 	}
+}
+
+func TestArraySpan_FillFromScalarListViewOverwritesScratch(t *testing.T) {
+	longView := scalar.NewStringViewScalar("long string; not inlined")
+	defer longView.Release()
+	values, _, err := array.FromJSON(memory.DefaultAllocator, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+	require.NoError(t, err)
+	defer values.Release()
+
+	for _, list := range []scalar.Scalar{scalar.NewListViewScalar(values), scalar.NewLargeListViewScalar(values)} {
+		t.Run(list.DataType().String(), func(t *testing.T) {
+			defer list.(scalar.Releasable).Release()
+			var span exec.ArraySpan
+			span.FillFromScalar(longView)
+			span.FillFromScalar(list)
+
+			out := span.MakeArray()
+			defer out.Release()
+			require.NoError(t, array.ValidateFull(out))
+			assert.Truef(t, array.Equal(out.(array.VarLenListLike).ListValues(), values), "got %s", out)
+			start, end := out.(array.VarLenListLike).ValueOffsets(0)
+			assert.Equal(t, [2]int64{0, 2}, [2]int64{start, end})
+		})
+	}
+}
+
+func TestArraySpan_FillFromScalarListViewSizeLimit(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("lists above the list view size limit require 64-bit lengths")
+	}
+	size := int(math.MaxInt32)
+	atLimit := array.NewNull(size)
+	defer atLimit.Release()
+	oversize := array.NewNull(size + 1)
+	defer oversize.Release()
+
+	var span exec.ArraySpan
+	listView := scalar.NewListViewScalar(oversize)
+	defer listView.Release()
+	want := fmt.Sprintf("invalid: %s value of %d elements exceeds the list view size limit", listView.DataType(), size+1)
+	assert.PanicsWithError(t, want, func() { span.FillFromScalar(listView) })
+
+	sizeOf := func(sc scalar.Scalar) int64 {
+		span.FillFromScalar(sc)
+		if sc.DataType().ID() == arrow.LIST_VIEW {
+			return int64(arrow.Int32Traits.CastFromBytes(span.Buffers[2].Buf)[0])
+		}
+		return arrow.Int64Traits.CastFromBytes(span.Buffers[2].Buf)[0]
+	}
+	atLimitView := scalar.NewListViewScalar(atLimit)
+	defer atLimitView.Release()
+	assert.Equal(t, int64(size), sizeOf(atLimitView))
+	large := scalar.NewLargeListViewScalar(oversize)
+	defer large.Release()
+	assert.Equal(t, int64(size+1), sizeOf(large))
 }
 
 func TestArraySpan_FillFromScalarRoundTripsViews(t *testing.T) {

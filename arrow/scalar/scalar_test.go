@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1300,6 +1301,10 @@ func (l *ListScalarSuite) TestValidateErrors() {
 		s.Valid = false
 	case *scalar.FixedSizeList:
 		s.Valid = false
+	case *scalar.ListView:
+		s.Valid = false
+	case *scalar.LargeListView:
+		s.Valid = false
 	}
 	l.Error(s.Validate())
 
@@ -1308,6 +1313,10 @@ func (l *ListScalarSuite) TestValidateErrors() {
 	case *scalar.List:
 		s.Value = nil
 	case *scalar.FixedSizeList:
+		s.Value = nil
+	case *scalar.ListView:
+		s.Value = nil
+	case *scalar.LargeListView:
 		s.Value = nil
 	}
 	l.Error(s.Validate())
@@ -1325,6 +1334,10 @@ func (l *ListScalarSuite) TestValidateErrors() {
 		s.Value = arr
 	case *scalar.FixedSizeList:
 		s.Value = arr
+	case *scalar.ListView:
+		s.Value = arr
+	case *scalar.LargeListView:
+		s.Value = arr
 	}
 	l.Error(s.Validate())
 }
@@ -1334,6 +1347,10 @@ func TestListScalars(t *testing.T) {
 	ls.typ = arrow.ListOf(arrow.PrimitiveTypes.Int16)
 	suite.Run(t, ls)
 	ls.typ = arrow.FixedSizeListOf(3, arrow.PrimitiveTypes.Int16)
+	suite.Run(t, ls)
+	ls.typ = arrow.ListViewOf(arrow.PrimitiveTypes.Int16)
+	suite.Run(t, ls)
+	ls.typ = arrow.LargeListViewOf(arrow.PrimitiveTypes.Int16)
 	suite.Run(t, ls)
 }
 
@@ -1436,7 +1453,7 @@ func TestListScalarHashUsesLogicalValues(t *testing.T) {
 	})
 }
 
-func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
+func TestListScalarHashSupportsChildListViews(t *testing.T) {
 	seed := maphash.MakeSeed()
 	tests := []struct {
 		name      string
@@ -1482,6 +1499,225 @@ func TestListScalarHashSupportsChildArraysWithoutScalars(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestListViewScalars(t *testing.T) {
+	i32 := arrow.PrimitiveTypes.Int32
+	fromJSON := func(t *testing.T, mem memory.Allocator, dt arrow.DataType, data string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(data))
+		require.NoError(t, err)
+		return arr
+	}
+	// The offsets are out of order and two lists overlap. The last list is null.
+	outOfOrder := func(mem memory.Allocator, large bool) arrow.Array {
+		values := []int32{10, 11, 12, 13, 14, 15}
+		valid := []bool{true, true, true, true, false}
+		if large {
+			b := array.NewLargeListViewBuilder(mem, i32)
+			defer b.Release()
+			b.ValueBuilder().(*array.Int32Builder).AppendValues(values, nil)
+			b.AppendValuesWithSizes([]int64{4, 0, 2, 0, 5}, []int64{2, 1, 2, 3, 0}, valid)
+			return b.NewArray()
+		}
+		b := array.NewListViewBuilder(mem, i32)
+		defer b.Release()
+		b.ValueBuilder().(*array.Int32Builder).AppendValues(values, nil)
+		b.AppendValuesWithSizes([]int32{4, 0, 2, 0, 5}, []int32{2, 1, 2, 3, 0}, valid)
+		return b.NewArray()
+	}
+	slice := func(arr arrow.Array) arrow.Array {
+		defer arr.Release()
+		return array.NewSlice(arr, 1, 5)
+	}
+	jsonView := func(dt arrow.DataType, data string) func(memory.Allocator) arrow.Array {
+		return func(mem memory.Allocator) arrow.Array {
+			return fromJSON(t, mem, dt, data)
+		}
+	}
+	const nullable, nonNullable = `[[1, 2, null], null, [], [3]]`, `[[1, 2], null, [], [3]]`
+	named := arrow.Field{Name: "element", Type: i32}
+
+	tests := []struct {
+		name  string
+		build func(memory.Allocator) arrow.Array
+		// want holds each element as the JSON of its values, or "" when it is null.
+		want []string
+	}{
+		{"list_view", jsonView(arrow.ListViewOf(i32), nullable), []string{`[1, 2, null]`, ``, `[]`, `[3]`}},
+		{"large_list_view", jsonView(arrow.LargeListViewOf(i32), nullable), []string{`[1, 2, null]`, ``, `[]`, `[3]`}},
+		{"list_view with a named non-nullable element", jsonView(arrow.ListViewOfField(named), nonNullable), []string{`[1, 2]`, ``, `[]`, `[3]`}},
+		{"large_list_view with a named non-nullable element", jsonView(arrow.LargeListViewOfField(named), nonNullable), []string{`[1, 2]`, ``, `[]`, `[3]`}},
+		{"sliced list_view", func(mem memory.Allocator) arrow.Array { return slice(outOfOrder(mem, false)) },
+			[]string{`[10]`, `[12, 13]`, `[10, 11, 12]`, ``}},
+		{"sliced large_list_view", func(mem memory.Allocator) arrow.Array { return slice(outOfOrder(mem, true)) },
+			[]string{`[10]`, `[12, 13]`, `[10, 11, 12]`, ``}},
+	}
+
+	scalarsOf := func(t *testing.T, arr arrow.Array) []scalar.Scalar {
+		scalars := make([]scalar.Scalar, arr.Len())
+		for i := range scalars {
+			sc, err := scalar.GetScalar(arr, i)
+			require.NoError(t, err, "index %d", i)
+			scalars[i] = sc
+			require.NoError(t, sc.ValidateFull(), "index %d", i)
+			assert.True(t, arrow.TypeEqual(arr.DataType(), sc.DataType()))
+		}
+		return scalars
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("round trip", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+				defer mem.AssertSize(t, 0)
+				arr := tc.build(mem)
+				defer arr.Release()
+				require.NoError(t, array.ValidateFull(arr))
+				require.Equal(t, len(tc.want), arr.Len())
+				elemType := arr.DataType().(arrow.ListLikeType).Elem()
+
+				scalars := scalarsOf(t, arr)
+				for i, sc := range scalars {
+					defer releaseScalar(sc)
+					if tc.want[i] == "" {
+						assert.False(t, sc.IsValid(), "index %d", i)
+						assertScalarsEqual(t, scalar.MakeNullScalar(arr.DataType()), sc)
+						continue
+					}
+					require.True(t, sc.IsValid(), "index %d", i)
+					expected := fromJSON(t, mem, elemType, tc.want[i])
+					assert.Truef(t, array.Equal(expected, sc.(scalar.ListScalar).GetList()),
+						"index %d: expected %s, got %s", i, expected, sc.(scalar.ListScalar).GetList())
+					expected.Release()
+				}
+
+				for i, sc := range scalars {
+					if !sc.IsValid() {
+						continue
+					}
+					for _, length := range []int{1, 3} {
+						out, err := scalar.MakeArrayFromScalar(sc, length, mem)
+						require.NoError(t, err, "index %d length %d", i, length)
+						require.NoError(t, array.ValidateFull(out), "index %d length %d", i, length)
+						assert.Equal(t, length, out.Len())
+						assert.True(t, arrow.TypeEqual(arr.DataType(), out.DataType()))
+						for j := 0; j < length; j++ {
+							got, err := scalar.GetScalar(out, j)
+							require.NoError(t, err)
+							assertScalarsEqual(t, sc, got)
+							releaseScalar(got)
+						}
+						if length == 1 {
+							expected := array.NewSlice(arr, int64(i), int64(i+1))
+							assert.Truef(t, array.Equal(expected, out), "index %d: expected %s, got %s", i, expected, out)
+							expected.Release()
+						}
+
+						// The array owns a copy of the scalar's values.
+						for _, scalarBuf := range sc.(scalar.ListScalar).GetList().Data().Buffers() {
+							for _, outBuf := range out.Data().Children()[0].Buffers() {
+								assert.False(t, scalarBuf != nil && scalarBuf == outBuf, "index %d length %d", i, length)
+							}
+						}
+						out.Release()
+					}
+				}
+			})
+
+			t.Run("append", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+				defer mem.AssertSize(t, 0)
+				arr := tc.build(mem)
+				defer arr.Release()
+
+				scalars := scalarsOf(t, arr)
+				for _, sc := range scalars {
+					defer releaseScalar(sc)
+				}
+				bldr := array.NewBuilder(mem, arr.DataType())
+				defer bldr.Release()
+				require.NoError(t, scalar.AppendSlice(bldr, scalars))
+				appended := bldr.NewArray()
+				defer appended.Release()
+				require.NoError(t, array.ValidateFull(appended))
+				assert.Truef(t, array.Equal(arr, appended), "expected %s, got %s", arr, appended)
+			})
+		})
+	}
+}
+
+func TestListViewScalarEqualsAndCastTo(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	int32Array := func(values string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(values))
+		require.NoError(t, err)
+		return arr
+	}
+	oneTwo, oneThree := int32Array(`[1, 2]`), int32Array(`[1, 3]`)
+	defer oneTwo.Release()
+	defer oneThree.Release()
+
+	named := arrow.Field{Name: "element", Type: arrow.PrimitiveTypes.Int32}
+	variants := []struct {
+		name      string
+		newScalar func(arrow.Array) scalar.Scalar
+		typ       arrow.DataType
+		badType   arrow.DataType
+	}{
+		{"list_view", func(a arrow.Array) scalar.Scalar { return scalar.NewListViewScalar(a) },
+			arrow.ListViewOfField(named), arrow.ListViewOf(arrow.PrimitiveTypes.Int16)},
+		{"large_list_view", func(a arrow.Array) scalar.Scalar { return scalar.NewLargeListViewScalar(a) },
+			arrow.LargeListViewOfField(named), arrow.LargeListViewOf(arrow.PrimitiveTypes.Int16)},
+	}
+	for _, v := range variants {
+		t.Run(v.name, func(t *testing.T) {
+			a, c := v.newScalar(oneTwo), v.newScalar(oneThree)
+			defer releaseScalar(a)
+			defer releaseScalar(c)
+			assert.False(t, scalar.Equals(a, c))
+
+			got, err := a.CastTo(a.DataType())
+			require.NoError(t, err)
+			assert.Same(t, a, got)
+
+			_, err = scalar.MakeScalarParam(oneTwo, v.badType)
+			assert.Error(t, err)
+
+			sc, err := scalar.MakeScalarParam(oneTwo, v.typ)
+			require.NoError(t, err)
+			defer releaseScalar(sc)
+			assert.Truef(t, arrow.TypeEqual(v.typ, sc.DataType()), "expected %s, got %s", v.typ, sc.DataType())
+		})
+	}
+}
+
+func TestListViewScalarSizeLimit(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("lists above the list view size limit require 64-bit lengths")
+	}
+	limit := int(math.MaxInt32)
+	nulls := array.NewNull(limit)
+	defer nulls.Release()
+	oversize := array.NewNull(limit + 1)
+	defer oversize.Release()
+
+	for _, sc := range []scalar.Scalar{scalar.NewListViewScalar(nulls), scalar.NewLargeListViewScalar(nulls), scalar.NewLargeListViewScalar(oversize)} {
+		defer releaseScalar(sc)
+		assert.NoError(t, sc.Validate(), sc.DataType().String())
+		assert.NoError(t, sc.ValidateFull(), sc.DataType().String())
+	}
+
+	sc := scalar.NewListViewScalar(oversize)
+	defer sc.Release()
+	assert.ErrorIs(t, sc.Validate(), arrow.ErrInvalid)
+	assert.ErrorContains(t, sc.ValidateFull(), "exceeds the list view size limit")
+
+	arr, err := scalar.MakeArrayFromScalar(sc, 1, memory.DefaultAllocator)
+	assert.ErrorIs(t, err, arrow.ErrInvalid)
+	assert.ErrorContains(t, err, "exceeds the list view size limit")
+	assert.Nil(t, arr)
 }
 
 func TestFixedSizeListScalarWrongNumber(t *testing.T) {
@@ -1669,7 +1905,10 @@ func TestMakeArrayFromScalar(t *testing.T) {
 	assert.Equal(t, 5, nullArray.Len())
 	assert.Equal(t, 5, nullArray.NullN())
 
-	scalars := getScalars(mem)
+	values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int8, strings.NewReader(`[1, 2, 3, 4]`))
+	require.NoError(t, err)
+	defer values.Release()
+	scalars := append(getScalars(mem), scalar.NewListViewScalar(values), scalar.NewLargeListViewScalar(values))
 
 	for _, length := range []int{16} {
 		for _, s := range scalars {
@@ -2856,28 +3095,129 @@ func TestGetScalarIndexOutOfRange(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrIndex)
 }
 
+func TestGetScalarSlicedListLike(t *testing.T) {
+	i32 := arrow.PrimitiveTypes.Int32
+	tests := []struct {
+		name     string
+		dt       arrow.DataType
+		values   string
+		expected string
+	}{
+		{"list", arrow.ListOf(i32), `[[1], [2, 3], [], null, [4]]`, `[[2, 3], [], null, [4]]`},
+		{"large_list", arrow.LargeListOf(i32), `[[1], [2, 3], [], null, [4]]`, `[[2, 3], [], null, [4]]`},
+		{
+			"map", arrow.MapOf(arrow.BinaryTypes.String, i32),
+			`[[{"key": "a", "value": 1}], [{"key": "b", "value": 2}, {"key": "c", "value": 3}], [], null, [{"key": "d", "value": 4}]]`,
+			`[[{"key": "b", "value": 2}, {"key": "c", "value": 3}], [], null, [{"key": "d", "value": 4}]]`,
+		},
+		{"fixed_size_list", arrow.FixedSizeListOf(2, i32), `[[1, 2], [3, 4], null, [7, 8]]`, `[[3, 4], null, [7, 8]]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			full, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.values))
+			require.NoError(t, err)
+			defer full.Release()
+			sliced := array.NewSlice(full, 1, int64(full.Len()))
+			defer sliced.Release()
+			expected, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+
+			for i := 0; i < sliced.Len(); i++ {
+				want, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				got, err := scalar.GetScalar(sliced, i)
+				require.NoError(t, err)
+				assertScalarsEqual(t, want, got)
+				releaseScalar(want)
+				releaseScalar(got)
+			}
+		})
+	}
+}
+
+func TestListScalarHashNestedSliced(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.ListOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	full, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[1]], [[2, 3], []]]`))
+	require.NoError(t, err)
+	defer full.Release()
+	fresh, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[2, 3], []]]`))
+	require.NoError(t, err)
+	defer fresh.Release()
+
+	want, err := scalar.GetScalar(fresh, 0)
+	require.NoError(t, err)
+	defer releaseScalar(want)
+	got, err := scalar.GetScalar(full, 1)
+	require.NoError(t, err)
+	defer releaseScalar(got)
+	assertScalarsEqual(t, want, got)
+}
+
+func TestAppendNestedSlicedListScalar(t *testing.T) {
+	// scalar.Append does not release the child scalars it unboxes, so a
+	// checked allocator would report them.
+	mem := memory.NewGoAllocator()
+
+	dt := arrow.ListOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	full, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[1]], [[2, 3], []]]`))
+	require.NoError(t, err)
+	defer full.Release()
+	expected, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[2, 3], []]]`))
+	require.NoError(t, err)
+	defer expected.Release()
+
+	sc, err := scalar.GetScalar(full, 1)
+	require.NoError(t, err)
+	defer releaseScalar(sc)
+
+	bldr := array.NewBuilder(mem, dt)
+	defer bldr.Release()
+	require.NoError(t, scalar.Append(bldr, sc))
+	got := bldr.NewArray()
+	defer got.Release()
+	assert.Truef(t, array.Equal(expected, got), "expected: %s, got: %s", expected, got)
+}
+
 func TestGetScalarReleasesPartialStructChildrenOnError(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)
 
-	dt := arrow.StructOf(
-		arrow.Field{Name: "values", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
-		arrow.Field{Name: "unsupported", Type: arrow.ListViewOf(arrow.PrimitiveTypes.Int32)},
-	)
-	builder := array.NewStructBuilder(mem, dt)
-	defer builder.Release()
-
-	builder.Append(true)
-	listBuilder := builder.FieldBuilder(0).(*array.ListBuilder)
+	listBuilder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+	defer listBuilder.Release()
 	listBuilder.Append(true)
 	listBuilder.ValueBuilder().(*array.Int32Builder).Append(1)
-	builder.FieldBuilder(1).(*array.ListViewBuilder).AppendWithSize(true, 0)
+	lists := listBuilder.NewArray()
+	defer lists.Release()
 
-	arr := builder.NewStructArray()
+	// The union's only value is at offset 5 of a one-element child.
+	unionType := arrow.DenseUnionOf(
+		[]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: true}},
+		[]arrow.UnionTypeCode{0},
+	)
+	child, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1]`))
+	require.NoError(t, err)
+	defer child.Release()
+	typeIDs := memory.NewBufferBytes([]byte{0})
+	offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{5}))
+	unionData := array.NewData(unionType, 1, []*memory.Buffer{nil, typeIDs, offsets}, []arrow.ArrayData{child.Data()}, 0, 0)
+	union := array.NewDenseUnionData(unionData)
+	unionData.Release()
+	defer union.Release()
+
+	arr, err := array.NewStructArray([]arrow.Array{lists, union}, []string{"values", "bad"})
+	require.NoError(t, err)
 	defer arr.Release()
 
-	_, err := scalar.GetScalar(arr, 0)
-	require.Error(t, err)
+	_, err = scalar.GetScalar(arr, 0)
+	require.ErrorIs(t, err, arrow.ErrIndex)
 }
 
 func TestDictionaryScalarValidateErrors(t *testing.T) {

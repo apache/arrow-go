@@ -30,9 +30,14 @@ type {{.Name}}ColumnChunkReader struct {
 
 // Skip skips the next nvalues so that the next call to ReadBatch
 // will start reading *after* the skipped values.
+//
+// It returns the number of rows skipped before it stopped, which is less than
+// nvalues when the column ends or an error occurs first. On error, the count
+// covers the rows skipped before the step that failed, and the reader stops
+// at that error. For a repeated column, that count can include a row that
+// continues onto the page that failed.
 func (cr *{{.Name}}ColumnChunkReader) Skip(nvalues int64) (int64, error) {
-  err := cr.columnChunkReader.skipRows(nvalues)
-  return nvalues, err
+  return cr.columnChunkReader.skipRows(nvalues)
 }
 
 {{- if .isByteArray}}

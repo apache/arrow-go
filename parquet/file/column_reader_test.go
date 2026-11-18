@@ -495,8 +495,9 @@ func TestSkipEmptyRepeatedRows(t *testing.T) {
 	col, err := r.RowGroup(0).Column(0)
 	require.NoError(t, err)
 	typed := col.(*file.Int32ColumnChunkReader)
-	_, err = typed.Skip(2)
+	skipped, err := typed.Skip(2)
 	require.NoError(t, err)
+	assert.EqualValues(t, 2, skipped)
 
 	values := make([]int32, 1)
 	defs := make([]int16, 1)
@@ -508,6 +509,234 @@ func TestSkipEmptyRepeatedRows(t *testing.T) {
 	assert.Equal(t, []int32{42}, values)
 	assert.Equal(t, []int16{1}, defs)
 	assert.Equal(t, []int16{0}, reps)
+}
+
+func TestSkipStopsAtDecodeError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	node, err := schema.NewPrimitiveNode("value", parquet.Repetitions.Required, parquet.Types.ByteArray, -1, -1)
+	require.NoError(t, err)
+	descr := schema.NewColumn(node, 0, 0)
+
+	t.Run("fails on the first value", func(t *testing.T) {
+		// the length prefix runs past the data, so only decoding fails
+		body := memory.NewBufferBytes([]byte{3, 0, 0, 0, 'a'})
+		page := file.NewDataPageV1(body, 20, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(body.Len()))
+		defer page.Release()
+
+		pages := new(testutils.MockPageReader)
+		pages.Test(t)
+		pages.TestData().Set("pages", []file.Page{page})
+		pages.On("Err").Return((error)(nil))
+		r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
+		defer r.Close()
+
+		n, err := r.Skip(10)
+		require.Error(t, err)
+		assert.EqualValues(t, 0, n)
+	})
+
+	t.Run("valid value before the bad one", func(t *testing.T) {
+		first := memory.NewBufferBytes([]byte{1, 0, 0, 0, 'a', 1, 0, 0, 0, 'b'})
+		firstPage := file.NewDataPageV1(first, 2, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(first.Len()))
+		defer firstPage.Release()
+
+		// the length prefix runs past the data, so only decoding fails
+		second := memory.NewBufferBytes([]byte{1, 0, 0, 0, 'a', 3, 0, 0, 0})
+		secondPage := file.NewDataPageV1(second, 3, parquet.Encodings.Plain, parquet.Encodings.RLE, parquet.Encodings.RLE, int32(second.Len()))
+		defer secondPage.Release()
+
+		pages := new(testutils.MockPageReader)
+		pages.Test(t)
+		pages.TestData().Set("pages", []file.Page{firstPage, secondPage})
+		pages.On("Err").Return((error)(nil))
+		r := file.NewColumnReader(descr, pages, mem, nil).(*file.ByteArrayColumnChunkReader)
+		defer r.Close()
+
+		n, err := r.Skip(4)
+		require.Error(t, err)
+		assert.EqualValues(t, 2, n)
+	})
+}
+
+func TestSkipPastEndOfColumn(t *testing.T) {
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("values", parquet.Repetitions.Required, -1),
+	}, -1)))
+
+	var out bytes.Buffer
+	w := file.NewParquetWriter(&out, sc.Root(), file.WithWriterProps(
+		parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	rg := w.AppendRowGroup()
+	cw, err := rg.NextColumn()
+	require.NoError(t, err)
+	_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1, 2, 3, 4, 5}, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, cw.Close())
+	require.NoError(t, rg.Close())
+	require.NoError(t, w.Close())
+
+	r, err := file.NewParquetReader(bytes.NewReader(out.Bytes()))
+	require.NoError(t, err)
+	defer r.Close()
+	col, err := r.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	icr := col.(*file.Int32ColumnChunkReader)
+
+	skipped, err := icr.Skip(15)
+	require.NoError(t, err)
+	assert.EqualValues(t, 5, skipped)
+
+	skipped, err = icr.Skip(1)
+	require.NoError(t, err)
+	assert.Zero(t, skipped)
+}
+
+func TestSkipAndSeekRepeatedAcrossPages(t *testing.T) {
+	const numRows = 200
+
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("values", parquet.Repetitions.Repeated, -1),
+	}, -1)))
+
+	var (
+		values    []int32
+		defs      []int16
+		reps      []int16
+		rowStarts []int
+	)
+	for row := 0; row < numRows; row++ {
+		rowStarts = append(rowStarts, len(reps))
+		for i := 0; i < row%4+1; i++ {
+			values = append(values, int32(row*10+i))
+			defs = append(defs, 1)
+			if i == 0 {
+				reps = append(reps, 0)
+			} else {
+				reps = append(reps, 1)
+			}
+		}
+	}
+
+	for _, version := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+		t.Run(fmt.Sprintf("DataPageVersion=%v", version+1), func(t *testing.T) {
+			var out bytes.Buffer
+			w := file.NewParquetWriter(&out, sc.Root(), file.WithWriterProps(parquet.NewWriterProperties(
+				parquet.WithDataPageVersion(version),
+				parquet.WithDictionaryDefault(false),
+				parquet.WithDataPageSize(64),
+				parquet.WithBatchSize(16),
+				parquet.WithPageIndexEnabled(true))))
+			rg := w.AppendRowGroup()
+			cw, err := rg.NextColumn()
+			require.NoError(t, err)
+			_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(values, defs, reps)
+			require.NoError(t, err)
+			require.NoError(t, cw.Close())
+			require.NoError(t, rg.Close())
+			require.NoError(t, w.Close())
+			data := out.Bytes()
+
+			pf, err := file.NewParquetReader(bytes.NewReader(data))
+			require.NoError(t, err)
+			rgIdx, err := pf.GetPageIndexReader().RowGroup(0)
+			require.NoError(t, err)
+			oidx, err := rgIdx.GetOffsetIndex(0)
+			require.NoError(t, err)
+			locs := oidx.GetPageLocations()
+			require.NoError(t, pf.Close())
+			require.Greater(t, len(locs), 2, "test data must span several data pages")
+			require.GreaterOrEqual(t, locs[1].FirstRowIndex, int64(4), "first page must hold several rows")
+			require.GreaterOrEqual(t, locs[2].FirstRowIndex-locs[1].FirstRowIndex, int64(3), "second page must hold several rows")
+			secondPageRow := int(locs[1].FirstRowIndex)
+
+			newReader := func(t *testing.T) *file.Int32ColumnChunkReader {
+				r, err := file.NewParquetReader(bytes.NewReader(data))
+				require.NoError(t, err)
+				t.Cleanup(func() { r.Close() })
+				col, err := r.RowGroup(0).Column(0)
+				require.NoError(t, err)
+				t.Cleanup(func() { col.Close() })
+				return col.(*file.Int32ColumnChunkReader)
+			}
+
+			checkLevels := func(t *testing.T, col *file.Int32ColumnChunkReader, from, to int) {
+				n := to - from
+				gotVals := make([]int32, n)
+				gotDefs := make([]int16, n)
+				gotReps := make([]int16, n)
+				levels, nvals, err := col.ReadBatch(int64(n), gotVals, gotDefs, gotReps)
+				require.NoError(t, err)
+				require.EqualValues(t, n, levels)
+				assert.Equal(t, reps[from:to], gotReps[:levels])
+				assert.Equal(t, defs[from:to], gotDefs[:levels])
+				assert.Equal(t, values[from:to], gotVals[:nvals])
+			}
+
+			skipRows := func(t *testing.T, col *file.Int32ColumnChunkReader, n int) {
+				skipped, err := col.Skip(int64(n))
+				require.NoError(t, err)
+				require.EqualValues(t, n, skipped)
+			}
+
+			t.Run("seek within a page", func(t *testing.T) {
+				col := newReader(t)
+				require.NoError(t, col.SeekToRow(1))
+				checkLevels(t, col, rowStarts[1], rowStarts[2])
+
+				require.NoError(t, col.SeekToRow(2))
+				checkLevels(t, col, rowStarts[2], len(reps))
+			})
+
+			t.Run("seek to the start of the next page", func(t *testing.T) {
+				col := newReader(t)
+				require.NoError(t, col.SeekToRow(1))
+				checkLevels(t, col, rowStarts[1], rowStarts[2])
+
+				require.NoError(t, col.SeekToRow(int64(secondPageRow)))
+				checkLevels(t, col, rowStarts[secondPageRow], rowStarts[secondPageRow+3])
+			})
+
+			t.Run("skip after skip", func(t *testing.T) {
+				col := newReader(t)
+				skipRows(t, col, 1)
+				skipRows(t, col, 1)
+				checkLevels(t, col, rowStarts[2], len(reps))
+			})
+
+			t.Run("skip after read", func(t *testing.T) {
+				col := newReader(t)
+				checkLevels(t, col, 0, rowStarts[1])
+				skipRows(t, col, 1)
+				checkLevels(t, col, rowStarts[2], len(reps))
+			})
+
+			t.Run("skip across a page boundary", func(t *testing.T) {
+				col := newReader(t)
+				require.NoError(t, col.SeekToRow(1))
+				skipRows(t, col, secondPageRow)
+				checkLevels(t, col, rowStarts[secondPageRow+1], rowStarts[secondPageRow+2])
+			})
+
+			t.Run("skip past the end", func(t *testing.T) {
+				const remaining = 3
+				col := newReader(t)
+				require.NoError(t, col.SeekToRow(numRows-remaining))
+				skipped, err := col.Skip(numRows)
+				require.NoError(t, err)
+				require.EqualValues(t, remaining, skipped)
+				assert.False(t, col.HasNext())
+			})
+
+			t.Run("skip after seek", func(t *testing.T) {
+				col := newReader(t)
+				require.NoError(t, col.SeekToRow(1))
+				skipRows(t, col, 1)
+				checkLevels(t, col, rowStarts[2], len(reps))
+			})
+		})
+	}
 }
 
 func (p *PrimitiveReaderSuite) TestReadBatchMultiPage() {
@@ -677,14 +906,45 @@ func (p *PrimitiveReaderSuite) TestDictionaryEncodedPages() {
 		p.pages = p.pages[:0]
 	})
 
-	p.Run("Unsupported encoding", func() {
-		dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, parquet.Encodings.DeltaByteArray, dummy, nil, nil, 0, 0, 0)
-		p.pages = append(p.pages, dataPage)
-		p.initReader(descr)
-		p.Panics(func() { p.reader.HasNext() })
-		// p.Error(p.reader.Err())
-		p.pages = p.pages[:0]
-	})
+	// The decoder is chosen before the page body is read, so the body is empty.
+	unsupported := []struct {
+		enc   parquet.Encoding
+		want  string
+		types []parquet.Type
+	}{
+		{parquet.Encodings.RLE, "RLE encoding only supports BOOLEAN",
+			[]parquet.Type{parquet.Types.Int32}},
+		{parquet.Encodings.DeltaBinaryPacked, "DELTA_BINARY_PACKED encoding only supports INT32 and INT64",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int96, parquet.Types.Float, parquet.Types.Double,
+				parquet.Types.ByteArray, parquet.Types.FixedLenByteArray}},
+		{parquet.Encodings.DeltaLengthByteArray, "DELTA_LENGTH_BYTE_ARRAY encoding only supports BYTE_ARRAY",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int32, parquet.Types.Int64, parquet.Types.Int96,
+				parquet.Types.Float, parquet.Types.Double, parquet.Types.FixedLenByteArray}},
+		{parquet.Encodings.DeltaByteArray, "DELTA_BYTE_ARRAY encoding only supports BYTE_ARRAY and FIXED_LEN_BYTE_ARRAY",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int32, parquet.Types.Int64, parquet.Types.Int96,
+				parquet.Types.Float, parquet.Types.Double}},
+		{parquet.Encodings.ByteStreamSplit, "BYTE_STREAM_SPLIT encoding only supports INT32, INT64, FLOAT, DOUBLE and FIXED_LEN_BYTE_ARRAY",
+			[]parquet.Type{parquet.Types.Boolean, parquet.Types.Int96, parquet.Types.ByteArray}},
+	}
+	for _, tt := range unsupported {
+		for _, typ := range tt.types {
+			p.Run(fmt.Sprintf("Unsupported encoding %s for %s", tt.enc, typ), func() {
+				typeLen := int32(-1)
+				if typ == parquet.Types.FixedLenByteArray {
+					typeLen = 4
+				}
+				node, err := schema.NewPrimitiveNode("a", parquet.Repetitions.Required, typ, -1, typeLen)
+				p.Require().NoError(err)
+				descr := schema.NewColumn(node, p.maxDefLvl, p.maxRepLvl)
+				dataPage := testutils.MakeDataPage(p.dataPageVersion, descr, nil, 0, tt.enc, dummy, nil, nil, 0, 0, 0)
+				p.pages = append(p.pages, dataPage)
+				p.initReader(descr)
+				p.NotPanics(func() { p.False(p.reader.HasNext()) })
+				p.ErrorContains(p.reader.Err(), fmt.Sprintf("%s, got %s", tt.want, typ))
+				p.pages = p.pages[:0]
+			})
+		}
+	}
 
 	p.pages = p.pages[:2]
 }
@@ -1225,7 +1485,7 @@ func TestALPOnIntegerColumnIsRejected(t *testing.T) {
 	r := file.NewColumnReader(descr, pages, mem, nil)
 	defer r.Close()
 	total, read, err := r.(*file.Int32ColumnChunkReader).ReadBatch(4, make([]int32, 4), nil, nil)
-	require.ErrorContains(t, err, "only float and double support ALP encoding")
+	require.ErrorContains(t, err, "ALP encoding only supports FLOAT and DOUBLE")
 	require.Zero(t, total)
 	require.Zero(t, read)
 }
@@ -1335,8 +1595,9 @@ func TestReadBatchStopsAtCorruptPage(t *testing.T) {
 func TestSkipStopsAtCorruptPage(t *testing.T) {
 	icr := newCorruptPageReader(t)
 
-	_, err := icr.Skip(25)
+	n, err := icr.Skip(25)
 	require.ErrorContains(t, err, "invalid checksum")
+	assert.EqualValues(t, 10, n)
 }
 
 func TestSeekToRowAfterCorruptPage(t *testing.T) {

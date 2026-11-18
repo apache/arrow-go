@@ -578,6 +578,8 @@ func init() {
 		arrow.RUN_END_ENCODED: func(dt arrow.DataType) Scalar { return &RunEndEncoded{scalar: scalar{dt, false}} },
 		arrow.BINARY_VIEW:     func(dt arrow.DataType) Scalar { return &BinaryView{&Binary{scalar: scalar{dt, false}}} },
 		arrow.STRING_VIEW:     func(dt arrow.DataType) Scalar { return &StringView{&String{&Binary{scalar: scalar{dt, false}}}} },
+		arrow.LIST_VIEW:       func(dt arrow.DataType) Scalar { return &ListView{&List{scalar: scalar{dt, false}}} },
+		arrow.LARGE_LIST_VIEW: func(dt arrow.DataType) Scalar { return &LargeListView{&List{scalar: scalar{dt, false}}} },
 		// invalid data types to fill out array size 2^6 - 1
 		63: invalidScalarType,
 	}
@@ -641,8 +643,8 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 		defer buf.Release()
 		return NewFixedSizeBinaryScalar(buf, arr.DataType()), nil
 	case *array.FixedSizeList:
-		size := int(arr.DataType().(*arrow.FixedSizeListType).Len())
-		slice := array.NewSlice(arr.ListValues(), int64(idx*size), int64((idx+1)*size))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewFixedSizeListScalarWithType(slice, arr.DataType()), nil
 	case *array.Float16:
@@ -668,18 +670,28 @@ func GetScalar(arr arrow.Array, idx int) (Scalar, error) {
 	case *array.Uint64:
 		return NewUint64Scalar(arr.Value(idx)), nil
 	case *array.List:
-		offsets := arr.Offsets()
-		slice := array.NewSlice(arr.ListValues(), int64(offsets[idx]), int64(offsets[idx+1]))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewListScalar(slice), nil
 	case *array.LargeList:
-		offsets := arr.Offsets()
-		slice := array.NewSlice(arr.ListValues(), int64(offsets[idx]), int64(offsets[idx+1]))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewLargeListScalar(slice), nil
+	case *array.ListView:
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
+		defer slice.Release()
+		return NewListViewScalarWithType(slice, arr.DataType()), nil
+	case *array.LargeListView:
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
+		defer slice.Release()
+		return NewLargeListViewScalarWithType(slice, arr.DataType()), nil
 	case *array.Map:
-		offsets := arr.Offsets()
-		slice := array.NewSlice(arr.ListValues(), int64(offsets[idx]), int64(offsets[idx+1]))
+		start, end := arr.ValueOffsets(idx)
+		slice := array.NewSlice(arr.ListValues(), start, end)
 		defer slice.Release()
 		return NewMapScalar(slice), nil
 	case *array.MonthInterval:
@@ -942,6 +954,34 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		offsetsBuf := createOffsets(int64(s.Value.Len()))
 		defer offsetsBuf.Release()
 		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf}, []arrow.ArrayData{valueArray.Data()}, 0, 0)
+		defer data.Release()
+		return array.MakeFromData(data), nil
+	case *ListView, *LargeListView:
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+		value := s.(ListScalar).GetList()
+		valueArray, err := array.Concatenate([]arrow.Array{value}, mem)
+		if err != nil {
+			return nil, err
+		}
+		defer valueArray.Release()
+
+		// Every element has offset 0 and the same size, so they all
+		// view the one copy of the values.
+		offsetTraits := sc.DataType().(arrow.OffsetsDataType).OffsetTypeTraits()
+		offsetsBuf := createBuffer(make([]byte, offsetTraits.BytesRequired(1)))
+		defer offsetsBuf.Release()
+		var size []byte
+		if offsetTraits.BytesRequired(1) == arrow.Int64SizeBytes {
+			size = arrow.Int64Traits.CastToBytes([]int64{int64(value.Len())})
+		} else {
+			size = arrow.Int32Traits.CastToBytes([]int32{int32(value.Len())})
+		}
+		sizesBuf := createBuffer(size)
+		defer sizesBuf.Release()
+
+		data := array.NewData(s.DataType(), length, []*memory.Buffer{nil, offsetsBuf, sizesBuf}, []arrow.ArrayData{valueArray.Data()}, 0, 0)
 		defer data.Release()
 		return array.MakeFromData(data), nil
 	case *FixedSizeList:

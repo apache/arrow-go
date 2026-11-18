@@ -34,3 +34,17 @@ func setOffsetsForScalar[T int32 | int64](span *ArraySpan, buf []T, valueSize in
 	span.Buffers[bufidx].Owner = nil
 	span.Buffers[bufidx].SelfAlloc = false
 }
+
+// buf holds the single offset followed by the single size.
+func setOffsetsAndSizesForScalar[T int32 | int64](span *ArraySpan, buf []T, valueSize int64) {
+	buf[0] = 0
+	buf[1] = T(valueSize)
+
+	width := int(unsafe.Sizeof(T(0)))
+	bytes := unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(buf))), 2*width)
+	for i := 1; i <= 2; i++ {
+		span.Buffers[i].Buf = bytes[(i-1)*width : i*width]
+		span.Buffers[i].Owner = nil
+		span.Buffers[i].SelfAlloc = false
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -75,6 +76,11 @@ func (l *List) Validate() (err error) {
 		err = fmt.Errorf("%s scalar should have a value of type %s, got %s",
 			listType, valueType, l.Value.DataType())
 	}
+	if err == nil && l.Type.ID() == arrow.LIST_VIEW && l.Value.Len() > math.MaxInt32 {
+		// A list view stores each size as an int32.
+		err = fmt.Errorf("%w: %s scalar value of %d elements exceeds the list view size limit of %d",
+			arrow.ErrInvalid, listType, l.Value.Len(), math.MaxInt32)
+	}
 	return
 }
 
@@ -128,6 +134,52 @@ func NewLargeListScalar(val arrow.Array) *LargeList {
 
 func NewLargeListScalarData(val arrow.ArrayData) *LargeList {
 	return &LargeList{&List{scalar{arrow.LargeListOf(val.DataType()), true}, array.MakeFromData(val)}}
+}
+
+type ListView struct {
+	*List
+}
+
+func (l *ListView) CastTo(to arrow.DataType) (Scalar, error) {
+	if l.Valid && arrow.TypeEqual(l.Type, to) {
+		return l, nil
+	}
+	return l.List.CastTo(to)
+}
+
+func NewListViewScalar(val arrow.Array) *ListView {
+	return NewListViewScalarWithType(val, arrow.ListViewOf(val.DataType()))
+}
+
+func NewListViewScalarWithType(val arrow.Array, typ arrow.DataType) *ListView {
+	return &ListView{&List{scalar{typ, true}, array.MakeFromData(val.Data())}}
+}
+
+func NewListViewScalarData(val arrow.ArrayData) *ListView {
+	return &ListView{&List{scalar{arrow.ListViewOf(val.DataType()), true}, array.MakeFromData(val)}}
+}
+
+type LargeListView struct {
+	*List
+}
+
+func (l *LargeListView) CastTo(to arrow.DataType) (Scalar, error) {
+	if l.Valid && arrow.TypeEqual(l.Type, to) {
+		return l, nil
+	}
+	return l.List.CastTo(to)
+}
+
+func NewLargeListViewScalar(val arrow.Array) *LargeListView {
+	return NewLargeListViewScalarWithType(val, arrow.LargeListViewOf(val.DataType()))
+}
+
+func NewLargeListViewScalarWithType(val arrow.Array, typ arrow.DataType) *LargeListView {
+	return &LargeListView{&List{scalar{typ, true}, array.MakeFromData(val.Data())}}
+}
+
+func NewLargeListViewScalarData(val arrow.ArrayData) *LargeListView {
+	return &LargeListView{&List{scalar{arrow.LargeListViewOf(val.DataType()), true}, array.MakeFromData(val)}}
 }
 
 func makeMapType(typ *arrow.StructType) *arrow.MapType {

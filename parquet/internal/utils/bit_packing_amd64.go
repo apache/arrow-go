@@ -26,6 +26,7 @@ import (
 func init() {
 	if cpu.X86.HasAVX2 {
 		unpack32 = unpack32Avx2
+		unpack32Bytes = unpack32BytesAvx2
 	} else { // default to the pure go implementation if no avx2 available
 		unpack32 = unpack32Default
 	}

@@ -198,3 +198,37 @@ func BenchmarkALPDecodingFloat64Batched(b *testing.B) {
 		})
 	}
 }
+
+// Whole numbers up to 2^50 pack at about 50 bits each with no exceptions,
+// which is wider than the 32 bits the vectorized unpackers handle.
+func BenchmarkALPDecodingFloat64Wide(b *testing.B) {
+	for sz := MINSIZE; sz < MAXSIZE+1; sz *= 2 {
+		b.Run(fmt.Sprintf("len %d", sz), func(b *testing.B) {
+			values := make([]float64, sz)
+			for i := range values {
+				values[i] = float64((uint64(i) * 0x9E3779B97F4A7C15) >> 14)
+			}
+			output := make([]float64, sz)
+			encoder := encoding.NewEncoder(parquet.Types.Double, parquet.Encodings.ALP,
+				false, nil, memory.DefaultAllocator).(encoding.Float64Encoder)
+			defer encoder.Release()
+			encoder.Put(values)
+			buf, _ := encoder.FlushValues()
+			defer buf.Release()
+
+			decoder := encoding.NewDecoder(parquet.Types.Double, parquet.Encodings.ALP,
+				nil, memory.DefaultAllocator).(encoding.Float64Decoder)
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.SetBytes(int64(len(values) * arrow.Float64SizeBytes))
+			for b.Loop() {
+				if err := decoder.SetData(sz, buf.Bytes()); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := decoder.Decode(output); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

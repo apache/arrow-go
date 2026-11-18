@@ -190,13 +190,22 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 		}
 		bldr.ValueBuilder().Reserve(numChildren)
 
+		// List-view builders do not support Append and need the size up front.
+		appendList := func(int) { bldr.Append(true) }
+		switch b := bldr.(type) {
+		case *array.ListViewBuilder:
+			appendList = func(n int) { b.AppendWithSize(true, n) }
+		case *array.LargeListViewBuilder:
+			appendList = func(n int) { b.AppendWithSize(true, n) }
+		}
+
 		for _, s := range scalars {
 			if !s.IsValid() {
 				bldr.AppendNull()
 				continue
 			}
-			bldr.Append(true)
 			list := s.(ListScalar).GetList()
+			appendList(list.Len())
 			for i := 0; i < list.Len(); i++ {
 				sc, err := GetScalar(list, i)
 				if err != nil {

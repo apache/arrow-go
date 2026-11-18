@@ -1081,20 +1081,31 @@ func TestListElementRefPerRow(t *testing.T) {
 		slice    [2]int64
 		offset   int32
 		expected string
+		build    func(memory.Allocator) arrow.Array
 	}{
-		{"offset beyond the row count", arrow.ListOf(str), `[["a", "b", "c"], ["d", "e", "f"]]`, [2]int64{}, 2, `["c", "f"]`},
-		{"null row", arrow.ListOf(str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`},
-		{"sliced", arrow.ListOf(str), `[["a", "b"], ["c", "d"], null, ["g", "h"]]`, [2]int64{1, 4}, 1, `["d", null, "h"]`},
-		{"large list", arrow.LargeListOf(str), `[["a", "b"], ["c", "d"]]`, [2]int64{}, 1, `["b", "d"]`},
-		{"fixed size list", arrow.FixedSizeListOf(2, str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`},
+		{"offset beyond the row count", arrow.ListOf(str), `[["a", "b", "c"], ["d", "e", "f"]]`, [2]int64{}, 2, `["c", "f"]`, nil},
+		{"null row", arrow.ListOf(str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`, nil},
+		{"sliced", arrow.ListOf(str), `[["a", "b"], ["c", "d"], null, ["g", "h"]]`, [2]int64{1, 4}, 1, `["d", null, "h"]`, nil},
+		{"large list", arrow.LargeListOf(str), `[["a", "b"], ["c", "d"]]`, [2]int64{}, 1, `["b", "d"]`, nil},
+		{"fixed size list", arrow.FixedSizeListOf(2, str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`, nil},
+		{"list view out of order and overlapping", nil, "", [2]int64{}, 1, `["e", "b", "c"]`, makeListView(false, []int32{3, 0, 1}, []int32{2, 3, 3}, nil)},
+		{"list view sliced", nil, "", [2]int64{1, 4}, 1, `["b", null, "c"]`, makeListView(false, []int32{4, 0, 2, 1}, []int32{2, 2, 2, 3}, []bool{true, true, false, true})},
+		{"large list view out of order and overlapping", nil, "", [2]int64{}, 1, `["e", "b", "c"]`, makeListView(true, []int32{3, 0, 1}, []int32{2, 3, 3}, nil)},
+		{"large list view sliced", nil, "", [2]int64{1, 4}, 1, `["b", null, "c"]`, makeListView(true, []int32{4, 0, 2, 1}, []int32{2, 2, 2, 3}, []bool{true, true, false, true})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 
-			lists, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.json))
-			require.NoError(t, err)
+			var lists arrow.Array
+			if tt.build != nil {
+				lists = tt.build(mem)
+			} else {
+				var err error
+				lists, _, err = array.FromJSON(mem, tt.dt, strings.NewReader(tt.json))
+				require.NoError(t, err)
+			}
 			if tt.slice != [2]int64{} {
 				sliced := array.NewSlice(lists, tt.slice[0], tt.slice[1])
 				lists.Release()
@@ -1117,17 +1128,26 @@ func TestListElementRefPerRow(t *testing.T) {
 		name   string
 		json   string
 		offset int32
+		build  func(memory.Allocator) arrow.Array
 	}{
-		{"past the end of one row", `[["a", "b"], ["c"]]`, 1},
-		{"negative offset", `[["a", "b"], ["c", "d"]]`, -1},
+		{"past the end of one row", `[["a", "b"], ["c"]]`, 1, nil},
+		{"negative offset", `[["a", "b"], ["c", "d"]]`, -1, nil},
+		{"past the end of one list view", "", 1, makeListView(false, []int32{3, 1}, []int32{3, 1}, nil)},
+		{"past the end of one large list view", "", 1, makeListView(true, []int32{3, 1}, []int32{3, 1}, nil)},
 	}
 	for _, tt := range errTests {
 		t.Run("error "+tt.name, func(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
 
-			lists, _, err := array.FromJSON(mem, arrow.ListOf(str), strings.NewReader(tt.json))
-			require.NoError(t, err)
+			var lists arrow.Array
+			if tt.build != nil {
+				lists = tt.build(mem)
+			} else {
+				var err error
+				lists, _, err = array.FromJSON(mem, arrow.ListOf(str), strings.NewReader(tt.json))
+				require.NoError(t, err)
+			}
 			defer lists.Release()
 			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
 				compute.NewDatumWithoutOwning(lists), extSet)
@@ -1185,6 +1205,37 @@ func TestListElementRefPerRow(t *testing.T) {
 		defer expected.Release()
 		assertEqual(t, expected, result)
 	})
+}
+
+// makeListView returns a function that builds a (large) list view whose rows
+// are the given views over the strings "a" to "f". A nil valid means all rows
+// are valid.
+func makeListView(large bool, offsets, sizes []int32, valid []bool) func(memory.Allocator) arrow.Array {
+	return func(mem memory.Allocator) arrow.Array {
+		values := []string{"a", "b", "c", "d", "e", "f"}
+		if valid == nil {
+			valid = make([]bool, len(offsets))
+			for i := range valid {
+				valid[i] = true
+			}
+		}
+		if !large {
+			b := array.NewListViewBuilder(mem, arrow.BinaryTypes.String)
+			defer b.Release()
+			b.ValueBuilder().(*array.StringBuilder).AppendValues(values, nil)
+			b.AppendValuesWithSizes(offsets, sizes, valid)
+			return b.NewArray()
+		}
+		b := array.NewLargeListViewBuilder(mem, arrow.BinaryTypes.String)
+		defer b.Release()
+		b.ValueBuilder().(*array.StringBuilder).AppendValues(values, nil)
+		offsets64, sizes64 := make([]int64, len(offsets)), make([]int64, len(sizes))
+		for i := range offsets {
+			offsets64[i], sizes64[i] = int64(offsets[i]), int64(sizes[i])
+		}
+		b.AppendValuesWithSizes(offsets64, sizes64, valid)
+		return b.NewArray()
+	}
 }
 
 func TestNestedFieldRefSlicedStruct(t *testing.T) {

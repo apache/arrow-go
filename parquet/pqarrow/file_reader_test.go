@@ -772,6 +772,53 @@ func TestRecordReaderSeekToRowEncryptedDictionary(t *testing.T) {
 	require.Equal(t, want[row:row+len(got)], got)
 }
 
+func TestRecordReaderSeekToRowRepeated(t *testing.T) {
+	sc := arrow.NewSchema([]arrow.Field{{Name: "x", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32), Nullable: true}}, nil)
+
+	for _, dataPageVersion := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+		t.Run(fmt.Sprintf("DataPageVersion=%v", dataPageVersion+1), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			tbl, err := array.TableFromJSON(mem, sc, []string{`[
+				{"x": [1, 2, 3, 4]},
+				{"x": [5]},
+				{"x": [6]},
+				{"x": [7, 8]}
+			]`})
+			require.NoError(t, err)
+			defer tbl.Release()
+
+			var buf bytes.Buffer
+			props := parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithDataPageVersion(dataPageVersion))
+			require.NoError(t, pqarrow.WriteTable(tbl, &buf, 2, props, pqarrow.NewArrowWriterProperties(pqarrow.WithAllocator(mem))))
+
+			pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+			require.NoError(t, err)
+			defer pf.Close()
+
+			reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 10}, mem)
+			require.NoError(t, err)
+
+			rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+			require.NoError(t, err)
+			defer rr.Release()
+
+			require.NoError(t, rr.SeekToRow(1))
+
+			var got []string
+			for rr.Next() {
+				rec := rr.RecordBatch()
+				for i := 0; i < int(rec.NumRows()); i++ {
+					got = append(got, rec.Column(0).ValueStr(i))
+				}
+			}
+			require.NoError(t, rr.Err())
+			assert.Equal(t, []string{"[5]", "[6]", "[7,8]"}, got)
+		})
+	}
+}
+
 func TestFileReaderWriterMetadata(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
