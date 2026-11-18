@@ -489,8 +489,8 @@ func (fw *FileWriter) AppendKeyValueMetadata(key string, value string) error {
 	return fw.wr.AppendKeyValueMetadata(key, value)
 }
 
-// Close flushes out the data and closes the file. It can be called multiple times,
-// subsequent calls after the first will have no effect. If the underlying writer implements
+// Close flushes out the data and closes the file. It can be called multiple times.
+// Subsequent calls do nothing and return the error from the first call. If the underlying writer implements
 // [io.Closer], then this will also call Close on the underlying writer.
 func (fw *FileWriter) Close() error {
 	if !fw.closed {
