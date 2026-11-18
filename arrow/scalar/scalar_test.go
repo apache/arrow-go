@@ -3539,6 +3539,22 @@ func (s *UnionScalarSuite) TestValidateErrors() {
 		s.Error(sc.ValidateFull())
 	}
 
+	// underlying value is missing, whether or not the scalar is declared valid
+	for _, valid := range []bool{false, true} {
+		switch missing := s.scalarFromValue(1, s.two).(type) {
+		case *scalar.DenseUnion:
+			missing.Valid = valid
+			missing.Value = nil
+			s.Error(missing.Validate())
+			s.Error(missing.ValidateFull())
+		case *scalar.SparseUnion:
+			missing.Valid = valid
+			missing.Value[1] = nil
+			s.Error(missing.Validate())
+			s.Error(missing.ValidateFull())
+		}
+	}
+
 	// underlying value has invalid utf8
 	sc = s.scalarFromValue(0, scalar.NewStringScalar("\xff"))
 	s.NoError(sc.Validate())

@@ -189,15 +189,28 @@ func TestMakeArrayFromInvalidNestedScalar(t *testing.T) {
 	dense := arrow.DenseUnionOf(fields, []arrow.UnionTypeCode{5, 7})
 	uuidType := extensions.NewUUIDType()
 
+	denseNoValue := scalar.NewDenseUnionScalar(scalar.NewInt32Scalar(1), 5, dense)
+	denseNoValue.Valid = false
+	denseNoValue.Value = nil
+	sparseNoValue := scalar.NewSparseUnionScalar(
+		[]scalar.Scalar{scalar.NewInt32Scalar(10), scalar.NewStringScalar("x")}, 5, sparse)
+	sparseNoValue.Valid = false
+	sparseNoValue.Value[0] = nil
+
 	tests := []struct {
 		name    string
 		sc      scalar.Scalar
 		wantErr string
 	}{
 		{name: "sparse union with a missing child", sc: scalar.NewSparseUnionScalar(
-			[]scalar.Scalar{scalar.NewInt32Scalar(10)}, 5, sparse), wantErr: "sparse union scalar value had"},
+			[]scalar.Scalar{scalar.NewInt32Scalar(10)}, 5, sparse),
+			wantErr: "sparse union scalar value had 1 fields but type has 2 fields"},
+		{name: "sparse union with a missing child value", sc: sparseNoValue,
+			wantErr: "value for field i: type=int32, nullable is missing"},
 		{name: "dense union with an unknown type code", sc: scalar.NewDenseUnionScalar(
 			scalar.NewInt32Scalar(10), 6, dense), wantErr: "invalid type code 6"},
+		{name: "dense union without a value", sc: denseNoValue,
+			wantErr: "scalar with type code 5 doesn't have an underlying value"},
 		{name: "extension without a storage value", sc: scalar.NewExtensionScalar(nil, uuidType),
 			wantErr: "doesn't have a storage value"},
 		{name: "extension with a non extension type", sc: scalar.NewExtensionScalar(
