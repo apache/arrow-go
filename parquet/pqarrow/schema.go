@@ -978,7 +978,13 @@ func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx
 }
 
 func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
-	if n.LogicalType().Equals(schema.NewListLogicalType()) {
+	if vector, ok := n.LogicalType().(schema.FiniteVectorLogicalType); ok {
+		if err := listToSchemaField(n, currentLevels, ctx, parent, out); err != nil {
+			return err
+		}
+		out.Field.Type = arrow.FixedSizeListOfField(vector.NumElements(), *out.Children[0].Field)
+		return nil
+	} else if n.LogicalType().Equals(schema.NewListLogicalType()) {
 		return listToSchemaField(n, currentLevels, ctx, parent, out)
 	} else if n.LogicalType().Equals(schema.MapLogicalType{}) {
 		return mapToSchemaField(n, currentLevels, ctx, parent, out)
@@ -1131,6 +1137,13 @@ func getNestedFactory(origin, inferred arrow.DataType) func(fieldList []arrow.Fi
 				return arrow.LargeListOfField(list[0])
 			}
 		}
+	case arrow.FIXED_SIZE_LIST:
+		size := inferred.(*arrow.FixedSizeListType).Len()
+		if original, ok := origin.(*arrow.FixedSizeListType); ok && original.Len() == size {
+			return func(list []arrow.Field) arrow.DataType {
+				return arrow.FixedSizeListOfField(size, list[0])
+			}
+		}
 	case arrow.MAP:
 		if origin.ID() == arrow.MAP {
 			return func(list []arrow.Field) arrow.DataType {
@@ -1209,11 +1222,17 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 		}
 
 		modified = origin.Type.ID() != inferred.Field.Type.ID()
-		childModified, err := applyOriginalMetadata(arrow.Field{Type: origin.Type.(arrow.ListLikeType).Elem()}, &inferred.Children[0])
+		originalElement := origin.Type.(arrow.ListLikeType).ElemField()
+		childModified, err := applyOriginalMetadata(originalElement, &inferred.Children[0])
 		if err != nil {
 			return modified, err
 		}
 		modified = modified || childModified
+		if inferred.Field.Type.ID() == arrow.FIXED_SIZE_LIST &&
+			originalElement.Nullable && !inferred.Children[0].Field.Nullable {
+			inferred.Children[0].Field.Nullable = true
+			modified = true
+		}
 		if modified {
 			inferred.Field.Type = factory([]arrow.Field{*inferred.Children[0].Field})
 		}
