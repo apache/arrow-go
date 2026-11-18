@@ -1870,3 +1870,62 @@ func sinkFailureLimits(t *testing.T, full *writeOffsetsSink) []int {
 	slices.Sort(limits)
 	return slices.Compact(limits)
 }
+
+func TestEncryptedPageLimitClose(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		dictionary, buffered bool
+	}{
+		{"PlainSerial", false, false},
+		{"DictionarySerial", true, false},
+		{"DictionaryBuffered", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			const key = "0123456789012345"
+			props := parquet.NewWriterProperties(parquet.WithAllocator(mem),
+				parquet.WithEncryptionProperties(parquet.NewFileEncryptionProperties(key)),
+				parquet.WithDictionaryDefault(tc.dictionary), parquet.WithBatchSize(1), parquet.WithDataPageSize(1))
+			sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required,
+				schema.FieldList{schema.NewInt32Node("col", parquet.Repetitions.Required, -1)}, -1)
+			require.NoError(t, err)
+			var buf bytes.Buffer
+			writer := file.NewParquetWriter(&buf, sc, file.WithWriterProps(props))
+			var rg file.RowGroupWriter
+			var col file.ColumnChunkWriter
+			if tc.buffered {
+				group := writer.AppendBufferedRowGroup()
+				rg = group
+				col, err = group.Column(0)
+			} else {
+				group := writer.AppendRowGroup()
+				rg = group
+				col, err = group.NextColumn()
+			}
+			require.NoError(t, err)
+			_, writeErr := col.(*file.Int32ColumnChunkWriter).WriteBatch(make([]int32, 32770), nil, nil)
+			if tc.dictionary {
+				require.NoError(t, writeErr)
+				if tc.buffered {
+					writeErr = rg.Close()
+				} else {
+					writeErr = col.Close()
+				}
+			}
+			require.ErrorContains(t, writeErr, "more than 32767 pages")
+			failedSize := buf.Len()
+			for i := 0; i < 2; i++ {
+				assert.ErrorContains(t, col.Close(), "more than 32767 pages", "column close %d", i)
+				assert.ErrorContains(t, rg.Close(), "more than 32767 pages", "row group close %d", i)
+				assert.ErrorContains(t, writer.Close(), "more than 32767 pages", "file close %d", i)
+			}
+			assert.ErrorContains(t, writer.FlushWithFooter(), "more than 32767 pages")
+			assert.Equal(t, failedSize, buf.Len(), "close must not append a footer")
+			readProps := parquet.NewReaderProperties(memory.DefaultAllocator)
+			readProps.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(key))
+			_, readErr := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(readProps))
+			assert.Error(t, readErr, "failed writes must not produce a readable footer")
+		})
+	}
+}
