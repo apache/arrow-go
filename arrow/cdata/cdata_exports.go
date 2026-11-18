@@ -55,6 +55,7 @@ import (
 	"runtime/cgo"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -511,17 +512,24 @@ func (rr *cRecordReader) release() {
 }
 
 type cAsyncStreamHandler struct {
+	// mu guards producer: once release returns the producer may be freed,
+	// so it must not be called again.
+	mu        sync.Mutex
 	producer  *CArrowAsyncProducer
 	taskQueue chan taskState
 	ctx       context.Context
 }
 
-func asyncTaskQueue(ctx context.Context, schema *arrow.Schema, recordStream chan<- RecordMessage, taskQueue <-chan taskState, producer *CArrowAsyncProducer) {
+func asyncTaskQueue(ctx context.Context, schema *arrow.Schema, recordStream chan<- RecordMessage, taskQueue <-chan taskState, h *cAsyncStreamHandler) {
 	defer close(recordStream)
 	for {
 		select {
 		case <-ctx.Done():
-			C.goCallCancel(producer)
+			h.mu.Lock()
+			if h.producer != nil {
+				C.goCallCancel(h.producer)
+			}
+			h.mu.Unlock()
 			return
 		case task, ok := <-taskQueue:
 			// if the queue closes or we receive a nil task, we're done
@@ -535,7 +543,11 @@ func asyncTaskQueue(ctx context.Context, schema *arrow.Schema, recordStream chan
 			}
 
 			// request another batch now that we've processed this one
-			C.goCallRequest(producer, C.int64_t(1))
+			h.mu.Lock()
+			if h.producer != nil {
+				C.goCallRequest(h.producer, C.int64_t(1))
+			}
+			h.mu.Unlock()
 
 			var out CArrowDeviceArray
 			if C.goExtractTaskData(&task.task, &out) != C.int(0) {
@@ -573,6 +585,7 @@ func (h *cAsyncStreamHandler) onError(code C.int, message, metadata *C.char) {
 
 func (h *cAsyncStreamHandler) release() {
 	close(h.taskQueue)
+	h.mu.Lock()
 	h.taskQueue, h.producer = nil, nil
-	h.producer = nil
+	h.mu.Unlock()
 }
