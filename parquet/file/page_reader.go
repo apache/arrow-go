@@ -419,8 +419,10 @@ type serializedPageReader struct {
 
 	// Streaming (PageStreamingEnabled) inputs from schema/properties.
 	columnCanStream bool
-	maxRepLevel     int16
 	maxDefLevel     int16
+	// maxRepLevel is also read when seeking, since a V1 data page of a
+	// repeated column does not record how many rows it holds.
+	maxRepLevel int16
 
 	curPageHdr              *format.PageHeader
 	pageOrd                 int16
@@ -908,6 +910,11 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 
 		skipDict := p.dictionaryAtDataOffset()
 		for p.Next() && (p.rowsSeen < rowIdx || (skipDict && p.curPageHdr.GetType() == format.PageType_DICTIONARY_PAGE)) {
+			// rowsSeen counts the levels of V1 pages, which outnumber the rows of
+			// a repeated column, so the column reader counts rows from here
+			if p.maxRepLevel > 0 && p.curPageHdr.GetType() == format.PageType_DATA_PAGE {
+				break
+			}
 		}
 		return p.err
 	}
