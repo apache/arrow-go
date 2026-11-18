@@ -407,6 +407,14 @@ func NewGroupNodeConverted(name string, repetition parquet.Repetition, fields Fi
 // NewGroupNodeLogical constructs a group node with the provided fields and logical type,
 // determining the converted type from the provided logical type.
 func NewGroupNodeLogical(name string, repetition parquet.Repetition, fields FieldList, logical LogicalType, id int32) (n *GroupNode, err error) {
+	// Use the value form throughout the schema so validation and type mapping
+	// handle vectors the same way regardless of how the caller passes them.
+	if vector, ok := logical.(*FiniteVectorLogicalType); ok {
+		if vector == nil {
+			return nil, fmt.Errorf("FINITE_VECTOR %q is nil", name)
+		}
+		logical = *vector
+	}
 	n = &GroupNode{
 		node:   node{typ: Group, name: name, repetition: repetition, logicalType: logical, fieldID: id},
 		fields: fields,

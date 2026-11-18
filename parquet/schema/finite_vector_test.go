@@ -35,12 +35,17 @@ func TestFiniteVectorSchema(t *testing.T) {
 	list, err := NewGroupNode("list", parquet.Repetitions.Repeated, FieldList{element}, -1)
 	require.NoError(t, err)
 
-	_, err = NewGroupNodeLogical("v", parquet.Repetitions.Repeated, FieldList{list}, logical, -1)
+	for _, annotation := range []LogicalType{logical, &logical} {
+		_, err = NewGroupNodeLogical("v", parquet.Repetitions.Repeated, FieldList{list}, annotation, -1)
+		require.Error(t, err)
+		require.Nil(t, list.Parent(), "a rejected group must not become the child's parent")
+	}
+	_, err = NewGroupNodeLogical("v", parquet.Repetitions.Optional, FieldList{list}, (*FiniteVectorLogicalType)(nil), -1)
 	require.Error(t, err)
-	require.Nil(t, list.Parent(), "a rejected group must not become the child's parent")
 
-	vector, err := NewGroupNodeLogical("v", parquet.Repetitions.Optional, FieldList{list}, logical, -1)
+	vector, err := NewGroupNodeLogical("v", parquet.Repetitions.Optional, FieldList{list}, &logical, -1)
 	require.NoError(t, err)
+	require.Equal(t, logical, vector.LogicalType())
 	root, err := NewGroupNode("schema", parquet.Repetitions.Required, FieldList{vector}, -1)
 	require.NoError(t, err)
 
