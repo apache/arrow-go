@@ -81,7 +81,7 @@ type EncryptionConfiguration struct {
 	DataKeyLengthBits int
 
 	// Algorithm picks the Parquet cipher: parquet.AesGcm (the zero value
-	// and the parquet-cpp default) or parquet.AesGcmCtr.
+	// and the parquet-cpp default) or parquet.AesCtr.
 	Algorithm parquet.Cipher
 
 	// SingleWrapping wraps each data encryption key directly with its master
@@ -113,7 +113,10 @@ type EncryptionConfiguration struct {
 // token — parquet-cpp's per-token KEK write cache, additionally scoped
 // to the KMS instance so wraps are never shared across deployments.
 // Entries expire after the cache lifetime (DefaultKekCacheLifetime,
-// tunable with WithKekCacheLifetime) and are then wrapped again.
+// tunable with WithKekCacheLifetime) and are then wrapped again; a new
+// entry joining the map sweeps out expired ones (parquet-cpp's
+// CheckCacheForExpiredTokens), so rotating access tokens don't keep
+// stale plaintext KEKs in memory.
 // Generation is serialized per cache entry, so files under different
 // master keys wrap concurrently; only writers sharing a KEK wait for
 // one another.
@@ -122,7 +125,7 @@ type CryptoFactory struct {
 	kekLifetime   time.Duration
 
 	mu   sync.Mutex // guards the keks map only
-	keks map[kekReuseKey]*cachedKek
+	keks map[kekReuseKey]*kekSlot
 }
 
 // kekReuseKey identifies the KEK cached for a master key under one KMS
@@ -136,10 +139,11 @@ type kekReuseKey struct {
 }
 
 // cachedKek is a generated key encryption key together with its KMS-wrapped
-// form, ready to be stamped into key material. Its mutex serializes
-// (re)generation so the KMS call is made once per entry.
+// form, ready to be stamped into key material. Entries are immutable once
+// published: a refresh installs a brand-new value instead of mutating the
+// old one, so a KEK handed to a writer can never change — let alone tear —
+// underneath the unlocked reads in wrapDataKey.
 type cachedKek struct {
-	mu        sync.Mutex
 	createdAt time.Time
 
 	id      []byte // raw KEK id; also the AAD for local data key wrapping
@@ -147,11 +151,21 @@ type cachedKek struct {
 	wrapped string // KmsClient-wrapped KEK
 }
 
+// kekSlot owns the KEK cached for one kekReuseKey. Its mutex serializes
+// (re)generation so the KMS call is made once per refresh and guards the
+// cur pointer; the cachedKek it holds is immutable once published.
+type kekSlot struct {
+	mu  sync.Mutex
+	cur *cachedKek
+}
+
 // A CryptoFactoryOption configures a CryptoFactory.
 type CryptoFactoryOption func(*CryptoFactory)
 
 // WithKekCacheLifetime sets how long cached key encryption keys are
-// reused before being wrapped again.
+// reused before being wrapped again. A zero or negative duration falls
+// back to DefaultKekCacheLifetime — caching cannot be disabled by
+// passing 0.
 func WithKekCacheLifetime(d time.Duration) CryptoFactoryOption {
 	return func(f *CryptoFactory) { f.kekLifetime = d }
 }
@@ -317,9 +331,11 @@ func (f *CryptoFactory) wrapDataKey(client KmsClient, kmsCfg KmsConnectionConfig
 
 // kekFor returns the cached key encryption key for masterKeyID under the
 // config's key access token, generating and wrapping a fresh one on first
-// use or once the cache lifetime has passed. Each cache entry has its own
-// lock, so only writers sharing a KEK wait for its KMS wrap; the map lock
-// is never held across a KMS call.
+// use or once the cache lifetime has passed. The returned entry is
+// immutable: refreshes replace it wholesale, so the unlocked reads in
+// wrapDataKey can never race a refresh. Each cache key has its own lock,
+// so only writers sharing a KEK wait for its KMS wrap; the map lock is
+// never held across a KMS call.
 func (f *CryptoFactory) kekFor(client KmsClient, kmsCfg KmsConnectionConfig,
 	masterKeyID string) (*cachedKek, error) {
 	key := kekReuseKey{
@@ -329,24 +345,21 @@ func (f *CryptoFactory) kekFor(client KmsClient, kmsCfg KmsConnectionConfig,
 	}
 
 	f.mu.Lock()
-	entry, ok := f.keks[key]
+	slot, ok := f.keks[key]
 	if !ok {
-		entry = &cachedKek{}
+		slot = &kekSlot{}
 		if f.keks == nil {
-			f.keks = make(map[kekReuseKey]*cachedKek)
+			f.keks = make(map[kekReuseKey]*kekSlot)
 		}
-		f.keks[key] = entry
+		f.keks[key] = slot
+		f.removeExpiredLocked(key)
 	}
 	f.mu.Unlock()
 
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
-	lifetime := f.kekLifetime
-	if lifetime <= 0 {
-		lifetime = DefaultKekCacheLifetime
-	}
-	if !entry.createdAt.IsZero() && time.Since(entry.createdAt) <= lifetime {
-		return entry, nil
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	if slot.cur != nil && time.Since(slot.cur.createdAt) <= f.kekLifetimeOrDefault() {
+		return slot.cur, nil
 	}
 	id, err := randomKey(kekIDSize)
 	if err != nil {
@@ -360,9 +373,43 @@ func (f *CryptoFactory) kekFor(client KmsClient, kmsCfg KmsConnectionConfig,
 	if err != nil {
 		return nil, fmt.Errorf("parquet: wrap key encryption key with master key %q: %w", masterKeyID, err)
 	}
-	entry.id, entry.kek, entry.wrapped = id, kekKey, wrapped
-	entry.createdAt = time.Now()
-	return entry, nil
+	fresh := &cachedKek{
+		createdAt: time.Now(),
+		id:        id,
+		kek:       kekKey,
+		wrapped:   wrapped,
+	}
+	slot.cur = fresh
+	return fresh, nil
+}
+
+// removeExpiredLocked deletes cache entries whose lifetime has passed, so
+// rotating access tokens don't keep every stale plaintext KEK in memory —
+// parquet-cpp's CheckCacheForExpiredTokens, triggered when a new entry
+// joins the cache. The caller must hold f.mu; keep is the entry the caller
+// is inserting. Slots busy with a regeneration are left alone (their next
+// value is fresh by construction).
+func (f *CryptoFactory) removeExpiredLocked(keep kekReuseKey) {
+	lifetime := f.kekLifetimeOrDefault()
+	now := time.Now()
+	for k, slot := range f.keks {
+		if k == keep || !slot.mu.TryLock() {
+			continue
+		}
+		if slot.cur == nil || now.Sub(slot.cur.createdAt) > lifetime {
+			delete(f.keks, k)
+		}
+		slot.mu.Unlock()
+	}
+}
+
+// kekLifetimeOrDefault is the configured cache lifetime, falling back to
+// DefaultKekCacheLifetime for zero or negative values.
+func (f *CryptoFactory) kekLifetimeOrDefault() time.Duration {
+	if f.kekLifetime <= 0 {
+		return DefaultKekCacheLifetime
+	}
+	return f.kekLifetime
 }
 
 // wrapKeyLocally is parquet-cpp's EncryptKeyLocally: AES-GCM with a

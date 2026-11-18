@@ -466,6 +466,52 @@ func TestKekCacheEntryLifetime(t *testing.T) {
 		"the second file carries a fresh KEK")
 }
 
+// Refreshing an expired KEK races with writers that are still reading the
+// previous one if the cache hands out entries it later mutates in place.
+// With a 1ns lifetime every access refreshes, so concurrent writers force
+// the window open; each produced key material must stay self-consistent
+// (the retriever recovers the footer key from the metadata alone), and the
+// run must be clean under -race.
+func TestKekRefreshFromConcurrentWriters(t *testing.T) {
+	kms := &countingBase64KMS{}
+	factory := encryption.NewCryptoFactory(func(encryption.KmsConnectionConfig) (encryption.KmsClient, error) {
+		return kms, nil
+	}, encryption.WithKekCacheLifetime(time.Nanosecond))
+	retriever := encryption.NewKmsKeyRetriever(kms)
+	cfg := encryption.EncryptionConfiguration{FooterKeyID: "footer_master", UniformEncryption: true}
+
+	const workers = 8
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 25; i++ {
+				props, err := factory.FileEncryptionProperties(testKmsConfig, cfg)
+				if err != nil {
+					errs <- err
+					return
+				}
+				key, err := retriever.UnwrapKeyMetadata([]byte(props.FooterKeyMetadata()))
+				if err != nil {
+					errs <- fmt.Errorf("key material is not self-consistent: %w", err)
+					return
+				}
+				if string(key) != props.FooterKey() {
+					errs <- fmt.Errorf("recovered footer key does not match the encrypted one")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 // KEK generation locks per cache entry: files under different master keys
 // wrap concurrently, while files sharing a master key wait for one wrap.
 func TestKekWrappingLocksPerMasterKey(t *testing.T) {
