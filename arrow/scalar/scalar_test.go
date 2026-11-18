@@ -2923,9 +2923,8 @@ func TestListScalarHashNestedSliced(t *testing.T) {
 }
 
 func TestAppendNestedSlicedListScalar(t *testing.T) {
-	// scalar.Append does not release the child scalars it unboxes, so a
-	// checked allocator would report them.
-	mem := memory.NewGoAllocator()
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
 
 	dt := arrow.ListOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
 	full, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[1]], [[2, 3], []]]`))

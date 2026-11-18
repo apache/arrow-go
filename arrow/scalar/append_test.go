@@ -286,3 +286,62 @@ func TestAppendNullScalars(t *testing.T) {
 		})
 	}
 }
+
+func TestAppendListScalarReleasesChildren(t *testing.T) {
+	tests := []struct {
+		name string
+		dt   arrow.DataType
+	}{
+		{"list_binary", arrow.ListOf(arrow.BinaryTypes.Binary)},
+		{"large_list_binary", arrow.LargeListOf(arrow.BinaryTypes.Binary)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			expected, _, err := array.FromJSON(mem, tc.dt, strings.NewReader(`[["YWFi", "YmNkZQ=="], null, []]`))
+			require.NoError(t, err)
+			defer expected.Release()
+
+			scalars := make([]scalar.Scalar, expected.Len())
+			for i := range scalars {
+				sc, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				defer releaseScalar(sc)
+				scalars[i] = sc
+			}
+
+			bldr := array.NewBuilder(mem, tc.dt)
+			defer bldr.Release()
+			require.NoError(t, scalar.AppendSlice(bldr, scalars))
+			result := bldr.NewArray()
+			defer result.Release()
+
+			assert.Truef(t, array.Equal(expected, result), "expected: %s, got: %s", expected, result)
+		})
+	}
+}
+
+func TestAppendListScalarReleasesChildrenOnError(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	// Append has no case for a dictionary element, so the child scalar fails to
+	// append after GetScalar has allocated it.
+	dt := arrow.ListOf(&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String})
+	expected, _, err := array.FromJSON(mem, dt, strings.NewReader(`[["ab", "cd"]]`))
+	require.NoError(t, err)
+	defer expected.Release()
+
+	sc, err := scalar.GetScalar(expected, 0)
+	require.NoError(t, err)
+	defer releaseScalar(sc)
+
+	bldr := array.NewBuilder(mem, dt)
+	defer bldr.Release()
+
+	err = scalar.Append(bldr, sc)
+	require.ErrorIs(t, err, arrow.ErrNotImplemented)
+}
