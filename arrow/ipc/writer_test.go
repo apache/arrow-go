@@ -375,6 +375,109 @@ func TestNewTruncatedBitmap(t *testing.T) {
 	assert.Equal(t, 8, bitutil.CountSetBits(result.Bytes(), 0, 8))
 }
 
+func TestGetTruncatedBuffer(t *testing.T) {
+	assert.Nil(t, getTruncatedBuffer(0, 0, 1, nil), "input buffer is null")
+
+	// the buffer is exactly as long as the data, with no padding after it
+	buf := memory.NewBufferBytes([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
+	defer buf.Release()
+
+	result := getTruncatedBuffer(0, 10, 1, buf)
+	defer result.Release()
+	assert.Same(t, buf, result, "no truncation necessary")
+
+	result = getTruncatedBuffer(6, 4, 1, buf)
+	defer result.Release()
+	assert.Equal(t, []byte{6, 7, 8, 9}, result.Bytes(), "truncate for offset")
+
+	result = getTruncatedBuffer(1, 2, 4, buf)
+	defer result.Release()
+	assert.Equal(t, []byte{4, 5, 6, 7, 8, 9}, result.Bytes(), "truncate for offset with byte width")
+
+	buf = memory.NewBufferBytes(make([]byte, 128))
+	defer buf.Release()
+
+	result = getTruncatedBuffer(0, 8, 1, buf)
+	defer result.Release()
+	assert.Equal(t, 64, result.Len(), "truncate to smaller buffer")
+
+	result = getTruncatedBuffer(100, 8, 1, buf)
+	defer result.Release()
+	assert.Equal(t, 28, result.Len(), "truncate for offset to the end of the buffer")
+}
+
+func TestWriteSlicedUnion(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const n = 10
+	// buffers that are exactly as long as the data, as produced for
+	// example by the C Data interface, with no padding after them
+	typeIDs := memory.NewBufferBytes([]byte{0, 1, 0, 1, 0, 1, 0, 1, 0, 1})
+	valueOffsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes(
+		[]int32{0, 0, 1, 1, 2, 2, 3, 3, 4, 4}))
+
+	sparseInts, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`))
+	require.NoError(t, err)
+	defer sparseInts.Release()
+	sparseStrs, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]`))
+	require.NoError(t, err)
+	defer sparseStrs.Release()
+
+	denseInts, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32,
+		strings.NewReader(`[0, 2, 4, 6, 8]`))
+	require.NoError(t, err)
+	defer denseInts.Release()
+	denseStrs, _, err := array.FromJSON(mem, arrow.BinaryTypes.String,
+		strings.NewReader(`["b", "d", "f", "h", "j"]`))
+	require.NoError(t, err)
+	defer denseStrs.Release()
+
+	fields := []arrow.Field{
+		{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "s", Type: arrow.BinaryTypes.String, Nullable: true},
+	}
+	codes := []arrow.UnionTypeCode{0, 1}
+
+	sparse := array.NewSparseUnion(arrow.SparseUnionOf(fields, codes), n,
+		[]arrow.Array{sparseInts, sparseStrs}, typeIDs, 0)
+	defer sparse.Release()
+	dense := array.NewDenseUnion(arrow.DenseUnionOf(fields, codes), n,
+		[]arrow.Array{denseInts, denseStrs}, typeIDs, valueOffsets, 0)
+	defer dense.Release()
+
+	for _, arr := range []arrow.Array{sparse, dense} {
+		t.Run(arr.DataType().Name(), func(t *testing.T) {
+			for _, sl := range []struct{ beg, end int64 }{{0, 4}, {3, 7}, {5, n}, {9, n}} {
+				t.Run(fmt.Sprintf("%d-%d", sl.beg, sl.end), func(t *testing.T) {
+					slice := array.NewSlice(arr, sl.beg, sl.end)
+					defer slice.Release()
+
+					schema := arrow.NewSchema([]arrow.Field{{Name: "u", Type: arr.DataType()}}, nil)
+					rec := array.NewRecordBatch(schema, []arrow.Array{slice}, int64(slice.Len()))
+					defer rec.Release()
+
+					var buf bytes.Buffer
+					w := NewWriter(&buf, WithSchema(schema), WithAllocator(mem))
+					require.NoError(t, w.Write(rec))
+					require.NoError(t, w.Close())
+
+					r, err := NewReader(&buf, WithAllocator(mem))
+					require.NoError(t, err)
+					defer r.Release()
+
+					require.True(t, r.Next())
+					got := r.RecordBatch().Column(0)
+					require.NoError(t, array.ValidateFull(got))
+					assert.Truef(t, array.Equal(slice, got), "got %s, want %s", got, slice)
+				})
+			}
+		})
+	}
+}
+
 func TestGetZeroBasedValueOffsets(t *testing.T) {
 	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer alloc.AssertSize(t, 0)

@@ -1142,7 +1142,8 @@ func getTruncatedBuffer(offset, length int64, byteWidth int32, buf *memory.Buffe
 
 	paddedLen := paddedLength(length*int64(byteWidth), kArrowAlignment)
 	if offset != 0 || paddedLen < int64(buf.Len()) {
-		return memory.SliceBuffer(buf, int(offset*int64(byteWidth)), int(min(paddedLen, int64(buf.Len()))))
+		start := offset * int64(byteWidth)
+		return memory.SliceBuffer(buf, int(start), int(min(paddedLen, int64(buf.Len())-start)))
 	}
 	buf.Retain()
 	return buf
