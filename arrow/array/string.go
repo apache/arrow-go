@@ -231,7 +231,8 @@ func (a *String) ValidateFull() error {
 				a.data.offset+i, offsets[i], offsets[i-1])
 		}
 		if int(offsets[i]) > len(a.values) {
-			return fmt.Errorf("arrow/array: string offset %d out of bounds of data buffer (length %d)", offsets[i], len(a.values))
+			return fmt.Errorf("arrow/array: string offset %d at index %d out of bounds of data buffer (length %d)",
+				offsets[i], a.data.offset+i, len(a.values))
 		}
 		value := a.values[offsets[i-1]:offsets[i]]
 		if !utf8.ValidString(value) {
@@ -453,7 +454,8 @@ func (a *LargeString) ValidateFull() error {
 				a.data.offset+i, offsets[i], offsets[i-1])
 		}
 		if offsets[i] > int64(len(a.values)) {
-			return fmt.Errorf("arrow/array: large string offset %d out of bounds of data buffer (length %d)", offsets[i], len(a.values))
+			return fmt.Errorf("arrow/array: large string offset %d at index %d out of bounds of data buffer (length %d)",
+				offsets[i], a.data.offset+i, len(a.values))
 		}
 		value := a.values[offsets[i-1]:offsets[i]]
 		if !utf8.ValidString(value) {

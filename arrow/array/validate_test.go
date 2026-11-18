@@ -210,7 +210,7 @@ func TestStringValidate(t *testing.T) {
 		assert.NoError(t, arr.Validate())
 		var err error
 		require.NotPanics(t, func() { err = arr.ValidateFull() })
-		assert.EqualError(t, err, "arrow/array: string offset 100 out of bounds of data buffer (length 5)")
+		assert.EqualError(t, err, "arrow/array: string offset 100 at index 1 out of bounds of data buffer (length 5)")
 	})
 
 	t.Run("sliced array offset past the data buffer passes Validate but fails ValidateFull", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestStringValidate(t *testing.T) {
 		assert.NoError(t, arr.Validate())
 		var err error
 		require.NotPanics(t, func() { err = arr.ValidateFull() })
-		assert.EqualError(t, err, "arrow/array: string offset 100 out of bounds of data buffer (length 5)")
+		assert.EqualError(t, err, "arrow/array: string offset 100 at index 2 out of bounds of data buffer (length 5)")
 	})
 
 	t.Run("negative first offset passes Validate but fails ValidateFull", func(t *testing.T) {
@@ -250,7 +250,7 @@ func TestLargeStringValidate(t *testing.T) {
 		assert.NoError(t, arr.Validate())
 		var err error
 		require.NotPanics(t, func() { err = arr.ValidateFull() })
-		assert.EqualError(t, err, "arrow/array: large string offset 100 out of bounds of data buffer (length 5)")
+		assert.EqualError(t, err, "arrow/array: large string offset 100 at index 1 out of bounds of data buffer (length 5)")
 	})
 
 	t.Run("sliced array offset past the data buffer passes Validate but fails ValidateFull", func(t *testing.T) {
@@ -258,7 +258,7 @@ func TestLargeStringValidate(t *testing.T) {
 		assert.NoError(t, arr.Validate())
 		var err error
 		require.NotPanics(t, func() { err = arr.ValidateFull() })
-		assert.EqualError(t, err, "arrow/array: large string offset 100 out of bounds of data buffer (length 5)")
+		assert.EqualError(t, err, "arrow/array: large string offset 100 at index 2 out of bounds of data buffer (length 5)")
 	})
 
 	t.Run("negative first offset passes Validate but fails ValidateFull", func(t *testing.T) {
