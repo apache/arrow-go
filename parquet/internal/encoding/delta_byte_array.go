@@ -316,6 +316,7 @@ func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
 	prefixLengths := d.prefixLengths
 	suffixLengths := d.lengths
 	previousLen := len(d.lastVal)
+	typeLen := d.typeLen
 	if d.lastVal == nil {
 		if len(prefixLengths) == 0 || prefixLengths[0] != 0 {
 			return 0, errors.New("parquet: first delta byte array prefix length must be zero")
@@ -329,6 +330,11 @@ func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
 			return 0, fmt.Errorf("parquet: negative delta byte array length %d", suffixLen)
 		}
 		previousLen = int(suffixLen)
+		// Check lengths here, before Decode consumes values. Once a bad value is consumed,
+		// the next call returns no values and no error, and the column reader retries forever.
+		if typeLen > 0 && previousLen != typeLen {
+			return 0, fmt.Errorf("parquet: FLBA type requires fixed-length %d but got %d", typeLen, previousLen)
+		}
 		total = previousLen
 		prefixLengths = prefixLengths[1:]
 		suffixLengths = suffixLengths[1:]
@@ -356,6 +362,9 @@ func (d *DeltaByteArrayDecoder) decodedArenaSize(max int) (int, error) {
 			return 0, errors.New("parquet: delta byte array value length overflows int")
 		}
 		valueLen += int(suffixLen)
+		if typeLen > 0 && valueLen != typeLen {
+			return 0, fmt.Errorf("parquet: FLBA type requires fixed-length %d but got %d", typeLen, valueLen)
+		}
 		if suffixLen != 0 {
 			if valueLen > maxInt-total {
 				return 0, errors.New("parquet: decoded delta byte array size overflows int")

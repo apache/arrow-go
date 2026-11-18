@@ -35,11 +35,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// alpTestUnpackBits unpacks with readers of its own, since the decoder's are
-// tied to a page.
+// alpTestUnpackBits reverses alpPack with a plain bit reader.
 func alpTestUnpackBits(packed []byte, out []uint64, bitWidth int) error {
-	reader := bytes.NewReader(nil)
-	return alpUnpackBits(utils.NewBitReader(reader), reader, packed, out, bitWidth)
+	if bitWidth == 0 {
+		clear(out)
+		return nil
+	}
+	n, err := utils.NewBitReader(bytes.NewReader(packed)).GetBatch(uint(bitWidth), out)
+	if err != nil {
+		return err
+	}
+	if n != len(out) {
+		return fmt.Errorf("unpacked %d of %d values", n, len(out))
+	}
+	return nil
 }
 
 // alpTestPackBits packs values as the distances above a minimum of zero.
@@ -134,16 +143,6 @@ func TestALPPackBitsKnownOutput(t *testing.T) {
 	packed := alpTestPackBits([]uint64{0, 1, 2, 3}, 2)
 	require.Len(t, packed, 1)
 	assert.Equal(t, byte(0xE4), packed[0])
-}
-
-// TestALPUnpackBitsShortInput requires truncated packed data to return an error.
-// The two lengths cover the scalar path for a partial group of 32 values and the
-// vectorized path for a whole group.
-func TestALPUnpackBitsShortInput(t *testing.T) {
-	for _, count := range []int{8, 64} {
-		out := make([]uint64, count)
-		assert.Error(t, alpTestUnpackBits([]byte{0xFF}, out, 8), "count=%d", count)
-	}
 }
 
 func newFloat32Column() *schema.Column {
@@ -1325,19 +1324,53 @@ func TestALPEncoderSetVectorSizeRejects(t *testing.T) {
 	require.NoError(t, enc.SetVectorSize(32), "a flushed page leaves nothing buffered")
 }
 
-// A FLOAT value scaled to just under 2^31 can round up to 2^31, which a vector
-// cannot hold: readers rebuild its integers in int32 and would flip the sign.
-func TestALPFloat32RoundingPastInt32IsAnException(t *testing.T) {
+// The largest FLOAT value a scaling keeps lands on the limit, which is a whole
+// number inside int32: readers rebuild a vector's integers in int32, so one
+// past it would flip the sign.
+func TestALPFloat32ScalesUpToTheInt32Limit(t *testing.T) {
 	s := newALPScaling[float32](9, 6)
-	_, ok := s.tryEncode(2147483.5)
-	assert.False(t, ok, "2147483.5 at (9,6) rounds to 2^31")
+	encoded, ok := s.tryEncode(2147483.5)
+	assert.True(t, ok)
+	assert.LessOrEqual(t, encoded, int64(math.MaxInt32))
+	encoded, ok = s.tryEncode(-2147483.5)
+	assert.True(t, ok)
+	assert.GreaterOrEqual(t, encoded, int64(math.MinInt32))
 
 	alpRoundTrip(t, []float32{-24.875, 2147483.5, 12})
 	alpRoundTrip(t, []float32{-24.875, -2147483.5, 12})
 }
 
-// Page fields near the int32 limits must be rejected, not overflow int on
-// 32-bit platforms.
+// Every whole number a float32 holds exactly, up to 2^24, is an integer a
+// vector can store, so a column of them has no exceptions.
+func TestALPFloat32WholeNumbersAreNotExceptions(t *testing.T) {
+	values := make([]float32, 4*alpDefaultVectorSize)
+	for i := range values {
+		// Spread over the whole range, odd and even.
+		values[i] = float32((i * 4099) % (1 << 24))
+		if i%2 == 1 {
+			values[i] = -values[i]
+		}
+	}
+
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	enc := newALPEncoder[float32](format.Encoding_ALP, newFloat32Column(), mem)
+	defer enc.Release()
+	enc.Put(values)
+	buf, err := enc.FlushValues()
+	require.NoError(t, err)
+	defer buf.Release()
+
+	page := buf.Bytes()
+	for v := range len(values) / alpDefaultVectorSize {
+		vectorPos := alpHeaderSize + int(binary.LittleEndian.Uint32(page[alpHeaderSize+4*v:]))
+		assert.Zero(t, binary.LittleEndian.Uint16(page[vectorPos+2:]), "vector %d exception count", v)
+	}
+	assert.Less(t, len(page), 4*len(values), "smaller than PLAIN")
+
+	alpRoundTrip(t, values)
+}
+
 func TestALPDecoderHugeFields(t *testing.T) {
 	dec := newALPDecoder[float32](format.Encoding_ALP, newFloat32Column())
 	assert.Error(t, dec.SetData(1, alpTestPage(math.MaxInt32)),

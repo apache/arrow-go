@@ -182,7 +182,9 @@ func (a *Struct) String() string {
 		if i > 0 {
 			o.WriteString(" ")
 		}
-		if arrow.IsUnion(v.DataType().ID()) {
+		if arrow.IsUnion(v.DataType().ID()) || len(v.Data().Buffers()) == 0 {
+			// Unions and run-end encoded arrays have no validity bitmap to
+			// combine with the parent's, so print them as they are.
 			fmt.Fprintf(o, "%v", v)
 			continue
 		} else if a.Offset() != v.Data().Offset() || !bytes.Equal(structBitmap, v.NullBitmapBytes()) {

@@ -2856,6 +2856,97 @@ func TestGetScalarIndexOutOfRange(t *testing.T) {
 	assert.ErrorIs(t, err, arrow.ErrIndex)
 }
 
+func TestGetScalarSlicedListLike(t *testing.T) {
+	i32 := arrow.PrimitiveTypes.Int32
+	tests := []struct {
+		name     string
+		dt       arrow.DataType
+		values   string
+		expected string
+	}{
+		{"list", arrow.ListOf(i32), `[[1], [2, 3], [], null, [4]]`, `[[2, 3], [], null, [4]]`},
+		{"large_list", arrow.LargeListOf(i32), `[[1], [2, 3], [], null, [4]]`, `[[2, 3], [], null, [4]]`},
+		{
+			"map", arrow.MapOf(arrow.BinaryTypes.String, i32),
+			`[[{"key": "a", "value": 1}], [{"key": "b", "value": 2}, {"key": "c", "value": 3}], [], null, [{"key": "d", "value": 4}]]`,
+			`[[{"key": "b", "value": 2}, {"key": "c", "value": 3}], [], null, [{"key": "d", "value": 4}]]`,
+		},
+		{"fixed_size_list", arrow.FixedSizeListOf(2, i32), `[[1, 2], [3, 4], null, [7, 8]]`, `[[3, 4], null, [7, 8]]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			full, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.values))
+			require.NoError(t, err)
+			defer full.Release()
+			sliced := array.NewSlice(full, 1, int64(full.Len()))
+			defer sliced.Release()
+			expected, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+
+			for i := 0; i < sliced.Len(); i++ {
+				want, err := scalar.GetScalar(expected, i)
+				require.NoError(t, err)
+				got, err := scalar.GetScalar(sliced, i)
+				require.NoError(t, err)
+				assertScalarsEqual(t, want, got)
+				releaseScalar(want)
+				releaseScalar(got)
+			}
+		})
+	}
+}
+
+func TestListScalarHashNestedSliced(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.ListOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	full, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[1]], [[2, 3], []]]`))
+	require.NoError(t, err)
+	defer full.Release()
+	fresh, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[2, 3], []]]`))
+	require.NoError(t, err)
+	defer fresh.Release()
+
+	want, err := scalar.GetScalar(fresh, 0)
+	require.NoError(t, err)
+	defer releaseScalar(want)
+	got, err := scalar.GetScalar(full, 1)
+	require.NoError(t, err)
+	defer releaseScalar(got)
+	assertScalarsEqual(t, want, got)
+}
+
+func TestAppendNestedSlicedListScalar(t *testing.T) {
+	// scalar.Append does not release the child scalars it unboxes, so a
+	// checked allocator would report them.
+	mem := memory.NewGoAllocator()
+
+	dt := arrow.ListOf(arrow.ListOf(arrow.PrimitiveTypes.Int32))
+	full, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[1]], [[2, 3], []]]`))
+	require.NoError(t, err)
+	defer full.Release()
+	expected, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[[2, 3], []]]`))
+	require.NoError(t, err)
+	defer expected.Release()
+
+	sc, err := scalar.GetScalar(full, 1)
+	require.NoError(t, err)
+	defer releaseScalar(sc)
+
+	bldr := array.NewBuilder(mem, dt)
+	defer bldr.Release()
+	require.NoError(t, scalar.Append(bldr, sc))
+	got := bldr.NewArray()
+	defer got.Release()
+	assert.Truef(t, array.Equal(expected, got), "expected: %s, got: %s", expected, got)
+}
+
 func TestGetScalarReleasesPartialStructChildrenOnError(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

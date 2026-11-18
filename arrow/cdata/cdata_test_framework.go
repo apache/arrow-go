@@ -44,6 +44,22 @@ package cdata
 // 	return handler;
 // }
 //
+// static struct ArrowAsyncProducer* get_test_async_producer(ArrowDeviceType device_type) {
+// 	struct ArrowAsyncProducer* producer =
+// 		(struct ArrowAsyncProducer*)malloc(sizeof(struct ArrowAsyncProducer));
+// 	memset(producer, 0, sizeof(*producer));
+// 	producer->device_type = device_type;
+// 	return producer;
+// }
+//
+// static int call_async_on_schema(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema) {
+// 	return handler->on_schema(handler, schema);
+// }
+//
+// static void call_async_release(struct ArrowAsyncDeviceStreamHandler* handler) {
+// 	handler->release(handler);
+// }
+//
 // void release_test_arr(struct ArrowArray* arr);
 //
 // static int32_t* get_data() {
@@ -67,6 +83,10 @@ package cdata
 // int confuse_go_gc(struct ArrowArrayStream* stream, unsigned int seed);
 // extern void releaseTestArr(struct ArrowArray* array);
 // extern void goReleaseTestArray(struct ArrowArray* array);
+// void* wrap_counting_release(struct ArrowArray* arr);
+// int get_counting_release_count(void* cr);
+// void* setup_single_array_stream(struct ArrowArray* arr, struct ArrowSchema* sc, struct ArrowArrayStream* out);
+// int get_single_array_stream_release_count(void* stream_state);
 import "C"
 
 import (
@@ -174,6 +194,27 @@ func testAsyncHandler() *CArrowAsyncDeviceStreamHandler {
 
 func freeAsyncHandler(h *CArrowAsyncDeviceStreamHandler) {
 	C.free(unsafe.Pointer(h))
+}
+
+// asyncOnSchemaThenRelease acts as a producer whose device is CPU (or CUDA
+// when cpu is false): it calls the on_schema callback of handler with schema
+// and then, as a producer must once on_schema returned an error, its release
+// callback. It returns the status on_schema returned and whether release
+// marked handler as released.
+func asyncOnSchemaThenRelease(handler *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema, cpu bool) (status int, released bool) {
+	deviceType := C.ArrowDeviceType(C.ARROW_DEVICE_CPU)
+	if !cpu {
+		deviceType = C.ArrowDeviceType(C.ARROW_DEVICE_CUDA)
+	}
+	producer := C.get_test_async_producer(deviceType)
+	defer C.free(unsafe.Pointer(producer))
+
+	handler.producer = producer
+	status = int(C.call_async_on_schema(handler, schema))
+	if status != 0 {
+		C.call_async_release(handler)
+	}
+	return status, handler.release == nil
 }
 
 func testNested(fmts, names []string, isnull []bool) **CArrowSchema {
@@ -503,4 +544,39 @@ func confuseGoGc(reader array.RecordReader) error {
 		return nil
 	}
 	return fmt.Errorf("Exported stream test failed with return code %d", int(rc))
+}
+
+func wrapCountingRelease(arr *CArrowArray) unsafe.Pointer {
+	return C.wrap_counting_release((*C.struct_ArrowArray)(unsafe.Pointer(arr)))
+}
+
+func getCountingReleaseCount(cr unsafe.Pointer) int {
+	return int(C.get_counting_release_count(cr))
+}
+
+func freeCountingRelease(cr unsafe.Pointer) {
+	C.free(cr)
+}
+
+func setupSingleArrayStream(arr *CArrowArray, sc *CArrowSchema, out *CArrowArrayStream) unsafe.Pointer {
+	return C.setup_single_array_stream((*C.struct_ArrowArray)(unsafe.Pointer(arr)), (*C.struct_ArrowSchema)(unsafe.Pointer(sc)), (*C.struct_ArrowArrayStream)(unsafe.Pointer(out)))
+}
+
+func getSingleArrayStreamReleaseCount(state unsafe.Pointer) int {
+	return int(C.get_single_array_stream_release_count(state))
+}
+
+func freeSingleArrayStreamState(state unsafe.Pointer) {
+	C.free(state)
+}
+
+func testBitmap() unsafe.Pointer {
+	p := C.malloc(1)
+	const twoValidRows = 0b11
+	*(*byte)(p) = twoValidRows
+	return p
+}
+
+func freeTestBitmap(p unsafe.Pointer) {
+	C.free(p)
 }

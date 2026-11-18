@@ -621,11 +621,15 @@ func createMemoTable(mem memory.Allocator, dt arrow.DataType) (ret hashing.MemoT
 		ret = hashing.NewMemoTable[float32](0)
 	case arrow.FLOAT64:
 		ret = hashing.NewMemoTable[float64](0)
-	case arrow.BINARY, arrow.FIXED_SIZE_BINARY, arrow.DECIMAL32, arrow.DECIMAL64,
+	case arrow.BINARY, arrow.BINARY_VIEW, arrow.FIXED_SIZE_BINARY, arrow.DECIMAL32, arrow.DECIMAL64,
 		arrow.DECIMAL128, arrow.DECIMAL256, arrow.INTERVAL_DAY_TIME, arrow.INTERVAL_MONTH_DAY_NANO:
 		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.Binary))
-	case arrow.STRING:
+	case arrow.LARGE_BINARY:
+		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.LargeBinary))
+	case arrow.STRING, arrow.STRING_VIEW:
 		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.String))
+	case arrow.LARGE_STRING:
+		ret = hashing.NewBinaryMemoTable(0, 0, NewBinaryBuilder(mem, arrow.BinaryTypes.LargeString))
 	case arrow.NULL:
 	default:
 		err = fmt.Errorf("unimplemented dictionary value type, %s", dt)
@@ -706,6 +710,19 @@ func createBinaryDictBuilder(mem memory.Allocator, idxbldr IndexBuilder, memo ha
 			if err := ret.InsertDictValues(v); err != nil {
 				panic(err)
 			}
+		case *LargeString, *LargeBinary, *StringView, *BinaryView:
+			valfn := getvalFn(v)
+			for i := 0; i < v.Len(); i++ {
+				var err error
+				if v.IsNull(i) {
+					err = ret.insertDictBytes(nil)
+				} else {
+					err = ret.insertDictValue(valfn(i))
+				}
+				if err != nil {
+					panic(err)
+				}
+			}
 		}
 	}
 	return ret
@@ -785,7 +802,7 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 		return createDictBuilder[float32](mem, idxbldr, memo, dt, init)
 	case arrow.FLOAT64:
 		return createDictBuilder[float64](mem, idxbldr, memo, dt, init)
-	case arrow.STRING, arrow.BINARY:
+	case arrow.STRING, arrow.BINARY, arrow.LARGE_STRING, arrow.LARGE_BINARY, arrow.STRING_VIEW, arrow.BINARY_VIEW:
 		return createBinaryDictBuilder(mem, idxbldr, memo, dt, init)
 	case arrow.FIXED_SIZE_BINARY:
 		ret := &FixedSizeBinaryDictionaryBuilder{
@@ -837,8 +854,6 @@ func NewDictionaryBuilderWithDict(mem memory.Allocator, dt *arrow.DictionaryType
 	case arrow.FIXED_SIZE_LIST:
 	case arrow.DURATION:
 		return createDictBuilder[arrow.Duration](mem, idxbldr, memo, dt, init)
-	case arrow.LARGE_STRING:
-	case arrow.LARGE_BINARY:
 	case arrow.LARGE_LIST:
 	case arrow.INTERVAL_MONTH_DAY_NANO:
 		return createFixedSizeDictBuilder[arrow.MonthDayNanoInterval](mem, idxbldr, memo, dt, init)
@@ -1164,6 +1179,14 @@ func getvalFn(arr arrow.Array) func(i int) interface{} {
 	case *FixedSizeBinary:
 		return func(i int) interface{} { return typedarr.Value(i) }
 	case *String:
+		return func(i int) interface{} { return typedarr.Value(i) }
+	case *LargeBinary:
+		return func(i int) interface{} { return typedarr.Value(i) }
+	case *LargeString:
+		return func(i int) interface{} { return typedarr.Value(i) }
+	case *BinaryView:
+		return func(i int) interface{} { return typedarr.Value(i) }
+	case *StringView:
 		return func(i int) interface{} { return typedarr.Value(i) }
 	case *Decimal32:
 		return func(i int) interface{} {

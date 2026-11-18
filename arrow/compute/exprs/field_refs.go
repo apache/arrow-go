@@ -19,6 +19,7 @@
 package exprs
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -277,21 +278,15 @@ func arrayStep(mem memory.Allocator, ref expr.ReferenceSegment, v *compute.Array
 		return &compute.ArrayDatum{Value: field}, nil
 	case *expr.ListElementRef:
 		switch v.Type().ID() {
-		case arrow.LIST, arrow.LARGE_LIST, arrow.FIXED_SIZE_LIST:
+		case arrow.LIST, arrow.LARGE_LIST, arrow.LIST_VIEW, arrow.LARGE_LIST_VIEW, arrow.FIXED_SIZE_LIST:
 		default:
 			return nil, fmt.Errorf("%w: cannot reference list element in non-list array type %s",
 				arrow.ErrInvalid, v.Type())
 		}
-		if r.Offset < 0 || int64(r.Offset) >= v.Len() {
-			return nil, fmt.Errorf("%w: indices=%s", compute.ErrIndexRange, ref)
-		}
-		arr := v.MakeArray()
-		defer arr.Release()
-		sc, err := scalar.GetScalar(arr, int(r.Offset))
-		if err != nil {
-			return nil, err
-		}
-		return &compute.ScalarDatum{Value: sc}, nil
+		// No caller context here: the default exec context keeps the result in one
+		// chunk, while a caller's chunk size could split it and later steps reject that.
+		ctx := compute.WithAllocator(context.Background(), mem)
+		return compute.ListElement(ctx, v, compute.NewDatum(scalar.NewInt32Scalar(r.Offset)))
 	}
 	return nil, arrow.ErrNotImplemented
 }

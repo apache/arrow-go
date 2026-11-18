@@ -1617,6 +1617,50 @@ func TestAsyncSchemaError(t *testing.T) {
 	<-wait
 }
 
+// After on_schema fails, a producer calls release on the handler instead of
+// on_error, and that release must not touch the state on_schema freed.
+func TestAsyncReleaseAfterOnSchemaFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		cpu    bool
+		errMsg string
+	}{
+		{"unsupported device", "i", false, "unsupported device type"},
+		{"invalid schema", "~bogus", true, "unimplemented type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := testAsyncHandler()
+			defer freeAsyncHandler(handler)
+
+			ch := CreateAsyncDeviceStreamHandler(context.Background(), 1, handler)
+			schema := testPrimitive(tt.format)
+
+			type result struct {
+				status   int
+				released bool
+			}
+			done := make(chan result, 1)
+			go func() {
+				status, released := asyncOnSchemaThenRelease(handler, &schema, tt.cpu)
+				done <- result{status, released}
+			}()
+
+			asyncStream := <-ch
+			assert.ErrorContains(t, asyncStream.Err, tt.errMsg)
+
+			res := <-done
+			assert.Equal(t, 22, res.status)
+			assert.True(t, res.released)
+			if !schemaIsReleased(&schema) {
+				releaseSchema(&schema)
+			}
+		})
+	}
+}
+
 func TestAsyncPropagateError(t *testing.T) {
 	reclist := arrdata.Records["primitives"]
 
@@ -1657,4 +1701,130 @@ func TestAsyncPropagateError(t *testing.T) {
 	assert.Equal(t, 22, int(err.Code))
 
 	<-wait
+}
+
+func TestImportMapNullability(t *testing.T) {
+	for _, path := range []string{"array", "record", "stream", "nested"} {
+		for _, child := range []string{"keys", "entries"} {
+			for _, count := range []string{"known", "unknown", "valid", "offset", "offsetnull"} {
+				if (child == "entries" && count == "valid") || (path == "nested" && (child != "keys" || count != "unknown")) {
+					continue // covered by another case
+				}
+				t.Run(path+"/"+child+"/"+count, func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer mem.AssertSize(t, 0)
+					b := array.NewMapBuilder(mem, arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64, false)
+					b.Append(true)
+					b.KeyBuilder().(*array.StringBuilder).AppendValues([]string{"a", "b"}, nil)
+					b.ItemBuilder().(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+					arr := b.NewMapArray()
+					b.Release()
+					defer arr.Release()
+					schema := arrow.NewSchema([]arrow.Field{{Name: "map", Type: arr.DataType(), Nullable: true}}, nil)
+					var root CArrowArray
+					var nested arrow.Array
+					if path == "nested" {
+						lb := array.NewListBuilder(mem, arr.DataType())
+						lb.Append(true)
+						mb := lb.ValueBuilder().(*array.MapBuilder)
+						mb.Append(true)
+						mb.KeyBuilder().(*array.StringBuilder).AppendValues([]string{"a", "b"}, nil)
+						mb.ItemBuilder().(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+						nested = lb.NewArray()
+						lb.Release()
+						defer nested.Release()
+						ExportArrowArray(nested, &root, nil)
+					} else if path == "array" {
+						ExportArrowArray(arr, &root, nil)
+					} else {
+						rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
+						ExportArrowRecordBatch(rec, &root, nil)
+						rec.Release()
+					}
+					cr := wrapCountingRelease(&root)
+					defer freeCountingRelease(cr)
+					defer ReleaseCArrowArray(&root)
+					m := &root
+					if path != "array" {
+						m = unsafe.Slice(root.children, root.n_children)[0]
+					}
+					entries := unsafe.Slice(m.children, m.n_children)[0]
+					target := entries
+					if child == "keys" {
+						target = unsafe.Slice(entries.children, entries.n_children)[0]
+					}
+					// The exported key bitmap is present; entries need their own bitmap.
+					buffers := unsafe.Slice(target.buffers, target.n_buffers)
+					if child == "entries" {
+						buffers[0] = testBitmap()
+						defer freeTestBitmap(buffers[0])
+					}
+					require.NotNil(t, buffers[0])
+					bits := unsafe.Slice((*byte)(buffers[0]), 1)
+					switch count {
+					case "known": // A producer reports a known null count.
+						target.null_count = 1
+					case "unknown": // Resolve a null from the bitmap.
+						target.null_count = -1
+						bits[0] &^= 1
+					case "valid": // An unknown count with all bits set is valid.
+						target.null_count = -1
+					case "offset": // The null is outside the visible window.
+						target.null_count = -1
+						bits[0] &^= 1
+						target.offset, target.length = 1, 1
+						if child == "keys" {
+							entries.offset, entries.length = 1, 1
+						}
+					case "offsetnull": // The null is inside the visible window.
+						target.null_count = -1
+						bits[0] &^= 2
+						target.offset, target.length = 1, 1
+						if child == "keys" {
+							entries.offset, entries.length = 1, 1
+						}
+					}
+					var err error
+					switch path {
+					case "array":
+						var imported arrow.Array
+						imported, err = ImportCArrayWithType(&root, arr.DataType())
+						if imported != nil {
+							imported.Release()
+						}
+					case "nested":
+						var imported arrow.Array
+						imported, err = ImportCArrayWithType(&root, nested.DataType())
+						if imported != nil {
+							imported.Release()
+						}
+					case "record":
+						var imported arrow.RecordBatch
+						imported, err = ImportCRecordBatchWithSchema(&root, schema)
+						if imported != nil {
+							imported.Release()
+						}
+					case "stream":
+						var csc CArrowSchema
+						ExportArrowSchema(schema, &csc)
+						defer ReleaseCArrowSchema(&csc)
+						var stream CArrowArrayStream
+						state := setupSingleArrayStream(&root, &csc, &stream)
+						defer freeSingleArrayStreamState(state)
+						rdr, e := ImportCRecordReader(&stream, schema)
+						require.NoError(t, e)
+						_, err = rdr.Read()
+						rdr.(interface{ Release() }).Release()
+						assert.Equal(t, 1, getSingleArrayStreamReleaseCount(state))
+					}
+					if count == "known" || count == "unknown" || count == "offsetnull" {
+						assert.ErrorIs(t, err, arrow.ErrInvalid)
+					} else {
+						assert.NoError(t, err)
+					}
+					assert.Equal(t, 1, getCountingReleaseCount(cr))
+				})
+			}
+		}
+	}
 }

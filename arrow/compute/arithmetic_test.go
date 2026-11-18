@@ -1726,6 +1726,69 @@ func (ds *DecimalUnaryArithmeticSuite) TestRound() {
 	}
 }
 
+func (ds *DecimalUnaryArithmeticSuite) TestRoundMagnitudeBelowOne() {
+	// rounding a value between -1 and 1 to a whole number truncates it to
+	// zero first, so the direction must come from the sign of the input
+	cases := []struct {
+		fn   string
+		mode compute.RoundMode
+		exp  string
+	}{
+		{"round", compute.RoundDown, `["0.00", "0.00", "0.00", "-1.00", "-1.00", "-1.00", null]`},
+		{"round", compute.RoundUp, `["1.00", "1.00", "1.00", "0.00", "0.00", "0.00", null]`},
+		{"round", compute.RoundTowardsZero, `["0.00", "0.00", "0.00", "0.00", "0.00", "0.00", null]`},
+		{"round", compute.RoundTowardsInfinity, `["1.00", "1.00", "1.00", "-1.00", "-1.00", "-1.00", null]`},
+		{"round", compute.RoundHalfDown, `["0.00", "0.00", "1.00", "0.00", "-1.00", "-1.00", null]`},
+		{"round", compute.RoundHalfUp, `["0.00", "1.00", "1.00", "0.00", "0.00", "-1.00", null]`},
+		{"round", compute.RoundHalfTowardsZero, `["0.00", "0.00", "1.00", "0.00", "0.00", "-1.00", null]`},
+		{"round", compute.RoundHalfTowardsInfinity, `["0.00", "1.00", "1.00", "0.00", "-1.00", "-1.00", null]`},
+		{"round", compute.RoundHalfToEven, `["0.00", "0.00", "1.00", "0.00", "0.00", "-1.00", null]`},
+		{"round", compute.RoundHalfToOdd, `["0.00", "1.00", "1.00", "0.00", "-1.00", "-1.00", null]`},
+		{"floor", 0, `["0.00", "0.00", "0.00", "-1.00", "-1.00", "-1.00", null]`},
+		{"ceil", 0, `["1.00", "1.00", "1.00", "0.00", "0.00", "0.00", null]`},
+	}
+
+	for _, ty := range []arrow.DataType{&arrow.Decimal128Type{Precision: 4, Scale: 2}, &arrow.Decimal256Type{Precision: 4, Scale: 2}} {
+		ds.Run(ty.String(), func() {
+			values := ds.getArr(ty, `["0.40", "0.50", "0.60", "-0.40", "-0.50", "-0.60", null]`)
+			defer values.Release()
+
+			for _, tt := range cases {
+				name := tt.fn
+				var opts compute.FunctionOptions
+				if tt.fn == "round" {
+					name = tt.mode.String()
+					opts = compute.RoundOptions{NDigits: 0, Mode: tt.mode}
+				}
+				ds.Run(name, func() {
+					exp := ds.getArr(ty, tt.exp)
+					defer exp.Release()
+					checkScalar(ds.T(), tt.fn, []compute.Datum{&compute.ArrayDatum{Value: values.Data()}},
+						&compute.ArrayDatum{Value: exp.Data()}, opts)
+				})
+			}
+
+			// the same applies when rounding to a non-zero number of digits
+			small := ds.getArr(ty, `["0.04", "-0.04"]`)
+			defer small.Release()
+			for _, tt := range []struct {
+				mode compute.RoundMode
+				exp  string
+			}{
+				{compute.RoundDown, `["0.00", "-0.10"]`},
+				{compute.RoundUp, `["0.10", "0.00"]`},
+			} {
+				ds.Run("ndigits=1/"+tt.mode.String(), func() {
+					exp := ds.getArr(ty, tt.exp)
+					defer exp.Release()
+					checkScalar(ds.T(), "round", []compute.Datum{&compute.ArrayDatum{Value: small.Data()}},
+						&compute.ArrayDatum{Value: exp.Data()}, compute.RoundOptions{NDigits: 1, Mode: tt.mode})
+				})
+			}
+		})
+	}
+}
+
 func (ds *DecimalUnaryArithmeticSuite) TestRoundHalfToOddTies() {
 	for _, ty := range []arrow.DataType{
 		&arrow.Decimal128Type{Precision: 5, Scale: 2},

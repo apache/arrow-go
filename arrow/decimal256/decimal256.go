@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
+	"github.com/apache/arrow-go/v18/arrow/internal/decimalstr"
 )
 
 const (
@@ -118,9 +119,41 @@ func (n Num) Pow(rhs Num) Num {
 	return FromBigInt(b.Exp(b, rhs.BigInt(), nil))
 }
 
-var pt5 = big.NewFloat(0.5)
-
 func FromString(v string, prec, scale int32) (n Num, err error) {
+	if lit, ok := decimalstr.Parse(v); ok {
+		return fromDecimalLiteral(lit, prec, scale)
+	}
+	return fromFloatLiteral(v, prec, scale)
+}
+
+func fromDecimalLiteral(lit decimalstr.Parsed, prec, scale int32) (n Num, err error) {
+	if scale < 0 {
+		// Reject an unscaled magnitude that would not fit in signed 256-bit
+		// storage, before using the scale.
+		if lit.AtLeastTwoPower(0, 255) {
+			return Num{}, errors.New("bitlen too large for decimal256")
+		}
+		if scale < -MaxScale {
+			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+		}
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+	} else if lit.AtLeastTwoPower(int64(scale), 256) {
+		return Num{}, errors.New("bitlen too large for decimal256")
+	}
+
+	val, ok := lit.ScaleAndRound(int64(scale))
+	if !ok || val.BitLen() > 255 {
+		return Num{}, errors.New("bitlen too large for decimal256")
+	}
+	n = FromBigInt(val)
+	if !n.FitsInPrecision(prec) {
+		err = fmt.Errorf("value %v doesn't fit in precision %d", n, prec)
+	}
+	return
+}
+
+func fromFloatLiteral(v string, prec, scale int32) (n Num, err error) {
 	// time for some math!
 	// Our input precision means "number of digits of precision" but the
 	// math/big library refers to precision in floating point terms
@@ -167,44 +200,27 @@ func FromString(v string, prec, scale int32) (n Num, err error) {
 		if scale < -MaxScale {
 			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
 		}
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		n = FromBigInt(val)
+	} else if scale > MaxScale {
+		return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+	}
 
-		n, _ = n.Div(scaleMultipliers[-scale])
-	} else {
-		if scale > MaxScale {
-			return Num{}, fmt.Errorf("scale %d out of range for decimal256, must be between %d and %d", scale, -MaxScale, MaxScale)
+	if scale != 0 {
+		if scale > 0 {
+			out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
+		} else {
+			out.Quo(out, (&big.Float{}).SetInt(scaleMultipliers[-scale].BigInt())).SetPrec(precInBits)
 		}
-		out.Mul(out, (&big.Float{}).SetInt(scaleMultipliers[scale].BigInt())).SetPrec(precInBits)
 		// Reject before rounding and converting, which would allocate as many
 		// bits as the value has.
-		if out.IsInf() || out.MantExp(nil) > 256 {
+		if scale > 0 && (out.IsInf() || out.MantExp(nil) > 256) {
 			return Num{}, errors.New("bitlen too large for decimal256")
 		}
-		// A magnitude below 1/4 rounds to zero. Clearing it skips the
-		// rounding below, which allocates in proportion to the gap between
-		// the value's exponent and 0.5's.
-		if out.MantExp(nil) < -1 {
-			out.SetInt64(0)
-		}
-		// Since we're going to truncate this to get an integer, we need to round
-		// the value instead because of edge cases so that we match how other implementations
-		// (e.g. C++) handles Decimal values. So if we're negative we'll subtract 0.5 and if
-		// we're positive we'll add 0.5.
-		if out.Signbit() {
-			out.Sub(out, pt5)
-		} else {
-			out.Add(out, pt5)
-		}
-
-		var tmp big.Int
-		val, _ := out.Int(&tmp)
-		if val.BitLen() > 255 {
-			return Num{}, errors.New("bitlen too large for decimal256")
-		}
-		n = FromBigInt(val)
 	}
+	val := decimalstr.RoundScaled(out, v, int64(scale))
+	if val.BitLen() > 255 {
+		return Num{}, errors.New("bitlen too large for decimal256")
+	}
+	n = FromBigInt(val)
 	if !n.FitsInPrecision(prec) {
 		err = fmt.Errorf("value %v doesn't fit in precision %d", n, prec)
 	}
@@ -270,6 +286,12 @@ func fromPositiveFloat32(v float32, prec, scale int32) (Num, error) {
 	}
 
 	v = float32(val)
+	if math.IsInf(float64(v), 1) {
+		// the scaled value is past the float32 range but can still fit
+		// in a decimal256, so split it as a float64 instead
+		return splitPositiveFloat64(val), nil
+	}
+
 	var arr [4]float32
 	arr[3] = float32(math.Floor(math.Ldexp(float64(v), -192)))
 	v -= float32(math.Ldexp(float64(arr[3]), 192))
@@ -314,6 +336,12 @@ func fromPositiveFloat64(v float64, prec, scale int32) (Num, error) {
 		return Num{}, err
 	}
 
+	return splitPositiveFloat64(val), nil
+}
+
+// splitPositiveFloat64 converts an already scaled and rounded non-negative
+// float64 into the 64-bit words of a Num.
+func splitPositiveFloat64(val float64) Num {
 	var arr [4]float64
 	arr[3] = math.Floor(math.Ldexp(val, -192))
 	val -= math.Ldexp(arr[3], 192)
@@ -331,7 +359,7 @@ func fromPositiveFloat64(v float64, prec, scale int32) (Num, error) {
 	debug.Assert(arr[1] < 1.8446744073709552e+19, "bad conversion float64 to decimal256") // 2**64
 	debug.Assert(arr[0] >= 0, "bad conversion float64 to decimal256")
 	debug.Assert(arr[0] < 1.8446744073709552e+19, "bad conversion float64 to decimal256") // 2**64
-	return Num{[4]uint64{uint64(arr[0]), uint64(arr[1]), uint64(arr[2]), uint64(arr[3])}}, nil
+	return Num{[4]uint64{uint64(arr[0]), uint64(arr[1]), uint64(arr[2]), uint64(arr[3])}}
 }
 
 func (n Num) tofloat64Positive(scale int32) float64 {

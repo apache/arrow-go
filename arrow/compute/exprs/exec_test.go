@@ -867,11 +867,13 @@ func TestFieldRefTypeMismatchReleases(t *testing.T) {
 		exprType, dataType arrow.DataType
 		json               string
 		path               []any
+		wantMsg            string
 	}{
 		{"top level", arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32,
-			`[{"col": 1}, {"col": 2}]`, []any{"col"}},
+			`[{"col": 1}, {"col": 2}]`, []any{"col"}, "referenced field .field(0) was int32"},
 		{"nested", structOf(arrow.BinaryTypes.String), structOf(arrow.PrimitiveTypes.Int32),
-			`[{"col": {"a": 1}}, {"col": {"a": 2}}]`, []any{"col", "a"}},
+			`[{"col": {"a": 1}}, {"col": {"a": 2}}]`, []any{"col", "a"},
+			"referenced field .field(0).field(0) was int32"},
 	}
 
 	for _, tt := range tests {
@@ -894,6 +896,7 @@ func TestFieldRefTypeMismatchReleases(t *testing.T) {
 			ctx := compute.WithAllocator(context.Background(), mem)
 			result, err := exprs.ExecuteScalarExpression(ctx, dataSchema, e, compute.NewDatumWithoutOwning(rec))
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, tt.wantMsg)
 			assert.Nil(t, result)
 		})
 	}
@@ -1034,7 +1037,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		defer mem.AssertSize(t, 0)
 
 		lists, _, err := array.FromJSON(mem, arrow.ListOf(arrow.BinaryTypes.Binary),
-			strings.NewReader(`[["YQ=="], ["Yg==", "Yw=="]]`))
+			strings.NewReader(`[["YQ==", "Yg=="], ["Yw==", "ZA=="]]`))
 		require.NoError(t, err)
 
 		result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: 1},
@@ -1043,11 +1046,10 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		lists.Release()
 		require.NotZero(t, mem.CurrentAlloc(), "result no longer holds its buffers")
 
-		expected, _, err := array.FromJSON(mem, arrow.BinaryTypes.Binary, strings.NewReader(`["Yg==", "Yw=="]`))
+		expected, _, err := array.FromJSON(mem, arrow.BinaryTypes.Binary, strings.NewReader(`["Yg==", "ZA=="]`))
 		require.NoError(t, err)
 		defer expected.Release()
-		assert.Truef(t, array.Equal(expected, result.(*compute.ScalarDatum).Value.(*scalar.List).Value),
-			"got %s", result)
+		assertEqual(t, expected, result)
 		result.Release()
 	})
 
@@ -1067,6 +1069,173 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		assert.Equal(t, []byte("hello"), result.(*scalar.Binary).Data())
 		result.(scalar.Releasable).Release()
 	})
+}
+
+func TestListElementRefPerRow(t *testing.T) {
+	str := arrow.BinaryTypes.String
+
+	tests := []struct {
+		name     string
+		dt       arrow.DataType
+		json     string
+		slice    [2]int64
+		offset   int32
+		expected string
+		build    func(memory.Allocator) arrow.Array
+	}{
+		{"offset beyond the row count", arrow.ListOf(str), `[["a", "b", "c"], ["d", "e", "f"]]`, [2]int64{}, 2, `["c", "f"]`, nil},
+		{"null row", arrow.ListOf(str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`, nil},
+		{"sliced", arrow.ListOf(str), `[["a", "b"], ["c", "d"], null, ["g", "h"]]`, [2]int64{1, 4}, 1, `["d", null, "h"]`, nil},
+		{"large list", arrow.LargeListOf(str), `[["a", "b"], ["c", "d"]]`, [2]int64{}, 1, `["b", "d"]`, nil},
+		{"fixed size list", arrow.FixedSizeListOf(2, str), `[["a", "b"], null, ["e", "f"]]`, [2]int64{}, 1, `["b", null, "f"]`, nil},
+		{"list view out of order and overlapping", nil, "", [2]int64{}, 1, `["e", "b", "c"]`, makeListView(false, []int32{3, 0, 1}, []int32{2, 3, 3}, nil)},
+		{"list view sliced", nil, "", [2]int64{1, 4}, 1, `["b", null, "c"]`, makeListView(false, []int32{4, 0, 2, 1}, []int32{2, 2, 2, 3}, []bool{true, true, false, true})},
+		{"large list view out of order and overlapping", nil, "", [2]int64{}, 1, `["e", "b", "c"]`, makeListView(true, []int32{3, 0, 1}, []int32{2, 3, 3}, nil)},
+		{"large list view sliced", nil, "", [2]int64{1, 4}, 1, `["b", null, "c"]`, makeListView(true, []int32{4, 0, 2, 1}, []int32{2, 2, 2, 3}, []bool{true, true, false, true})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			var lists arrow.Array
+			if tt.build != nil {
+				lists = tt.build(mem)
+			} else {
+				var err error
+				lists, _, err = array.FromJSON(mem, tt.dt, strings.NewReader(tt.json))
+				require.NoError(t, err)
+			}
+			if tt.slice != [2]int64{} {
+				sliced := array.NewSlice(lists, tt.slice[0], tt.slice[1])
+				lists.Release()
+				lists = sliced
+			}
+			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
+				compute.NewDatumWithoutOwning(lists), extSet)
+			require.NoError(t, err)
+			lists.Release()
+			defer result.Release()
+
+			expected, _, err := array.FromJSON(mem, str, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+			assertEqual(t, expected, result)
+		})
+	}
+
+	errTests := []struct {
+		name   string
+		json   string
+		offset int32
+		build  func(memory.Allocator) arrow.Array
+	}{
+		{"past the end of one row", `[["a", "b"], ["c"]]`, 1, nil},
+		{"negative offset", `[["a", "b"], ["c", "d"]]`, -1, nil},
+		{"past the end of one list view", "", 1, makeListView(false, []int32{3, 1}, []int32{3, 1}, nil)},
+		{"past the end of one large list view", "", 1, makeListView(true, []int32{3, 1}, []int32{3, 1}, nil)},
+	}
+	for _, tt := range errTests {
+		t.Run("error "+tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			var lists arrow.Array
+			if tt.build != nil {
+				lists = tt.build(mem)
+			} else {
+				var err error
+				lists, _, err = array.FromJSON(mem, arrow.ListOf(str), strings.NewReader(tt.json))
+				require.NoError(t, err)
+			}
+			defer lists.Release()
+			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
+				compute.NewDatumWithoutOwning(lists), extSet)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			assert.ErrorContains(t, err, "out of bounds")
+			assert.Nil(t, result)
+		})
+	}
+
+	t.Run("nested field after the element", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		dt := arrow.ListOf(arrow.StructOf(arrow.Field{Name: "x", Type: str, Nullable: true}))
+		lists, _, err := array.FromJSON(mem, dt,
+			strings.NewReader(`[[{"x": "a"}, {"x": "b"}], null, [{"x": "d"}, {"x": "e"}]]`))
+		require.NoError(t, err)
+		result, err := exprs.GetReferencedValue(mem,
+			&expr.ListElementRef{Offset: 1, Child: &expr.StructFieldRef{Field: 0}},
+			compute.NewDatumWithoutOwning(lists), extSet)
+		require.NoError(t, err)
+		lists.Release()
+		defer result.Release()
+
+		expected, _, err := array.FromJSON(mem, str, strings.NewReader(`["b", null, "e"]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
+	})
+
+	t.Run("dot path on a record", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		schema := arrow.NewSchema([]arrow.Field{{Name: "l", Type: arrow.ListOf(str), Nullable: true}}, nil)
+		rec, _, err := array.RecordFromJSON(mem, schema,
+			strings.NewReader(`[{"l": ["a", "b"]}, {"l": ["c", "d"]}, {"l": ["e", "f"]}]`))
+		require.NoError(t, err)
+		defer rec.Release()
+
+		ref, err := exprs.NewFieldRefFromDotPath(".l[1]", schema)
+		require.NoError(t, err)
+		st, err := exprs.ToSubstraitType(arrow.StructOf(schema.Fields()...), false, extSet)
+		require.NoError(t, err)
+		e, err := expr.NewRootFieldRef(ref, types.NewRecordTypeFromStruct(*st.(*types.StructType)))
+		require.NoError(t, err)
+
+		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := exprs.ExecuteScalarExpression(ctx, schema, e, compute.NewDatumWithoutOwning(rec))
+		require.NoError(t, err)
+		defer result.Release()
+
+		expected, _, err := array.FromJSON(mem, str, strings.NewReader(`["b", "d", "f"]`))
+		require.NoError(t, err)
+		defer expected.Release()
+		assertEqual(t, expected, result)
+	})
+}
+
+// makeListView returns a function that builds a (large) list view whose rows
+// are the given views over the strings "a" to "f". A nil valid means all rows
+// are valid.
+func makeListView(large bool, offsets, sizes []int32, valid []bool) func(memory.Allocator) arrow.Array {
+	return func(mem memory.Allocator) arrow.Array {
+		values := []string{"a", "b", "c", "d", "e", "f"}
+		if valid == nil {
+			valid = make([]bool, len(offsets))
+			for i := range valid {
+				valid[i] = true
+			}
+		}
+		if !large {
+			b := array.NewListViewBuilder(mem, arrow.BinaryTypes.String)
+			defer b.Release()
+			b.ValueBuilder().(*array.StringBuilder).AppendValues(values, nil)
+			b.AppendValuesWithSizes(offsets, sizes, valid)
+			return b.NewArray()
+		}
+		b := array.NewLargeListViewBuilder(mem, arrow.BinaryTypes.String)
+		defer b.Release()
+		b.ValueBuilder().(*array.StringBuilder).AppendValues(values, nil)
+		offsets64, sizes64 := make([]int64, len(offsets)), make([]int64, len(sizes))
+		for i := range offsets {
+			offsets64[i], sizes64[i] = int64(offsets[i]), int64(sizes[i])
+		}
+		b.AppendValuesWithSizes(offsets64, sizes64, valid)
+		return b.NewArray()
+	}
 }
 
 func TestNestedFieldRefSlicedStruct(t *testing.T) {

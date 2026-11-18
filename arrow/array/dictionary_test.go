@@ -17,6 +17,8 @@
 package array_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -2198,5 +2200,264 @@ func BenchmarkBinaryDictionaryBuilder(b *testing.B) {
 	builder := bldr.(*array.BinaryDictionaryBuilder)
 	for i := 0; i < b.N; i++ {
 		assert.NoError(b, builder.AppendString(randString()))
+	}
+}
+
+func TestDictionaryBuilderBinaryLikeValueTypes(t *testing.T) {
+	const long = "a value longer than twelve bytes"
+	cases := []struct {
+		name   string
+		vt     arrow.DataType
+		binary bool
+	}{
+		{"string_view", arrow.BinaryTypes.StringView, false},
+		{"binary_view", arrow.BinaryTypes.BinaryView, true},
+		{"large_utf8", arrow.BinaryTypes.LargeString, false},
+		{"large_binary", arrow.BinaryTypes.LargeBinary, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dt := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: tc.vt}
+			isView := tc.vt.ID() == arrow.STRING_VIEW || tc.vt.ID() == arrow.BINARY_VIEW
+
+			jsonValues := func(vals ...any) string {
+				out := make([]any, len(vals))
+				for i, v := range vals {
+					if s, ok := v.(string); ok && tc.binary {
+						v = base64.StdEncoding.EncodeToString([]byte(s))
+					}
+					out[i] = v
+				}
+				b, err := json.Marshal(out)
+				require.NoError(t, err)
+				return string(b)
+			}
+			fromJSON := func(mem memory.Allocator, typ arrow.DataType, js string) arrow.Array {
+				arr, _, err := array.FromJSON(mem, typ, strings.NewReader(js))
+				require.NoError(t, err)
+				return arr
+			}
+			requireDict := func(t *testing.T, mem memory.Allocator, got arrow.Array, indices, dict string) {
+				t.Helper()
+				require.NoError(t, array.ValidateFull(got))
+				want, err := array.DictArrayFromJSON(mem, dt, indices, dict)
+				require.NoError(t, err)
+				defer want.Release()
+				assert.Truef(t, array.Equal(want, got), "got %v, want %v", got, want)
+			}
+			newBuilder := func(t *testing.T, mem memory.Allocator) *array.BinaryDictionaryBuilder {
+				t.Helper()
+				bldr := array.NewBuilder(mem, dt)
+				b, ok := bldr.(*array.BinaryDictionaryBuilder)
+				require.Truef(t, ok, "got builder %T", bldr)
+				return b
+			}
+
+			t.Run("append", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				b := newBuilder(t, mem)
+				defer b.Release()
+				require.NoError(t, b.AppendString("alpha"))
+				b.AppendNull()
+				require.NoError(t, b.AppendString(long))
+				require.NoError(t, b.Append([]byte("alpha")))
+				b.AppendEmptyValue()
+				require.NoError(t, b.AppendString(""))
+
+				arr := b.NewArray()
+				defer arr.Release()
+				requireDict(t, mem, arr, `[0, null, 1, 0, 2, 2]`, jsonValues("alpha", long, ""))
+			})
+
+			t.Run("delta", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				b := newBuilder(t, mem)
+				defer b.Release()
+				require.NoError(t, b.AppendString("alpha"))
+				require.NoError(t, b.AppendString("beta"))
+				first := b.NewArray()
+				defer first.Release()
+				requireDict(t, mem, first, `[0, 1]`, jsonValues("alpha", "beta"))
+
+				require.NoError(t, b.AppendString("beta"))
+				require.NoError(t, b.AppendString(long))
+				require.NoError(t, b.AppendString("gamma"))
+				indices, delta, err := b.NewDelta()
+				require.NoError(t, err)
+				defer indices.Release()
+				defer delta.Release()
+
+				require.NoError(t, array.ValidateFull(delta))
+				wantIdx := fromJSON(mem, arrow.PrimitiveTypes.Int32, `[1, 2, 3]`)
+				defer wantIdx.Release()
+				assert.Truef(t, array.Equal(wantIdx, indices), "indices: got %v", indices)
+				wantDelta := fromJSON(mem, tc.vt, jsonValues(long, "gamma"))
+				defer wantDelta.Release()
+				assert.Truef(t, array.Equal(wantDelta, delta), "delta: got %v", delta)
+			})
+
+			t.Run("initial dictionary", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				init := fromJSON(mem, tc.vt, jsonValues("alpha", long))
+				defer init.Release()
+				bldr := array.NewDictionaryBuilderWithDict(mem, dt, init)
+				defer bldr.Release()
+				assert.Equal(t, 2, bldr.DictionarySize())
+
+				b := bldr.(*array.BinaryDictionaryBuilder)
+				require.NoError(t, b.AppendString(long))
+				require.NoError(t, b.AppendString("beta"))
+				require.NoError(t, b.AppendString("alpha"))
+
+				arr := b.NewArray()
+				defer arr.Release()
+				requireDict(t, mem, arr, `[1, 2, 0]`, jsonValues("alpha", long, "beta"))
+			})
+
+			t.Run("FromJSON", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				arr := fromJSON(mem, dt, jsonValues("alpha", nil, long, "alpha"))
+				defer arr.Release()
+				requireDict(t, mem, arr, `[0, null, 1, 0]`, jsonValues("alpha", long))
+			})
+
+			t.Run("record builder", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				schema := arrow.NewSchema([]arrow.Field{{Name: "f", Type: dt, Nullable: true}}, nil)
+				rb := array.NewRecordBuilder(mem, schema)
+				defer rb.Release()
+				fb, ok := rb.Field(0).(*array.BinaryDictionaryBuilder)
+				require.Truef(t, ok, "got builder %T", rb.Field(0))
+				require.NoError(t, fb.AppendString("alpha"))
+				fb.AppendNull()
+				require.NoError(t, fb.AppendString(long))
+
+				rec := rb.NewRecordBatch()
+				defer rec.Release()
+				require.NoError(t, array.ValidateRecordFull(rec))
+				requireDict(t, mem, rec.Column(0), `[0, null, 1]`, jsonValues("alpha", long))
+			})
+
+			t.Run("empty delta", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				b := newBuilder(t, mem)
+				defer b.Release()
+				require.NoError(t, b.AppendString(long))
+				first := b.NewArray()
+				defer first.Release()
+
+				indices, delta, err := b.NewDelta()
+				require.NoError(t, err)
+				defer indices.Release()
+				defer delta.Release()
+				assert.Zero(t, indices.Len())
+				assert.Zero(t, delta.Len())
+				require.NoError(t, array.ValidateFull(delta))
+			})
+
+			if isView {
+				t.Run("single data buffer", func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+					defer mem.AssertSize(t, 0)
+
+					b := newBuilder(t, mem)
+					defer b.Release()
+					// 600 values of 100 bytes exceed the 32 KiB default block size.
+					for i := 0; i < 600; i++ {
+						require.NoError(t, b.AppendString(fmt.Sprintf("%0100d", i)))
+					}
+					arr := b.NewArray()
+					defer arr.Release()
+					require.NoError(t, array.ValidateFull(arr))
+
+					bufs := arr.(*array.Dictionary).Dictionary().Data().Buffers()
+					require.Len(t, bufs, 3, "validity, views, one data buffer")
+					assert.Equal(t, 600*100, bufs[2].Len())
+				})
+
+				t.Run("inline values have no data buffer", func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+					defer mem.AssertSize(t, 0)
+
+					b := newBuilder(t, mem)
+					defer b.Release()
+					require.NoError(t, b.AppendString("a"))
+					require.NoError(t, b.AppendString("twelve bytes"))
+					arr := b.NewArray()
+					defer arr.Release()
+					require.NoError(t, array.ValidateFull(arr))
+
+					assert.Len(t, arr.(*array.Dictionary).Dictionary().Data().Buffers(), 2, "validity and views only")
+				})
+
+				t.Run("initial dictionary null slot", func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+					defer mem.AssertSize(t, 0)
+
+					init := fromJSON(mem, tc.vt, jsonValues("alpha", nil, long))
+					defer init.Release()
+					views := init.Data().Buffers()[1].Bytes()
+					hdrSize := arrow.ViewHeaderTraits.BytesRequired(1)
+					for i := hdrSize; i < 2*hdrSize; i++ {
+						views[i] = 0xFF
+					}
+					require.True(t, init.IsNull(1))
+					require.NoError(t, array.ValidateFull(init))
+
+					bldr := array.NewDictionaryBuilderWithDict(mem, dt, init)
+					defer bldr.Release()
+					assert.Equal(t, 3, bldr.DictionarySize(), "the null slot is inserted as the empty value")
+
+					b := bldr.(*array.BinaryDictionaryBuilder)
+					require.NoError(t, b.AppendString(""))
+					require.NoError(t, b.AppendString(long))
+					arr := b.NewArray()
+					defer arr.Release()
+					requireDict(t, mem, arr, `[1, 2]`, jsonValues("alpha", "", long))
+				})
+			}
+
+			t.Run("unifier", func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				u, err := array.NewDictionaryUnifier(mem, tc.vt)
+				require.NoError(t, err)
+				defer u.Release()
+
+				d1 := fromJSON(mem, tc.vt, jsonValues("alpha", nil, long))
+				defer d1.Release()
+				d2 := fromJSON(mem, tc.vt, jsonValues(long, "beta", "alpha"))
+				defer d2.Release()
+
+				require.NoError(t, u.Unify(d1))
+				transposed, err := u.UnifyAndTranspose(d2)
+				require.NoError(t, err)
+				defer transposed.Release()
+				assert.Equal(t, []int32{2, 3, 0}, arrow.Int32Traits.CastFromBytes(transposed.Bytes())[:3])
+
+				outType, outDict, err := u.GetResult()
+				require.NoError(t, err)
+				defer outDict.Release()
+				assert.True(t, arrow.TypeEqual(tc.vt, outType.(*arrow.DictionaryType).ValueType))
+				require.NoError(t, array.ValidateFull(outDict))
+				want := fromJSON(mem, tc.vt, jsonValues("alpha", nil, long, "beta"))
+				defer want.Release()
+				assert.Truef(t, array.Equal(want, outDict), "unified: got %v", outDict)
+			})
+		})
 	}
 }

@@ -525,3 +525,61 @@ int confuse_go_gc(struct ArrowArrayStream* stream, unsigned int seed) {
   return 0;
 #undef DORAND
 }
+
+typedef struct {
+  void (*release)(struct ArrowArray*);
+  void* private_data;
+  int count;
+} CountingReleaser;
+static void counting_release(struct ArrowArray* arr) {
+  CountingReleaser* cr = arr->private_data;
+  cr->count++;
+  arr->private_data = cr->private_data;
+  arr->release = cr->release;
+  arr->release(arr);
+}
+void* wrap_counting_release(struct ArrowArray* arr) {
+  CountingReleaser* cr = calloc(1, sizeof(*cr));
+  cr->release = arr->release;
+  cr->private_data = arr->private_data;
+  arr->release = counting_release;
+  arr->private_data = cr;
+  return cr;
+}
+int get_counting_release_count(void* cr) {
+  return ((CountingReleaser*)cr)->count;
+}
+typedef struct {
+  struct ArrowArray arr;
+  struct ArrowSchema schema;
+  int releases;
+} SingleArrayStream;
+static int single_get_schema(struct ArrowArrayStream* stream, struct ArrowSchema* out) {
+  ArrowSchemaMove(&((SingleArrayStream*)stream->private_data)->schema, out);
+  return 0;
+}
+static int single_get_next(struct ArrowArrayStream* stream, struct ArrowArray* out) {
+  ArrowArrayMove(&((SingleArrayStream*)stream->private_data)->arr, out);
+  return 0;
+}
+static void single_release(struct ArrowArrayStream* stream) {
+  SingleArrayStream* state = stream->private_data;
+  state->releases++;
+  ArrowArrayRelease(&state->arr);
+  ArrowSchemaRelease(&state->schema);
+  ArrowArrayStreamMarkReleased(stream);
+}
+void* setup_single_array_stream(struct ArrowArray* arr, struct ArrowSchema* schema,
+                                struct ArrowArrayStream* stream) {
+  SingleArrayStream* state = calloc(1, sizeof(*state));
+  ArrowArrayMove(arr, &state->arr);
+  ArrowSchemaMove(schema, &state->schema);
+  stream->get_schema = single_get_schema;
+  stream->get_next = single_get_next;
+  stream->release = single_release;
+  stream->private_data = state;
+  return state;
+}
+int get_single_array_stream_release_count(void* state) {
+  return ((SingleArrayStream*)state)->releases;
+}

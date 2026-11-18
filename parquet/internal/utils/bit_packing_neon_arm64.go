@@ -59,3 +59,7 @@ func unpack32NEON(in io.Reader, out []uint32, nbits int) (int, error) {
 
 	return _unpack32_neon(input, output, completeBatch, nbits), err
 }
+
+func unpack32BytesNEON(in []byte, out []uint32, nbits int) int {
+	return _unpack32_neon(unsafe.Pointer(&in[0]), unsafe.Pointer(&out[0]), len(out), nbits)
+}
