@@ -318,6 +318,8 @@ jobs:
       - name: Test
         # WIP refactor, only tests in the specified dirs have been fixed
         run: GOARCH=386 go test ./parquet/file/... ./arrow/decimal/... ./arrow/decimal128/... ./arrow/decimal256/...
+      - name: Test arrow/array validation for 386
+        run: GOARCH=386 go test -run Validate ./arrow/array/...
   tinygo:
     name: TinyGo
     runs-on: ubuntu-latest
