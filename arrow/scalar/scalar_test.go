@@ -1704,6 +1704,7 @@ func TestListViewScalarSizeLimit(t *testing.T) {
 	defer oversize.Release()
 
 	for _, sc := range []scalar.Scalar{scalar.NewListViewScalar(nulls), scalar.NewLargeListViewScalar(nulls), scalar.NewLargeListViewScalar(oversize)} {
+		defer releaseScalar(sc)
 		assert.NoError(t, sc.Validate(), sc.DataType().String())
 		assert.NoError(t, sc.ValidateFull(), sc.DataType().String())
 	}
