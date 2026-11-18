@@ -170,6 +170,24 @@ func TestReadBatchInPageReportsNoProgress(t *testing.T) {
 	require.Zero(t, read)
 }
 
+func TestReadBatchStopsAtNoProgress(t *testing.T) {
+	descr := shortPageDescr(t, parquet.Repetitions.Required)
+	enc := parquet.Encodings.DeltaBinaryPacked
+	r := newInt32Reader(t, descr, enc, shortPage(t, descr, enc, 10, nil, []int32{7, 8}))
+	out := make([]int32, 10)
+
+	_, _, err := r.ReadBatchInPage(10, out, nil, nil)
+	require.NoError(t, err)
+	_, _, err = r.ReadBatchInPage(10, out, nil, nil)
+	require.ErrorContains(t, err, shortPageMessage)
+
+	require.False(t, r.HasNext())
+	total, read, err2 := r.ReadBatch(10, out, nil, nil)
+	require.Equal(t, err, err2)
+	require.Zero(t, total)
+	require.Zero(t, read)
+}
+
 func TestSkipPageHoldsFewerValuesThanHeader(t *testing.T) {
 	descr := shortPageDescr(t, parquet.Repetitions.Required)
 	enc := parquet.Encodings.DeltaBinaryPacked

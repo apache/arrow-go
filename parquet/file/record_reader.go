@@ -495,7 +495,11 @@ func (rr *recordReader) SetPageReader(pr PageReader) {
 
 func (rr *recordReader) SetPageReaderWithError(pr PageReader) error {
 	rr.atRecStart = true
-	return rr.recordReaderImpl.SetPageReaderWithError(pr)
+	err := rr.recordReaderImpl.SetPageReaderWithError(pr)
+	if err != nil {
+		rr.levelsPos, rr.levelsWritten = 0, 0
+	}
+	return err
 }
 
 func (rr *recordReader) ValuesWritten() int {
@@ -562,7 +566,8 @@ func (rr *recordReader) ResetValues() {
 }
 
 func (rr *recordReader) SeekToRow(recordIdx int64) error {
-	if err := rr.recordReaderImpl.SeekToRow(recordIdx); err != nil {
+	err := rr.recordReaderImpl.SeekToRow(recordIdx)
+	if errors.Is(err, errSeekRowOutOfRange) {
 		return err
 	}
 
@@ -570,10 +575,11 @@ func (rr *recordReader) SeekToRow(recordIdx int64) error {
 	rr.recordsRead = 0
 	// force re-reading the definition/repetition levels
 	// calling SeekToRow on the underlying column reader will ensure that
-	// the next reads will pull from the correct row
+	// the next reads will pull from the correct row. After a failed seek the
+	// buffered levels describe a page the page reader has already released.
 	rr.levelsPos, rr.levelsWritten = 0, 0
 
-	return nil
+	return err
 }
 
 func (rr *recordReader) Reset() {

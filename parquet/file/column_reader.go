@@ -645,8 +645,16 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 // finds the page that contains the desired row index, and the Column Chunk
 // reader will discard values until it reaches the desired row index according
 // to the definition and repetition levels.
+//
+// If the page reader rejects rowIdx as outside the column chunk, SeekToRow
+// returns that error and leaves the reader as it was. If the seek fails after
+// the page reader has moved, the reader stays stopped and returns the error
+// until a later SeekToRow succeeds.
 func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 	if err := c.pager().SeekToPageWithRow(rowIdx); err != nil {
+		if !errors.Is(err, errSeekRowOutOfRange) {
+			c.err = err
+		}
 		return err
 	}
 
@@ -817,6 +825,7 @@ func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, de
 
 	ndefs, toRead, err := c.determineNumToRead(batchSize, defLvls, repLvls)
 	if err != nil {
+		c.err = err
 		return 0, 0, err
 	}
 
@@ -830,10 +839,16 @@ func (c *columnChunkReader) readBatchInPage(batchSize int64, totalRead int64, de
 	// A decoder can hold fewer values than the page header claims. Zero progress
 	// without an error would leave callers that loop on HasNext spinning.
 	if lvls == 0 && err == nil && batchSize > 0 {
-		return 0, 0, errNoProgress(min(batchSize, c.numAvailValues()))
+		c.err = errNoProgress(min(batchSize, c.numAvailValues()))
+		return 0, 0, c.err
 	}
 	c.consumeBufferedValues(lvls)
 
+	// On optional columns the failed batch's definition levels are already
+	// consumed, so a retry would silently drop values.
+	if err != nil {
+		c.err = err
+	}
 	return lvls, read, err
 }
 

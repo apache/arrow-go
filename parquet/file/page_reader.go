@@ -885,9 +885,11 @@ func (p *serializedPageReader) readPageHeader(rd parquet.BufferedReader, hdr *fo
 	return nil
 }
 
+var errSeekRowOutOfRange = errors.New("parquet: cannot seek column reader to row index")
+
 func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 	if rowIdx < 0 || rowIdx >= p.nrows {
-		return fmt.Errorf("parquet: cannot seek column reader to row index %d", rowIdx)
+		return fmt.Errorf("%w %d", errSeekRowOutOfRange, rowIdx)
 	}
 
 	// Release before repositioning p.r: a streaming page's drain-on-release would
