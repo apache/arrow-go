@@ -405,6 +405,9 @@ func checkFiniteVectorValues(values arrow.Array) error {
 	for values.DataType().ID() == arrow.EXTENSION {
 		values = values.(array.ExtensionArray).Storage()
 	}
+	if values.DataType().ID() == arrow.DICTIONARY {
+		return fmt.Errorf("%w: dictionary arrays are not supported for FINITE_VECTOR elements", arrow.ErrInvalid)
+	}
 	if values.NullN() > 0 {
 		return fmt.Errorf("%w: contains a null element", arrow.ErrInvalid)
 	}

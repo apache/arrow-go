@@ -139,3 +139,44 @@ func TestFiniteVectorUnderNullStruct(t *testing.T) {
 	defer got.Release()
 	require.True(t, array.Equal(values, got.Column(0).Data().Chunk(0)))
 }
+
+func TestWriteFiniteVectorRejectsDictionaryArray(t *testing.T) {
+	logical, err := schema.NewFiniteVectorLogicalType(2)
+	require.NoError(t, err)
+	element := schema.Must(schema.NewPrimitiveNodeLogical("element", parquet.Repetitions.Required,
+		nil, parquet.Types.Float, -1, -1))
+	list := schema.Must(schema.NewGroupNode("list", parquet.Repetitions.Repeated, schema.FieldList{element}, -1))
+	vector := schema.Must(schema.NewGroupNodeLogical("v", parquet.Repetitions.Required, schema.FieldList{list}, logical, -1))
+	root := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{vector}, -1))
+
+	var sink bytes.Buffer
+	writer := file.NewParquetWriter(&sink, root,
+		file.WithWriterProps(parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))))
+	defer func() { require.NoError(t, writer.Close()) }()
+	group, err := writer.AppendRowGroupChecked()
+	require.NoError(t, err)
+	column, err := group.NextColumn()
+	require.NoError(t, err)
+
+	mem := memory.DefaultAllocator
+	indexBuilder := array.NewInt32Builder(mem)
+	defer indexBuilder.Release()
+	indexBuilder.AppendValues([]int32{0, 1}, nil)
+	indices := indexBuilder.NewArray()
+	defer indices.Release()
+	valueBuilder := array.NewFloat32Builder(mem)
+	defer valueBuilder.Release()
+	valueBuilder.AppendValues([]float32{1, float32(math.NaN())}, nil)
+	values := valueBuilder.NewArray()
+	defer values.Release()
+	dictionary := array.NewDictionaryArray(
+		&arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.PrimitiveTypes.Float32},
+		indices, values)
+	defer dictionary.Release()
+
+	props := pqarrow.DefaultWriterProps()
+	ctx := pqarrow.NewArrowWriteContext(context.Background(), &props)
+	err = pqarrow.WriteArrowToColumn(ctx, column, dictionary, []int16{1, 1}, []int16{0, 1}, false)
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	require.ErrorContains(t, err, "dictionary arrays are not supported for FINITE_VECTOR elements")
+}
