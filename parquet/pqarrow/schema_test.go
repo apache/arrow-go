@@ -215,7 +215,8 @@ func TestReadDurationFromStoredSchema(t *testing.T) {
 			}, -1))
 			var buf bytes.Buffer
 			writer := file.NewParquetWriter(&buf, root, file.WithWriteMetadata(kv))
-			rgw := writer.AppendRowGroup()
+			rgw, err := writer.AppendRowGroupChecked()
+			require.NoError(t, err)
 			cw, err := rgw.NextColumn()
 			require.NoError(t, err)
 			_, err = cw.(*file.Int64ColumnChunkWriter).WriteBatch([]int64{1, 3}, []int16{1, 0, 1}, nil)
