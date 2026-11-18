@@ -676,7 +676,11 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 		return c.seekEnded(rowIdx)
 	}
 
-	_, err = c.skipRows(rowIdx - c.curPage.(DataPage).FirstRowIndex())
+	want := rowIdx - c.curPage.(DataPage).FirstRowIndex()
+	skipped, err := c.skipRows(want)
+	if err == nil && skipped < want {
+		return c.seekEnded(rowIdx)
+	}
 	return err
 }
 

@@ -1712,22 +1712,29 @@ func patchedDictionaryFile(t *testing.T, dict bool) []byte {
 		require.NoError(t, rg.Close())
 	}
 	require.NoError(t, w.Close())
-	data := out.Bytes()
 
+	return patchFooter(t, out.Bytes(), func(md *format.FileMetaData) {
+		meta := md.RowGroups[1].Columns[0].MetaData
+		cut := func(size int64) { meta.TotalCompressedSize, meta.TotalUncompressedSize = size, size }
+		if !dict {
+			cut(0)
+		} else {
+			dictOffset, dataOffset := meta.GetDictionaryPageOffset(), meta.DataPageOffset
+			meta.DataPageOffset = dictOffset
+			cut(dataOffset - dictOffset)
+		}
+	})
+}
+
+// patchFooter rewrites the file metadata with edit and keeps the data pages.
+func patchFooter(t *testing.T, data []byte, edit func(*format.FileMetaData)) []byte {
+	t.Helper()
 	footerLen := int(binary.LittleEndian.Uint32(data[len(data)-8:]))
 	footerStart := len(data) - 8 - footerLen
 	md := format.NewFileMetaData()
-	_, err = thrift.DeserializeThrift(md, data[footerStart:len(data)-8])
+	_, err := thrift.DeserializeThrift(md, data[footerStart:len(data)-8])
 	require.NoError(t, err)
-	meta := md.RowGroups[1].Columns[0].MetaData
-	cut := func(size int64) { meta.TotalCompressedSize, meta.TotalUncompressedSize = size, size }
-	if !dict {
-		cut(0)
-	} else {
-		dictOffset, dataOffset := meta.GetDictionaryPageOffset(), meta.DataPageOffset
-		meta.DataPageOffset = dictOffset
-		cut(dataOffset - dictOffset)
-	}
+	edit(md)
 	var footer bytes.Buffer
 	_, err = thrift.NewThriftSerializer().Serialize(md, &footer, nil)
 	require.NoError(t, err)
@@ -1770,6 +1777,62 @@ func TestSeekToRowWithoutDataPage(t *testing.T) {
 			assert.Zero(t, total)
 		})
 	}
+}
+
+// patchedRowCountFile writes three 10-row pages with an offset index and patches the
+// footer so the row group and chunk claim 40 values, ten more than the pages hold.
+func patchedRowCountFile(t *testing.T) []byte {
+	t.Helper()
+	sc := schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("x", parquet.Repetitions.Required, -1),
+	}, -1))
+	var out bytes.Buffer
+	w, err := file.NewParquetWriterWithError(&out, sc, file.WithWriterProps(parquet.NewWriterProperties(
+		parquet.WithPageIndexEnabled(true), parquet.WithDictionaryDefault(false), parquet.WithDataPageSize(40))))
+	require.NoError(t, err)
+	rg := w.AppendRowGroup()
+	cw, err := rg.NextColumn()
+	require.NoError(t, err)
+	for page := range 3 {
+		vals := make([]int32, 10)
+		for i := range vals {
+			vals[i] = int32(10*page + i)
+		}
+		_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(vals, nil, nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, cw.Close())
+	require.NoError(t, rg.Close())
+	require.NoError(t, w.Close())
+
+	return patchFooter(t, out.Bytes(), func(md *format.FileMetaData) {
+		md.NumRows, md.RowGroups[0].NumRows = 40, 40
+		md.RowGroups[0].Columns[0].MetaData.NumValues = 40
+	})
+}
+
+// A seek that the offset index sends to the last page must not succeed when that page
+// holds fewer rows than the chunk claims.
+func TestSeekToRowPastLastPageWithOffsetIndex(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+	rdr, err := file.NewParquetReader(bytes.NewReader(patchedRowCountFile(t)),
+		file.WithReadProps(parquet.NewReaderProperties(mem)))
+	require.NoError(t, err)
+	defer rdr.Close()
+	col, err := rdr.RowGroup(0).Column(0)
+	require.NoError(t, err)
+	defer col.Close()
+	icr := col.(*file.Int32ColumnChunkReader)
+
+	err = icr.SeekToRow(35)
+	require.ErrorContains(t, err, "seek found no data page for row index 35")
+	require.NotErrorIs(t, err, file.ErrSeekRowOutOfRange)
+	assert.False(t, icr.HasNext())
+
+	total, _, err2 := icr.ReadBatch(5, make([]int32, 5), nil, nil)
+	assert.Equal(t, err, err2)
+	assert.Zero(t, total)
 }
 
 // A page reader can end right after a dictionary page, with or without an error.
