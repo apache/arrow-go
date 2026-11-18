@@ -637,7 +637,7 @@ func (s *SparseUnion) Release() {
 func (s *SparseUnion) Validate() (err error) {
 	dt := s.Type.(*arrow.SparseUnionType)
 	if dt.NumFields() != len(s.Value) {
-		return fmt.Errorf("sparse union scalar value had %d fields but type has %d fields", dt.NumFields(), len(s.Value))
+		return fmt.Errorf("sparse union scalar value had %d fields but type has %d fields", len(s.Value), dt.NumFields())
 	}
 
 	if s.TypeCode < 0 || int(s.TypeCode) >= len(dt.ChildIDs()) || dt.ChildIDs()[s.TypeCode] == arrow.InvalidUnionChildID {
@@ -646,6 +646,9 @@ func (s *SparseUnion) Validate() (err error) {
 
 	for i, f := range dt.Fields() {
 		v := s.Value[i]
+		if v == nil {
+			return fmt.Errorf("%s value for field %s is missing", dt, f)
+		}
 		if !arrow.TypeEqual(f.Type, v.DataType()) {
 			return fmt.Errorf("%s value for field %s had incorrect type of %s", dt, f, v.DataType())
 		}
@@ -659,7 +662,7 @@ func (s *SparseUnion) Validate() (err error) {
 func (s *SparseUnion) ValidateFull() (err error) {
 	dt := s.Type.(*arrow.SparseUnionType)
 	if dt.NumFields() != len(s.Value) {
-		return fmt.Errorf("sparse union scalar value had %d fields but type has %d fields", dt.NumFields(), len(s.Value))
+		return fmt.Errorf("sparse union scalar value had %d fields but type has %d fields", len(s.Value), dt.NumFields())
 	}
 
 	if s.TypeCode < 0 || int(s.TypeCode) >= len(dt.ChildIDs()) || dt.ChildIDs()[s.TypeCode] == arrow.InvalidUnionChildID {
@@ -668,6 +671,9 @@ func (s *SparseUnion) ValidateFull() (err error) {
 
 	for i, f := range dt.Fields() {
 		v := s.Value[i]
+		if v == nil {
+			return fmt.Errorf("%s value for field %s is missing", dt, f)
+		}
 		if !arrow.TypeEqual(f.Type, v.DataType()) {
 			return fmt.Errorf("%s value for field %s had incorrect type of %s", dt, f, v.DataType())
 		}
@@ -755,6 +761,9 @@ func (s *DenseUnion) Validate() (err error) {
 	if s.TypeCode < 0 || int(s.TypeCode) >= len(dt.ChildIDs()) || dt.ChildIDs()[s.TypeCode] == arrow.InvalidUnionChildID {
 		return fmt.Errorf("%s scalar has invalid type code %d", dt, s.TypeCode)
 	}
+	if s.Value == nil {
+		return fmt.Errorf("%s scalar with type code %d doesn't have an underlying value", s.Type, s.TypeCode)
+	}
 	fieldType := dt.Fields()[dt.ChildIDs()[s.TypeCode]].Type
 	if !arrow.TypeEqual(fieldType, s.Value.DataType()) {
 		return fmt.Errorf("%s scalar with type code %d should have an underlying value of type %s, got %s",
@@ -767,6 +776,9 @@ func (s *DenseUnion) ValidateFull() error {
 	dt := s.Type.(*arrow.DenseUnionType)
 	if s.TypeCode < 0 || int(s.TypeCode) >= len(dt.ChildIDs()) || dt.ChildIDs()[s.TypeCode] == arrow.InvalidUnionChildID {
 		return fmt.Errorf("%s scalar has invalid type code %d", dt, s.TypeCode)
+	}
+	if s.Value == nil {
+		return fmt.Errorf("%s scalar with type code %d doesn't have an underlying value", s.Type, s.TypeCode)
 	}
 	fieldType := dt.Fields()[dt.ChildIDs()[s.TypeCode]].Type
 	if !arrow.TypeEqual(fieldType, s.Value.DataType()) {

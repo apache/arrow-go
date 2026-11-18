@@ -2575,8 +2575,7 @@ func TestViewScalarsInNestedTypes(t *testing.T) {
 			defer values.Release()
 			return array.NewRunEndEncodedArray(runEnds, values, 5, 0)
 		}},
-		// MakeArrayFromScalar supports valid union scalars only at length 0.
-		{name: "dense_union<string_view, int32>", lengths: []int{0}, build: func(t *testing.T) arrow.Array {
+		{name: "dense_union<string_view, int32>", lengths: []int{0, 1, 3}, build: func(t *testing.T) arrow.Array {
 			return fromJSON(t, arrow.DenseUnionOf([]arrow.Field{
 				{Name: "sv", Type: sv, Nullable: true},
 				{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
@@ -3538,6 +3537,22 @@ func (s *UnionScalarSuite) TestValidateErrors() {
 		sc.TypeCode = 3
 		s.Error(sc.Validate())
 		s.Error(sc.ValidateFull())
+	}
+
+	// underlying value is missing, whether or not the scalar is declared valid
+	for _, valid := range []bool{false, true} {
+		switch missing := s.scalarFromValue(1, s.two).(type) {
+		case *scalar.DenseUnion:
+			missing.Valid = valid
+			missing.Value = nil
+			s.Error(missing.Validate())
+			s.Error(missing.ValidateFull())
+		case *scalar.SparseUnion:
+			missing.Valid = valid
+			missing.Value[1] = nil
+			s.Error(missing.Validate())
+			s.Error(missing.ValidateFull())
+		}
 	}
 
 	// underlying value has invalid utf8
