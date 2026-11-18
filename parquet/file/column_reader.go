@@ -624,7 +624,13 @@ func (c *columnChunkReader) determineNumToRead(batchLen int64, defLvls, repLvls 
 		toRead = size
 	}
 
-	if c.descr.MaxRepetitionLevel() > 0 && repLvls != nil {
+	if c.descr.MaxRepetitionLevel() > 0 {
+		if repLvls == nil {
+			// keep the repetition levels in step with the definition levels for
+			// later reads and skips on this page
+			err = c.cacheRepLevels()
+			return
+		}
 		nreps, repErr := c.readRepetitionLevels(repLvls[:size])
 		if repErr != nil {
 			err = repErr
@@ -672,9 +678,29 @@ func (c *columnChunkReader) SeekToRow(rowIdx int64) error {
 	return err
 }
 
+// cacheRepLevels decodes the rest of the page's repetition levels into
+// repLvlBuffer, at their page positions, unless they are already there.
+func (c *columnChunkReader) cacheRepLevels() error {
+	if len(c.repLvlBuffer) > 0 {
+		return nil
+	}
+	buf := c.getRepLvlBuffer(c.numBuffered)
+	nreps, _, err := c.repetitionDecoder.Decode(buf[c.numDecoded:])
+	if err != nil {
+		c.repLvlBuffer = c.repLvlBuffer[:0]
+		return err
+	}
+	c.repLvlBuffer = buf[:c.numDecoded+int64(nreps)]
+	return nil
+}
+
 func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 	toSkip := nrows
-	for c.HasNext() && toSkip > 0 {
+	// inRow is set when a page ends before the last row counted in it does.
+	// That row can continue on the next V1 page, so its remaining levels must
+	// be skipped as well.
+	inRow := false
+	for c.HasNext() && (toSkip > 0 || inRow) {
 		// if there are no repetition levels, then this is easy! each level
 		// is one row so we just use the definition levels to determine
 		// the number of physical values to discard!
@@ -711,15 +737,9 @@ func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 			// because there could be multiple values per row. So we decode the
 			// rest of the page's repetition levels once, at their page
 			// positions, and then go through them to find the right row.
-			if len(c.repLvlBuffer) == 0 {
-				buf := c.getRepLvlBuffer(c.numBuffered)
-				nreps, _, err := c.repetitionDecoder.Decode(buf[c.numDecoded:])
-				if err != nil {
-					c.repLvlBuffer = c.repLvlBuffer[:0]
-					c.err = err
-					return nrows - toSkip, err
-				}
-				c.repLvlBuffer = buf[:c.numDecoded+int64(nreps)]
+			if err := c.cacheRepLevels(); err != nil {
+				c.err = err
+				return nrows - toSkip, err
 			}
 
 			rowsSkipped := int64(0)
@@ -736,6 +756,7 @@ func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 
 			if levelsToSkip == -1 {
 				toSkip -= rowsSkipped
+				inRow = true
 				c.numBuffered, c.numDecoded = 0, 0
 				continue
 			}
@@ -762,6 +783,7 @@ func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 			}
 
 			toSkip -= rowsSkipped
+			inRow = false
 			c.consumeBufferedValues(int64(levelsToSkip))
 		}
 	}

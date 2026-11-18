@@ -739,6 +739,146 @@ func TestSkipAndSeekRepeatedAcrossPages(t *testing.T) {
 	}
 }
 
+// Without a page index, V1 pages are cut without regard to rows, so a row can
+// continue on the next page, and the pages do not record how many rows they hold.
+func TestSkipAndSeekRepeatedWithoutPageIndex(t *testing.T) {
+	const (
+		numRows = 120
+		key     = "0123456789012345"
+	)
+
+	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt32Node("values", parquet.Repetitions.Repeated, -1),
+	}, -1)))
+
+	var (
+		values    []int32
+		defs      []int16
+		reps      []int16
+		rowStarts []int
+	)
+	for row := range numRows {
+		rowStarts = append(rowStarts, len(reps))
+		for i := range row%7 + 1 {
+			values = append(values, int32(row*10+i))
+			defs = append(defs, 1)
+			reps = append(reps, min(int16(i), 1))
+		}
+	}
+	rowStarts = append(rowStarts, len(reps))
+
+	for _, version := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+		for _, encrypted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("DataPageVersion=%v/encrypted=%v", version+1, encrypted), func(t *testing.T) {
+				opts := []parquet.WriterProperty{
+					parquet.WithDataPageVersion(version),
+					parquet.WithDictionaryDefault(false),
+					parquet.WithDataPageSize(64),
+					parquet.WithBatchSize(16),
+				}
+				if encrypted {
+					opts = append(opts, parquet.WithEncryptionProperties(parquet.NewFileEncryptionProperties(key)))
+				}
+				var out bytes.Buffer
+				w := file.NewParquetWriter(&out, sc.Root(), file.WithWriterProps(parquet.NewWriterProperties(opts...)))
+				rg := w.AppendRowGroup()
+				cw, err := rg.NextColumn()
+				require.NoError(t, err)
+				_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch(values, defs, reps)
+				require.NoError(t, err)
+				require.NoError(t, cw.Close())
+				require.NoError(t, rg.Close())
+				require.NoError(t, w.Close())
+				data := out.Bytes()
+
+				open := func(t *testing.T) *file.RowGroupReader {
+					props := parquet.NewReaderProperties(memory.DefaultAllocator)
+					if encrypted {
+						props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(key))
+					}
+					r, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(props))
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, r.Close()) })
+					return r.RowGroup(0)
+				}
+				newReader := func(t *testing.T) *file.Int32ColumnChunkReader {
+					col, err := open(t).Column(0)
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, col.Close()) })
+					return col.(*file.Int32ColumnChunkReader)
+				}
+
+				pr, err := open(t).GetColumnPageReader(0)
+				require.NoError(t, err)
+				var pageStarts []int
+				levels := 0
+				for pr.Next() {
+					pageStarts = append(pageStarts, levels)
+					levels += int(pr.Page().NumValues())
+				}
+				require.NoError(t, pr.Err())
+				require.NoError(t, pr.Close())
+				require.Greater(t, len(pageStarts), 4, "test data must span several data pages")
+				if version == parquet.DataPageV1 {
+					require.NotSubset(t, rowStarts, pageStarts, "some row must continue on the next page")
+				}
+
+				// readRows reads rows [from, to) and checks every level and value.
+				readRows := func(t *testing.T, col *file.Int32ColumnChunkReader, from, to int, msg string) {
+					n := rowStarts[to] - rowStarts[from]
+					gotVals := make([]int32, n)
+					gotDefs := make([]int16, n)
+					gotReps := make([]int16, n)
+					total, nvals, err := col.ReadBatch(int64(n), gotVals, gotDefs, gotReps)
+					require.NoError(t, err, msg)
+					require.EqualValues(t, n, total, msg)
+					require.Equal(t, reps[rowStarts[from]:rowStarts[to]], gotReps, msg)
+					require.Equal(t, defs[rowStarts[from]:rowStarts[to]], gotDefs, msg)
+					require.Equal(t, values[rowStarts[from]:rowStarts[to]], gotVals[:nvals], msg)
+				}
+
+				t.Run("skip", func(t *testing.T) {
+					for n := 1; n < numRows; n++ {
+						col := newReader(t)
+						skipped, err := col.Skip(int64(n))
+						require.NoError(t, err)
+						require.EqualValues(t, n, skipped)
+						readRows(t, col, n, n+1, fmt.Sprintf("after Skip(%d)", n))
+					}
+				})
+
+				t.Run("seek", func(t *testing.T) {
+					col := newReader(t)
+					for i := range numRows {
+						row := i * 37 % numRows
+						require.NoError(t, col.SeekToRow(int64(row)))
+						readRows(t, col, row, min(row+2, numRows), fmt.Sprintf("after SeekToRow(%d)", row))
+					}
+				})
+
+				t.Run("read without repetition levels", func(t *testing.T) {
+					for n := 1; n < numRows-1; n++ {
+						col := newReader(t)
+						levels := rowStarts[n]
+						vals := make([]int32, levels)
+						read, _, err := col.ReadBatch(int64(levels), vals, nil, nil)
+						require.NoError(t, err)
+						require.EqualValues(t, levels, read)
+						readRows(t, col, n, n+1, fmt.Sprintf("after reading %d rows", n))
+
+						skipped, err := col.Skip(1)
+						require.NoError(t, err)
+						require.EqualValues(t, 1, skipped)
+						if n+3 <= numRows {
+							readRows(t, col, n+2, n+3, fmt.Sprintf("after skipping row %d", n+1))
+						}
+					}
+				})
+			})
+		}
+	}
+}
+
 func (p *PrimitiveReaderSuite) TestReadBatchMultiPage() {
 	const (
 		levelsPerPage int = 100

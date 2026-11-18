@@ -172,6 +172,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
 			maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
 			cryptoCtx:               ctx,
+			maxRepLevel:             r.fileMetadata.Schema.Column(i).MaxRepetitionLevel(),
 		}
 		return pr, pr.init(col.Compression(), &ctx)
 	}
@@ -207,6 +208,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
 		maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
 		cryptoCtx:               ctx,
+		maxRepLevel:             r.fileMetadata.Schema.Column(i).MaxRepetitionLevel(),
 	}
 	return pr, pr.init(col.Compression(), &ctx)
 }
