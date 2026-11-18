@@ -525,7 +525,8 @@ func (fw *FileWriter) WriteColumnChunked(data *arrow.Chunked, offset, size int64
 	if fw.closed {
 		return fmt.Errorf("invalid write call: FileWriter is already closed")
 	}
-	acw, err := newArrowColumnWriter(data, offset, size, fw.manifest, fw.rgw, fw.colIdx)
+	acw, err := newArrowColumnWriter(data, offset, size, fw.manifest, fw.rgw, fw.colIdx,
+		fw.arrowProps.writeFiniteVector)
 	if err != nil {
 		return err
 	}

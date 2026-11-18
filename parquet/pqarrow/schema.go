@@ -320,6 +320,29 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	case arrow.FIXED_SIZE_LIST, arrow.LIST, arrow.LARGE_LIST:
 		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
+		if list, ok := field.Type.(*arrow.FixedSizeListType); ok && arrprops.writeFiniteVector &&
+			list.Len() > 0 && isFiniteVectorValueType(elemField.Type) {
+			required := elemField
+			required.Nullable = false
+			element, err := fieldToNode("element", required, props, arrprops)
+			if err != nil {
+				return nil, err
+			}
+			if schema.IsFiniteVectorElement(element) {
+				logical, err := schema.NewFiniteVectorLogicalType(list.Len())
+				if err != nil {
+					return nil, err
+				}
+				middle, err := schema.NewGroupNode("list", parquet.Repetitions.Repeated,
+					schema.FieldList{element}, -1)
+				if err != nil {
+					return nil, err
+				}
+				return schema.NewGroupNodeLogical(name, repType, schema.FieldList{middle},
+					logical, fieldIDFromMeta(field.Metadata))
+			}
+		}
+
 		child, err := fieldToNode(name, elemField, props, arrprops)
 		if err != nil {
 			return nil, err
@@ -372,6 +395,19 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	}
 
 	return schema.NewPrimitiveNodeLogical(name, repType, logicalType, typ, length, fieldIDFromMeta(field.Metadata))
+}
+
+func isFiniteVectorValueType(typ arrow.DataType) bool {
+	for typ.ID() == arrow.EXTENSION {
+		typ = typ.(arrow.ExtensionType).StorageType()
+	}
+	switch typ.ID() {
+	case arrow.BOOL, arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
+		arrow.FLOAT16, arrow.FLOAT32, arrow.FLOAT64, arrow.DECIMAL, arrow.DECIMAL256:
+		return true
+	}
+	return false
 }
 
 const fieldIDKey = "PARQUET:field_id"
