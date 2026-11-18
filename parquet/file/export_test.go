@@ -19,3 +19,7 @@ package file
 // StreamingThreshold exposes the package-level streaming page-size threshold so tests
 // can lower it and exercise streaming on small pages.
 var StreamingThreshold = &streamingThreshold
+
+// ErrSeekRowOutOfRange lets external tests tell the page reader's range error, which
+// leaves the column reader usable, from the errors that stop it.
+var ErrSeekRowOutOfRange = errSeekRowOutOfRange
