@@ -740,7 +740,7 @@ func transferColumnData(rdr file.RecordReader, valueType arrow.DataType, descr *
 		return transferDictionary(rdr, valueType, mem)
 	case arrow.NULL:
 		return arrow.NewChunked(arrow.Null, []arrow.Array{array.NewNull(rdr.ValuesWritten())}), nil
-	case arrow.INT32, arrow.INT64, arrow.FLOAT32, arrow.FLOAT64:
+	case arrow.INT32, arrow.INT64, arrow.FLOAT32, arrow.FLOAT64, arrow.DURATION:
 		data = transferZeroCopy(rdr, valueType) // can just reference the raw data without copying
 	case arrow.BOOL:
 		data = transferBool(rdr)
