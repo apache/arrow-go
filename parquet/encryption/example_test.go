@@ -70,3 +70,41 @@ func ExampleKmsKeyRetriever() {
 
 	// Output: "secret-dek"
 }
+
+// ExampleCryptoFactory shows how to write files whose keys are wrapped by a
+// key management service: implement KmsClient, wrap a client factory in a
+// CryptoFactory, and pass the properties it builds to the writer with
+// parquet.WithEncryptionProperties. The generated PKMT1 key material is read
+// back by KmsKeyRetriever and by parquet-cpp/pyarrow readers.
+func ExampleCryptoFactory() {
+	factory := encryption.NewCryptoFactory(
+		func(encryption.KmsConnectionConfig) (encryption.KmsClient, error) {
+			return toyKMS{}, nil
+		})
+
+	props, err := factory.FileEncryptionProperties(
+		encryption.KmsConnectionConfig{
+			KmsInstanceID:  "kms-instance",
+			KmsInstanceURL: "https://kms.example",
+		},
+		encryption.EncryptionConfiguration{
+			FooterKeyID: "footer_master",
+			// every listed column gets its own data key wrapped by this
+			// master key; columns left out stay in plaintext
+			ColumnKeys: map[string][]string{"column_master": {"sensitive_column"}},
+			// SingleWrapping: true wraps each data key directly with its
+			// master key instead of a per-master-key key encryption key
+		})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("footer key is %d bytes\n", len(props.FooterKey()))
+
+	// The properties are single use: build fresh ones for every file.
+	//
+	//	writerProps := parquet.NewWriterProperties(
+	//		parquet.WithEncryptionProperties(props))
+	//	w := file.NewParquetWriter(out, schema, file.WithWriterProps(writerProps))
+
+	// Output: footer key is 16 bytes
+}

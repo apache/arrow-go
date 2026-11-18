@@ -22,6 +22,7 @@ Usage:
   python3 encryption_interop_pyarrow.py gen <outdir> <footer-key>
   python3 encryption_interop_pyarrow.py gen-kms <outdir>
   python3 encryption_interop_pyarrow.py read <file> <footer-key>
+  python3 encryption_interop_pyarrow.py read-kms <file>
 """
 import sys
 
@@ -57,14 +58,12 @@ def gen(outdir, footer_key):
           create_encryption_properties(footer_key, plaintext_footer=True))
 
 
-def gen_kms(outdir):
-    """Write PKMT1 key material files with a CryptoFactory and a test-only
-    in-memory KMS client whose wrapping is plain base64 (no cryptography
-    dependency). The Go side mirrors the client to unwrap the keys."""
+def _kms_crypto_factory():
+    """A CryptoFactory over a test-only in-memory KMS client whose wrapping
+    is plain base64 (no cryptography dependency), shared by gen-kms and
+    read-kms."""
     import base64 as b64
-    import os
 
-    import pyarrow.parquet as pq
     import pyarrow.parquet.encryption as pe
 
     class Base64KmsClient(pe.KmsClient):
@@ -80,11 +79,18 @@ def gen_kms(outdir):
     config = pe.KmsConnectionConfig(
         kms_instance_id="in-memory", kms_instance_url="local",
         key_access_token="token")
+    return pe.CryptoFactory(lambda cfg: Base64KmsClient(cfg)), config
 
-    def client_factory(kms_connection_config):
-        return Base64KmsClient(kms_connection_config)
 
-    factory = pe.CryptoFactory(client_factory)
+def gen_kms(outdir):
+    """Write PKMT1 key material files with a CryptoFactory. The Go side
+    mirrors the client to unwrap the keys."""
+    import os
+
+    import pyarrow.parquet as pq
+    import pyarrow.parquet.encryption as pe
+
+    factory, config = _kms_crypto_factory()
 
     table = build_table()
     for name, double_wrapping in (("kms_double", True), ("kms_single", False)):
@@ -95,6 +101,18 @@ def gen_kms(outdir):
         path = os.path.join(outdir, name + ".parquet")
         pq.write_table(table, path, encryption_properties=properties)
         print(name)
+
+
+def read_kms(path):
+    """Read a file whose keys were wrapped by the test KMS client, resolving
+    them through the CryptoFactory."""
+    import pyarrow.parquet as pq
+
+    factory, config = _kms_crypto_factory()
+    table = pq.read_table(path,
+                          decryption_properties=factory.file_decryption_properties(config))
+    for name, col in zip(table.column_names, table.columns):
+        print(name + "\t" + " ".join(str(v) for v in col.to_pylist()))
 
 
 def read(path, footer_key):
@@ -125,6 +143,9 @@ def main():
         return 0
     if mode == "gen-kms":
         gen_kms(sys.argv[2])
+        return 0
+    if mode == "read-kms":
+        read_kms(sys.argv[2])
         return 0
     if mode == "read":
         read(sys.argv[2], sys.argv[3].encode())
