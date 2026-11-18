@@ -459,6 +459,7 @@ func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding
 	// Data page layout: Repetition Levels - Definition Levels - encoded values.
 	// Levels are encoded as rle or bit-packed
 	if c.descr.MaxRepetitionLevel() > 0 {
+		c.repLvlBuffer = c.repLvlBuffer[:0]
 		repBytes, err := c.repetitionDecoder.SetData(parquet.Encoding(repLvlEncoding), c.descr.MaxRepetitionLevel(), int(c.numBuffered), buf)
 		if err != nil {
 			return levelsByteLen, err
@@ -707,19 +708,23 @@ func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 		} else {
 			// with repetition levels, we have to check them to determine
 			// how many rows to skip. we can't just skip the number of values
-			// because there could be multiple values per row. So we read in
-			// the repetition levels for the entire page at once and then go
-			// through them to find the right row.
-			repLvls := c.getRepLvlBuffer(c.numBuffered)
-			nreps, _, err := c.repetitionDecoder.Decode(repLvls)
-			if err != nil {
-				c.err = err
-				return nrows - toSkip, err
+			// because there could be multiple values per row. So we decode the
+			// rest of the page's repetition levels once, at their page
+			// positions, and then go through them to find the right row.
+			if len(c.repLvlBuffer) == 0 {
+				buf := c.getRepLvlBuffer(c.numBuffered)
+				nreps, _, err := c.repetitionDecoder.Decode(buf[c.numDecoded:])
+				if err != nil {
+					c.repLvlBuffer = c.repLvlBuffer[:0]
+					c.err = err
+					return nrows - toSkip, err
+				}
+				c.repLvlBuffer = buf[:c.numDecoded+int64(nreps)]
 			}
 
 			rowsSkipped := int64(0)
 			levelsToSkip := -1
-			for i, def := range repLvls[:nreps] {
+			for i, def := range c.repLvlBuffer[c.numDecoded:] {
 				if def == 0 {
 					if rowsSkipped == toSkip {
 						levelsToSkip = i
@@ -735,7 +740,10 @@ func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 				continue
 			}
 
-			var valuesToSkip int64
+			var (
+				valuesToSkip int64
+				err          error
+			)
 			if c.descr.MaxDefinitionLevel() > 0 {
 				defLvls := c.getDefLvlBuffer(int64(levelsToSkip))
 				_, valuesToSkip, err = c.readDefinitionLevels(defLvls)
