@@ -333,7 +333,13 @@ func (w *columnWriter) commitWriteAndCheckPageLimit(numLevels, numValues int64) 
 	return nil
 }
 
+// FlushCurrentPage keeps any failure (not only page writes) so a later Close
+// cannot finish a chunk that is missing data.
 func (w *columnWriter) FlushCurrentPage() error {
+	return w.recordError(w.flushCurrentPage())
+}
+
+func (w *columnWriter) flushCurrentPage() error {
 	var (
 		defLevelsRLESize int32 = 0
 		repLevelsRLESize int32 = 0

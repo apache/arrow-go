@@ -26,7 +26,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -168,4 +170,70 @@ func TestSerializedPageWriterEncryptionRejectsMoreThanMaxInt16Pages(t *testing.T
 	_, err = writer.WriteDataPage(page)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "encrypted parquet files cannot have more than 32767 pages per chunk")
+}
+
+// failingFlushEncoder fails its first FlushValues call and works afterwards,
+// so only a kept error can make a later Close fail.
+type failingFlushEncoder struct {
+	encoding.Int32Encoder
+	failed bool
+}
+
+func (e *failingFlushEncoder) FlushValues() (encoding.Buffer, error) {
+	if !e.failed {
+		e.failed = true
+		return nil, errors.New("flush values failed")
+	}
+	return e.Int32Encoder.FlushValues()
+}
+
+// A FlushCurrentPage failure other than a page write must also stay on the
+// column, so Close does not finish a chunk that is missing data.
+func TestWriteBatchFlushErrorIsKeptForClose(t *testing.T) {
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{schema.NewInt32Node("col", parquet.Repetitions.Required, -1)}, -1)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false), parquet.WithDataPageSize(1))
+	writer := NewParquetWriter(&buf, sc, WithWriterProps(props))
+	rg := writer.AppendRowGroup()
+	col, err := rg.NextColumn()
+	require.NoError(t, err)
+	w := col.(*Int32ColumnChunkWriter)
+	w.currentEncoder = &failingFlushEncoder{Int32Encoder: w.currentEncoder.(encoding.Int32Encoder)}
+
+	_, err = w.WriteBatch([]int32{1, 2, 3}, nil, nil)
+	require.ErrorContains(t, err, "flush values failed")
+	failedSize := buf.Len()
+	for i := 0; i < 2; i++ {
+		require.ErrorContains(t, w.Close(), "flush values failed", "column close %d", i)
+		require.ErrorContains(t, rg.Close(), "flush values failed", "row group close %d", i)
+		require.ErrorContains(t, writer.Close(), "flush values failed", "file close %d", i)
+	}
+	require.Equal(t, failedSize, buf.Len(), "close must not append a footer")
+	_, readErr := NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.Error(t, readErr, "failed writes must not produce a readable footer")
+}
+
+// The exported FlushCurrentPage keeps its failure too.
+func TestExplicitFlushCurrentPageErrorIsKeptForClose(t *testing.T) {
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required,
+		schema.FieldList{schema.NewInt32Node("col", parquet.Repetitions.Required, -1)}, -1)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
+	writer := NewParquetWriter(&buf, sc, WithWriterProps(props))
+	rg := writer.AppendRowGroup()
+	col, err := rg.NextColumn()
+	require.NoError(t, err)
+	w := col.(*Int32ColumnChunkWriter)
+	_, err = w.WriteBatch([]int32{1, 2, 3}, nil, nil)
+	require.NoError(t, err)
+	w.currentEncoder = &failingFlushEncoder{Int32Encoder: w.currentEncoder.(encoding.Int32Encoder)}
+
+	require.ErrorContains(t, w.FlushCurrentPage(), "flush values failed")
+	failedSize := buf.Len()
+	require.ErrorContains(t, w.Close(), "flush values failed")
+	require.ErrorContains(t, writer.Close(), "flush values failed")
+	require.Equal(t, failedSize, buf.Len(), "close must not append a footer")
 }
