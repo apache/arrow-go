@@ -346,3 +346,116 @@ func TestSortIndicesFloatTotalOrderNaNPayloads(t *testing.T) {
 		}
 	}
 }
+
+func TestSortIndicesSingleChunkNullableIntegerRadix(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+	ctx := &exec.KernelCtx{Ctx: exec.WithAllocator(context.Background(), mem)}
+
+	const start, n = 73, 4096
+	for _, pattern := range []string{"random", "duplicates", "sorted", "all-null"} {
+		values := make([]int64, start+n+29)
+		valid := make([]bool, len(values))
+		for i := range values {
+			switch pattern {
+			case "random":
+				x := uint64(i)
+				values[i] = int64(x*6364136223846793005 ^ ((x + 1) * 1442695040888963407))
+			case "duplicates":
+				values[i] = int64(i%19 - 9)
+			default:
+				values[i] = int64(i - start)
+			}
+			valid[i] = pattern != "all-null" && i%13 != 0
+		}
+
+		for _, kind := range []string{"int64", "uint32", "date32", "timestamp"} {
+			t.Run(pattern+"/"+kind, func(t *testing.T) {
+				var full arrow.Array
+				switch kind {
+				case "int64":
+					b := array.NewInt64Builder(mem)
+					b.AppendValues(values, valid)
+					full = b.NewArray()
+					b.Release()
+				case "uint32":
+					uvalues := make([]uint32, len(values))
+					for i, value := range values {
+						uvalues[i] = uint32(value)
+					}
+					b := array.NewUint32Builder(mem)
+					b.AppendValues(uvalues, valid)
+					full = b.NewArray()
+					b.Release()
+				case "date32":
+					dateValues := make([]arrow.Date32, len(values))
+					for i, value := range values {
+						dateValues[i] = arrow.Date32(value)
+					}
+					b := array.NewDate32Builder(mem)
+					b.AppendValues(dateValues, valid)
+					full = b.NewArray()
+					b.Release()
+				case "timestamp":
+					timestamps := make([]arrow.Timestamp, len(values))
+					for i, value := range values {
+						timestamps[i] = arrow.Timestamp(value)
+					}
+					b := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Nanosecond})
+					b.AppendValues(timestamps, valid)
+					full = b.NewArray()
+					b.Release()
+				}
+				defer full.Release()
+
+				sliced := array.NewSlice(full, start, start+n)
+				defer sliced.Release()
+				col := arrow.NewChunked(sliced.DataType(), []arrow.Array{sliced})
+				defer col.Release()
+
+				for _, placement := range []NullPlacement{NullsAtStart, NullsAtEnd} {
+					for _, order := range []SortOrder{Ascending, Descending} {
+						result, err := SortIndices(ctx, []*arrow.Chunked{col}, []SortKey{{Order: order, NullPlacement: placement}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						got := arrow.GetData[uint64](result.Buffers[1].Buf)[:n]
+						want := make([]uint64, n)
+						for i := range want {
+							want[i] = uint64(i)
+						}
+						slices.SortStableFunc(want, func(a, b uint64) int {
+							ai, bi := start+int(a), start+int(b)
+							if valid[ai] != valid[bi] {
+								if valid[ai] == (placement == NullsAtEnd) {
+									return -1
+								}
+								return 1
+							}
+							if !valid[ai] {
+								return 0
+							}
+							var diff int
+							switch kind {
+							case "int64", "timestamp":
+								diff = cmp.Compare(values[ai], values[bi])
+							case "uint32":
+								diff = cmp.Compare(uint32(values[ai]), uint32(values[bi]))
+							case "date32":
+								diff = cmp.Compare(arrow.Date32(values[ai]), arrow.Date32(values[bi]))
+							}
+							if order == Descending {
+								return -diff
+							}
+							return diff
+						})
+						if !slices.Equal(got, want) {
+							t.Errorf("radix mismatch for %s/%s placement=%v order=%v", pattern, kind, placement, order)
+						}
+						result.Release()
+					}
+				}
+			})
+		}
+	}
+}

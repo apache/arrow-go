@@ -286,3 +286,46 @@ func BenchmarkSortIndices_Float64(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkSortIndices_Int64_Nullable(b *testing.B) {
+	const n = 65536
+	for _, nullPct := range []int{1, 10, 50} {
+		for _, pattern := range []string{"random", "duplicates", "sorted"} {
+			b.Run(fmt.Sprintf("nulls=%d%%/%s", nullPct, pattern), func(b *testing.B) {
+				ctx, mem := newBenchKernelCtx(b)
+				values := make([]int64, n)
+				valid := make([]bool, n)
+				for i := range values {
+					valid[i] = (i*17)%100 >= nullPct
+					switch pattern {
+					case "random":
+						x := uint64(i)
+						values[i] = int64(x*6364136223846793005 ^ ((x + 1) * 1442695040888963407))
+					case "duplicates":
+						values[i] = int64(i%19 - 9)
+					default:
+						values[i] = int64(i)
+					}
+				}
+
+				builder := array.NewInt64Builder(mem)
+				builder.AppendValues(values, valid)
+				arr := builder.NewArray()
+				builder.Release()
+				col := arrow.NewChunked(arrow.PrimitiveTypes.Int64, []arrow.Array{arr})
+				arr.Release()
+				defer col.Release()
+
+				keys := []SortKey{{ColumnIndex: 0, Order: Ascending, NullPlacement: NullsAtEnd}}
+				b.ReportAllocs()
+				for b.Loop() {
+					result, err := SortIndices(ctx, []*arrow.Chunked{col}, keys)
+					if err != nil {
+						b.Fatal(err)
+					}
+					result.Release()
+				}
+			})
+		}
+	}
+}
