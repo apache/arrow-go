@@ -25,7 +25,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 func validateUtf8View(input *exec.ArraySpan) error {
@@ -50,30 +52,6 @@ func unsafeStringBytes(s string) []byte {
 		return nil
 	}
 	return unsafe.Slice(unsafe.StringData(s), len(s))
-}
-
-type binaryAppender struct {
-	bldr        array.Builder
-	appendBytes func([]byte)
-	reserveData func(int)
-}
-
-func newBinaryAppender(bldr array.Builder) (binaryAppender, error) {
-	switch b := bldr.(type) {
-	case *array.BinaryBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.Append, reserveData: b.ReserveData}, nil
-	case *array.StringBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.ReserveData}, nil
-	case *array.LargeStringBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryBuilder.Append, reserveData: b.ReserveData}, nil
-	case *array.BinaryViewBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.Append, reserveData: b.ReserveData}, nil
-	case *array.StringViewBuilder:
-		return binaryAppender{bldr: b, appendBytes: b.BinaryViewBuilder.Append, reserveData: b.ReserveData}, nil
-	default:
-		return binaryAppender{}, fmt.Errorf("%w: unsupported builder type %T for binary-like output",
-			arrow.ErrNotImplemented, bldr)
-	}
 }
 
 // binaryLikeValueAccessor returns a per-index byte slice accessor for any
@@ -101,16 +79,97 @@ func binaryLikeValueAccessor(arr arrow.Array) (func(int) []byte, error) {
 	}
 }
 
-// appendBinaryValues drives the null-preserving append loop shared by
-// both directions of the binary<->view cast kernels.
-func appendBinaryValues(arr arrow.Array, getVal func(int) []byte, ba binaryAppender) {
-	for i := 0; i < arr.Len(); i++ {
-		if arr.IsNull(i) {
-			ba.bldr.AppendNull()
+// castValidity copies the logical validity bits into a zero-offset bitmap.
+// A null-free result needs no bitmap, even when the source has one.
+func castValidity(input *exec.ArraySpan, mem memory.Allocator) (*memory.Buffer, int) {
+	nulls := int(input.UpdateNullCount())
+	if nulls == 0 {
+		return nil, 0
+	}
+	validity := memory.NewResizableBuffer(mem)
+	validity.Resize(int(bitutil.BytesForBits(input.Len)))
+	bitutil.CopyBitmap(input.Buffers[0].Buf, int(input.Offset), int(input.Len), validity.Bytes(), 0)
+	return validity, nulls
+}
+
+// makeBinaryViewCastData writes headers and out-of-line data in two contiguous
+// buffers. Keeping all overflow bytes together is required by ArraySpan's
+// fixed three-buffer representation.
+func makeBinaryViewCastData(input *exec.ArraySpan, dt arrow.DataType, arr arrow.Array,
+	value func(int) []byte, outOfLineBytes int, mem memory.Allocator) arrow.ArrayData {
+	nullBitmap, nulls := castValidity(input, mem)
+	if nullBitmap != nil {
+		defer nullBitmap.Release()
+	}
+
+	n := int(input.Len)
+	headersBuf := memory.NewResizableBuffer(mem)
+	defer headersBuf.Release()
+	headersBuf.Resize(arrow.ViewHeaderTraits.BytesRequired(n))
+	// Null slots and unused inline bytes must not retain stale data.
+	clear(headersBuf.Bytes())
+	headers := arrow.ViewHeaderTraits.CastFromBytes(headersBuf.Bytes())
+
+	var dataBuf *memory.Buffer
+	var data []byte
+	if outOfLineBytes != 0 {
+		dataBuf = memory.NewResizableBuffer(mem)
+		defer dataBuf.Release()
+		dataBuf.Resize(outOfLineBytes)
+		data = dataBuf.Bytes()
+	}
+
+	pos := 0
+	for i := range headers {
+		if nulls != 0 && arr.IsNull(i) {
 			continue
 		}
-		ba.appendBytes(getVal(i))
+		v := value(i)
+		headers[i].SetBytes(v)
+		if !headers[i].IsInline() {
+			headers[i].SetIndexOffset(0, int32(pos))
+			pos += copy(data[pos:], v)
+		}
 	}
+
+	buffers := []*memory.Buffer{nullBitmap, headersBuf}
+	if dataBuf != nil {
+		buffers = append(buffers, dataBuf)
+	}
+	return array.NewData(dt, n, buffers, nil, nulls, 0)
+}
+
+// makeBinaryCastData writes offsets and values directly, avoiding a
+// per-element builder append and repeated capacity/bitmap operations.
+func makeBinaryCastData[OffsetT int32 | int64](input *exec.ArraySpan, dt arrow.DataType,
+	arr arrow.Array, value func(int) []byte, totalBytes int, mem memory.Allocator) arrow.ArrayData {
+	nullBitmap, nulls := castValidity(input, mem)
+	if nullBitmap != nil {
+		defer nullBitmap.Release()
+	}
+
+	n := int(input.Len)
+	offsetsBuf := memory.NewResizableBuffer(mem)
+	defer offsetsBuf.Release()
+	offsetsBuf.Resize((n + 1) * int(unsafe.Sizeof(OffsetT(0))))
+	offsets := arrow.GetData[OffsetT](offsetsBuf.Bytes())
+	offsets[0] = 0
+
+	valuesBuf := memory.NewResizableBuffer(mem)
+	defer valuesBuf.Release()
+	valuesBuf.Resize(totalBytes)
+	dst := valuesBuf.Bytes()
+
+	pos := 0
+	for i := 0; i < n; i++ {
+		if nulls == 0 || !arr.IsNull(i) {
+			pos += copy(dst[pos:], value(i))
+		}
+		offsets[i+1] = OffsetT(pos)
+	}
+
+	return array.NewData(dt, n,
+		[]*memory.Buffer{nullBitmap, offsetsBuf, valuesBuf}, nil, nulls, 0)
 }
 
 // SumOutOfLineBytes returns the total non-inline payload (in bytes) that
@@ -165,15 +224,6 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 		}
 	}
 
-	rawBldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type)
-	defer rawBldr.Release()
-	rawBldr.Reserve(int(input.Len))
-
-	ba, err := newBinaryAppender(rawBldr)
-	if err != nil {
-		return err
-	}
-
 	arr := input.MakeArray()
 	defer arr.Release()
 
@@ -183,25 +233,18 @@ func CastBinaryToBinaryView(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec
 			arrow.ErrNotImplemented, out.Type, input.Type)
 	}
 
-	// Pre-size the out-of-line data buffer to the total required capacity so
-	// the builder allocates a single overflow block. ArraySpan only has three
-	// buffer slots (bitmap + view headers + one data buffer); if we let the
-	// builder spill into a second block, TakeOwnership would index past
-	// Buffers[2] and panic.
+	// ArraySpan has only one overflow data buffer, so reject casts that
+	// cannot fit the complete out-of-line payload into that buffer.
 	outOfLineTotal, err := SumOutOfLineBytes(arr.Len(), arr.IsNull,
 		func(i int) int { return len(getVal(i)) })
 	if err != nil {
 		return fmt.Errorf("cast from %s to %s: %w", input.Type, out.Type, err)
 	}
-	if outOfLineTotal > 0 {
-		ba.reserveData(int(outOfLineTotal))
-	}
 
-	appendBinaryValues(arr, getVal, ba)
-
-	result := ba.bldr.NewArray()
+	result := makeBinaryViewCastData(input, out.Type, arr, getVal,
+		int(outOfLineTotal), exec.GetAllocator(ctx.Ctx))
 	defer result.Release()
-	out.TakeOwnership(result.Data())
+	out.TakeOwnership(result)
 	return nil
 }
 
@@ -220,15 +263,6 @@ func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch
 		if err := validateUtf8View(input); err != nil {
 			return err
 		}
-	}
-
-	rawBldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type)
-	defer rawBldr.Release()
-	rawBldr.Reserve(int(input.Len))
-
-	ba, err := newBinaryAppender(rawBldr)
-	if err != nil {
-		return err
 	}
 
 	arr := input.MakeArray()
@@ -255,15 +289,11 @@ func CastBinaryViewToBinary[OutOffsetT int32 | int64](ctx *exec.KernelCtx, batch
 		return fmt.Errorf("%w: failed casting from %s to %s: output data buffer too large for this platform",
 			arrow.ErrInvalid, input.Type, out.Type)
 	}
-	if totalBytes > 0 {
-		ba.reserveData(int(totalBytes))
-	}
 
-	appendBinaryValues(arr, getVal, ba)
-
-	result := ba.bldr.NewArray()
+	result := makeBinaryCastData[OutOffsetT](input, out.Type, arr, getVal,
+		int(totalBytes), exec.GetAllocator(ctx.Ctx))
 	defer result.Release()
-	out.TakeOwnership(result.Data())
+	out.TakeOwnership(result)
 	return nil
 }
 
