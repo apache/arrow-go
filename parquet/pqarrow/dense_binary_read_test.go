@@ -18,7 +18,6 @@ package pqarrow_test
 
 import (
 	"bytes"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -32,13 +31,21 @@ import (
 )
 
 func TestReadDenseByteArrays(t *testing.T) {
+	smallPageValues := make([]string, 300)
+	for i := range smallPageValues {
+		smallPageValues[i] = strings.Repeat("a", 32+i%128)
+	}
 	for _, tt := range []struct {
 		name       string
 		values     []string
+		valid      []bool
 		dictionary bool
+		smallPages bool
 	}{
 		{name: "plain", values: []string{"", "abc", "long value", "", "last"}},
 		{name: "dictionary", values: []string{"", "abc", "long value", "abc", ""}, dictionary: true},
+		{name: "small pages", values: smallPageValues, smallPages: true},
+		{name: "null and empty", values: []string{"a", "", "", "b"}, valid: []bool{true, false, true, true}},
 		{name: "large payload", values: []string{"before", strings.Repeat("x", 9<<20), "after"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,19 +53,26 @@ func TestReadDenseByteArrays(t *testing.T) {
 			defer mem.AssertSize(t, 0)
 			builder := array.NewStringBuilder(mem)
 			defer builder.Release()
-			builder.AppendValues(tt.values, nil)
+			builder.AppendValues(tt.values, tt.valid)
 			input := builder.NewStringArray()
 			defer input.Release()
-			schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.BinaryTypes.String}}, nil)
+			schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.BinaryTypes.String, Nullable: len(tt.valid) > 0}}, nil)
 			record := array.NewRecordBatch(schema, []arrow.Array{input}, int64(len(tt.values)))
 			defer record.Release()
 			table := array.NewTableFromRecords(schema, []arrow.RecordBatch{record})
 			defer table.Release()
 
-			data := writeDenseByteArrayTable(t, table, tt.dictionary)
+			data := writeDenseByteArrayTable(t, table, tt.dictionary, tt.smallPages)
 			parquetReader, err := file.NewParquetReader(bytes.NewReader(data), file.WithReadProps(parquet.NewReaderProperties(mem)))
 			require.NoError(t, err)
 			defer parquetReader.Close()
+			if tt.smallPages {
+				pages, err := parquetReader.RowGroup(0).GetColumnPageReader(0)
+				require.NoError(t, err)
+				require.True(t, pages.Next())
+				require.True(t, pages.Next(), "fixture must span multiple data pages")
+				require.NoError(t, pages.Close())
+			}
 			reader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{BatchSize: 3}, mem)
 			require.NoError(t, err)
 			actual, err := reader.ReadTable(t.Context())
@@ -70,10 +84,17 @@ func TestReadDenseByteArrays(t *testing.T) {
 	}
 }
 
-func writeDenseByteArrayTable(tb testing.TB, table arrow.Table, dictionary bool) []byte {
+func writeDenseByteArrayTable(tb testing.TB, table arrow.Table, dictionary, smallPages bool) []byte {
 	tb.Helper()
 	var data bytes.Buffer
-	props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(dictionary))
+	opts := []parquet.WriterProperty{parquet.WithDictionaryDefault(dictionary)}
+	if dictionary {
+		opts = append(opts, parquet.WithDictionaryPageSizeLimit(2<<20), parquet.WithDictionaryCostFallbackFor("value", false))
+	}
+	if smallPages {
+		opts = append(opts, parquet.WithDataPageSize(4<<10), parquet.WithBatchSize(128))
+	}
+	props := parquet.NewWriterProperties(opts...)
 	require.NoError(tb, pqarrow.WriteTable(table, &data, table.NumRows(), props, pqarrow.DefaultWriterProps()))
 	return data.Bytes()
 }
@@ -82,9 +103,17 @@ func BenchmarkReadDenseByteArrays(b *testing.B) {
 	const rows = 64 * 1024
 	tbl, dataBytes := benchmarkBinaryTable(memory.DefaultAllocator, rows)
 	defer tbl.Release()
-	for _, dictionary := range []bool{false, true} {
-		b.Run("dictionary="+strconv.FormatBool(dictionary), func(b *testing.B) {
-			data := writeDenseByteArrayTable(b, tbl, dictionary)
+	for _, tc := range []struct {
+		name       string
+		dictionary bool
+		smallPages bool
+	}{
+		{name: "plain"},
+		{name: "dictionary", dictionary: true},
+		{name: "plain_small_pages", smallPages: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			data := writeDenseByteArrayTable(b, tbl, tc.dictionary, tc.smallPages)
 			b.SetBytes(dataBytes)
 			b.ReportAllocs()
 			for b.Loop() {
