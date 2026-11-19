@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/compute/internal/kernels"
 	"golang.org/x/sync/errgroup"
@@ -729,9 +730,61 @@ func filterRecordBatchColumn(ctx context.Context, col, indices arrow.Array) (arr
 	return TakeArrayOpts(ctx, col, indices, kernels.TakeOptions{BoundsCheck: false})
 }
 
+// allSelectedBooleanFilter checks whether every logical mask slot is valid
+// and true. It respects a sliced mask's offset and ignores bits outside its
+// logical range, including the last byte's padding.
+func allSelectedBooleanFilter(data arrow.ArrayData) bool {
+	if data.DataType().ID() != arrow.BOOL {
+		return false
+	}
+	if data.Len() == 0 {
+		return true
+	}
+	if data.NullN() > 0 {
+		return false
+	}
+	buffers := data.Buffers()
+	if len(buffers) < 2 || buffers[1] == nil {
+		return false
+	}
+	// Slices of a nullable mask have an unknown null count, even when
+	// the selected range contains no nulls.
+	if data.NullN() < 0 && len(buffers) > 0 && buffers[0] != nil &&
+		!bitutil.BitmapAllSet(buffers[0].Bytes(), data.Offset(), data.Len()) {
+		return false
+	}
+	return bitutil.BitmapAllSet(buffers[1].Bytes(), data.Offset(), data.Len())
+}
+
+func allSelectedFilterDatum(filter Datum) bool {
+	switch f := filter.(type) {
+	case *ArrayDatum:
+		return allSelectedBooleanFilter(f.Value)
+	case *ChunkedDatum:
+		if f.Value.DataType().ID() != arrow.BOOL {
+			return false
+		}
+		for _, chunk := range f.Value.Chunks() {
+			if !allSelectedBooleanFilter(chunk.Data()) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func FilterRecordBatch(ctx context.Context, batch arrow.RecordBatch, filter arrow.Array, opts *FilterOptions) (arrow.RecordBatch, error) {
 	if batch.NumRows() != int64(filter.Len()) {
 		return nil, fmt.Errorf("%w: filter inputs must all be the same length", arrow.ErrInvalid)
+	}
+
+	// A fully selected batch needs neither take indices nor copies of columns.
+	// Retain the original so the result remains live if the caller releases it.
+	if opts != nil && batch.NumRows() > 0 && allSelectedBooleanFilter(filter.Data()) {
+		batch.Retain()
+		return batch, nil
 	}
 
 	var filterSpan exec.ArraySpan
@@ -790,6 +843,13 @@ func FilterRecordBatch(ctx context.Context, batch arrow.RecordBatch, filter arro
 func FilterTable(ctx context.Context, tbl arrow.Table, filter Datum, opts *FilterOptions) (arrow.Table, error) {
 	if tbl.NumRows() != filter.Len() {
 		return nil, fmt.Errorf("%w: filter inputs must all be the same length", arrow.ErrInvalid)
+	}
+
+	// Preserve table chunks and buffers when the mask selects every row.
+	// For a mixed mask, the existing rechunk/take path is still used.
+	if opts != nil && tbl.NumRows() > 0 && allSelectedFilterDatum(filter) {
+		tbl.Retain()
+		return tbl, nil
 	}
 
 	if tbl.NumRows() == 0 {
