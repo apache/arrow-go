@@ -35,6 +35,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPageReaderBoundedBufferReuse(t *testing.T) {
+	pool := make(chan pageReaderBuffers, 1)
+	mem := memory.NewGoAllocator()
+	first := &serializedPageReader{mem: mem, bufferPool: pool}
+	second := &serializedPageReader{mem: mem, bufferPool: pool}
+	first.initBuffers()
+	second.initBuffers()
+	input, data, dict := first.decompressBuffer, first.dataPageBuffer, first.dictPageBuffer
+	data.Resize(128)
+	require.NoError(t, first.Close())
+	require.NoError(t, first.Close())
+	require.NoError(t, second.Close())
+	require.Len(t, pool, 1)
+
+	second.initBuffers()
+	require.Same(t, input, second.decompressBuffer)
+	require.Same(t, data, second.dataPageBuffer)
+	require.NotSame(t, dict, second.dictPageBuffer)
+	second.dataPageBuffer.Resize(2 << 20)
+	require.NoError(t, second.Close())
+	require.Empty(t, pool)
+}
+
 func TestPageReaderRejectsOversizedPages(t *testing.T) {
 	p := &serializedPageReader{
 		maxCompressedPageSize:   64,

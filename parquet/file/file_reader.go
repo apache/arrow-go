@@ -57,7 +57,7 @@ type Reader struct {
 	bloomFilterReader *metadata.BloomFilterReader
 
 	bufferPool  sync.Pool
-	pageBuffers *sync.Pool
+	pageBuffers chan pageReaderBuffers
 }
 
 type ReadOption func(*Reader)
@@ -123,10 +123,6 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 	if f.props == nil {
 		f.props = parquet.NewReaderProperties(memory.NewGoAllocator())
 	}
-	if _, ok := f.props.Allocator().(*memory.GoAllocator); ok {
-		f.pageBuffers = &sync.Pool{}
-	}
-
 	f.bufferPool = sync.Pool{
 		New: func() interface{} {
 			buf := memory.NewResizableBuffer(f.props.Allocator())
@@ -141,6 +137,9 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 		if err := f.parseMetaData(); err != nil {
 			return nil, err
 		}
+	}
+	if _, ok := f.props.Allocator().(*memory.GoAllocator); ok && f.fileDecryptor == nil && f.NumRowGroups() > 1 {
+		f.pageBuffers = make(chan pageReaderBuffers, 4)
 	}
 
 	f.pageIndexReader = &metadata.PageIndexReader{

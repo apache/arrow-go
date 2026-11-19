@@ -45,7 +45,7 @@ type RowGroupReader struct {
 	pageIndexReader   *metadata.PageIndexReader
 	rgPageIndexReader func() (*metadata.RowGroupPageIndexReader, error)
 	bufferPool        *sync.Pool
-	pageBuffers       *sync.Pool
+	pageBuffers       chan pageReaderBuffers
 }
 
 // MetaData returns the metadata of the current Row Group

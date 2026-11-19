@@ -92,15 +92,33 @@ func TestReadNumericRowGroupsRetainedBatch(t *testing.T) {
 }
 
 func BenchmarkReadNumericRowGroups(b *testing.B) {
-	const rowsPerGroup = 8192
-	const groups = 32
+	const rows = 32 * 8192
+	for _, tc := range []struct {
+		name     string
+		groups   int
+		parallel bool
+	}{
+		{name: "one_group_serial", groups: 1},
+		{name: "many_groups_serial", groups: 32},
+		{name: "many_groups_parallel", groups: 32, parallel: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			benchmarkNumericRowGroups(b, rows, tc.groups, tc.parallel)
+		})
+	}
+}
+
+func benchmarkNumericRowGroups(b *testing.B, rows, groups int, parallel bool) {
+	b.Helper()
+	const batchSize = 8192
 	mem := memory.DefaultAllocator
-	data := numericRowGroups(b, rowsPerGroup, groups)
+	data := numericRowGroups(b, rows/groups, groups)
+	b.SetBytes(int64(3 * rows * 8))
 	b.ReportAllocs()
 	for b.Loop() {
 		pf, err := file.NewParquetReader(bytes.NewReader(data))
 		require.NoError(b, err)
-		reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: rowsPerGroup}, mem)
+		reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: batchSize, Parallel: parallel}, mem)
 		require.NoError(b, err)
 		records, err := reader.GetRecordReader(b.Context(), nil, nil)
 		require.NoError(b, err)
@@ -117,7 +135,7 @@ func BenchmarkReadNumericRowGroups(b *testing.B) {
 		require.NoError(b, records.Err())
 		records.Release()
 		require.NoError(b, pf.Close())
-		if count != groups*rowsPerGroup {
+		if count != int64(rows) {
 			b.Fatalf("read %d rows", count)
 		}
 	}

@@ -43,7 +43,8 @@ import (
 type PageReader interface {
 	// Set the maximum Page header size allowed to be read
 	SetMaxPageHeaderSize(int)
-	// Return the current page, or nil if there are no more
+	// Return the current page, or nil if there are no more. The page and its data
+	// are borrowed until the reader advances, seeks, resets or closes.
 	Page() Page
 	// Fetch the next page, returns false if there are no more pages
 	Next() bool
@@ -442,7 +443,7 @@ type serializedPageReader struct {
 	decompressBuffer *memory.Buffer
 	dataPageBuffer   *memory.Buffer
 	dictPageBuffer   *memory.Buffer
-	bufferPool       *sync.Pool
+	bufferPool       chan pageReaderBuffers
 	err              error
 }
 
@@ -458,29 +459,30 @@ func (p *serializedPageReader) Close() error {
 	}
 	if p.decompressBuffer != nil {
 		const maxCachedBufferSize = 1 << 20
-		if p.bufferPool != nil && p.decompressBuffer.Cap() <= maxCachedBufferSize &&
-			p.dataPageBuffer.Cap() <= maxCachedBufferSize {
-			p.bufferPool.Put(&pageReaderBuffers{p.decompressBuffer, p.dataPageBuffer})
-		} else {
-			p.decompressBuffer.Release()
-			p.dataPageBuffer.Release()
-		}
+		buffers := pageReaderBuffers{p.decompressBuffer, p.dataPageBuffer}
 		p.dictPageBuffer.Release()
 		p.decompressBuffer, p.dictPageBuffer, p.dataPageBuffer = nil, nil, nil
+
+		if buffers.decompress.Cap() <= maxCachedBufferSize && buffers.data.Cap() <= maxCachedBufferSize {
+			select {
+			case p.bufferPool <- buffers:
+				return nil
+			default:
+			}
+		}
+		buffers.decompress.Release()
+		buffers.data.Release()
 	}
 	return nil
 }
 
 func (p *serializedPageReader) initBuffers() {
-	var buffers *pageReaderBuffers
-	if p.bufferPool != nil {
-		buffers, _ = p.bufferPool.Get().(*pageReaderBuffers)
-	}
-	if buffers == nil {
+	select {
+	case buffers := <-p.bufferPool:
+		p.decompressBuffer, p.dataPageBuffer = buffers.decompress, buffers.data
+	default:
 		p.decompressBuffer = memory.NewResizableBuffer(p.mem)
 		p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
-	} else {
-		p.decompressBuffer, p.dataPageBuffer = buffers.decompress, buffers.data
 	}
 	// GetDictionaryPage returns a page independently of the reader's current page.
 	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
