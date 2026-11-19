@@ -1701,7 +1701,11 @@ func TestAsyncTaskExtractNull(t *testing.T) {
 	defer arr.Release()
 	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32}}, nil), []arrow.Array{arr}, 3)
 
-	task := CArrowAsyncTask{private_data: createHandle(cgo.NewHandle(rec))}
+	// a Go-side handle slot (not createHandle's malloc) so nothing is left to free
+	hnd := cgo.NewHandle(rec)
+	defer hnd.Delete()
+	hptr := uintptr(hnd)
+	task := CArrowAsyncTask{private_data: unsafe.Pointer(&hptr)}
 	assert.Zero(t, int(asyncTaskExtract(&task, nil)))
 }
 
