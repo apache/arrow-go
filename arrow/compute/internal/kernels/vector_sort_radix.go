@@ -94,6 +94,83 @@ func sortIndicesSingleFloatTotalOrderRadix(ctx *exec.KernelCtx, arr arrow.Array,
 	return true
 }
 
+// sortIndicesSingleFloatDefaultRadix handles the default Arrow float ordering
+// for one chunk, including NaNs and validity nulls. NaNs sort next to the nulls
+// (but after them at the start and before them at the end), regardless of sort
+// direction. Signed zeros and all NaN payloads compare equal; radix sorting
+// preserves the original row order within each group.
+func sortIndicesSingleFloatDefaultRadix(ctx *exec.KernelCtx, arr arrow.Array, indices []uint64, key SortKey) bool {
+	switch values := arr.(type) {
+	case *array.Float16:
+		radixSortFloatDefaultOrder(ctx, indices, values.Values(), values,
+			uint16(0x8000), uint16(0x7c00), uint16(0x03ff), key,
+			func(v float16.Num) uint16 { return v.Uint16() })
+	case *array.Float32:
+		radixSortFloatDefaultOrder(ctx, indices, values.Float32Values(), values,
+			uint32(0x80000000), uint32(0x7f800000), uint32(0x007fffff), key,
+			func(v float32) uint32 { return math.Float32bits(v) })
+	case *array.Float64:
+		radixSortFloatDefaultOrder(ctx, indices, values.Float64Values(), values,
+			uint64(0x8000000000000000), uint64(0x7ff0000000000000), uint64(0x000fffffffffffff), key,
+			func(v float64) uint64 { return math.Float64bits(v) })
+	default:
+		return false
+	}
+	return true
+}
+
+type radixFloatBits interface {
+	~uint16 | ~uint32 | ~uint64
+}
+
+// radixSortFloatDefaultOrder maps floating-point values to unsigned integer
+// radix keys without changing the default compare semantics. After making
+// -0 and +0 identical, negative values have their bits inverted and positive
+// values have the sign bit flipped. Descending reverses only numeric keys.
+// The endpoints of the key space are reserved for NaNs and validity nulls:
+// the bit patterns of finite values and infinities never reach these keys.
+func radixSortFloatDefaultOrder[F any, K radixFloatBits](
+	ctx *exec.KernelCtx, indices []uint64, values []F, arr arrow.Array,
+	signBit, exponentMask, fractionMask K, key SortKey, toBits func(F) K,
+) {
+	var zero K
+	width := int(unsafe.Sizeof(zero))
+	keyBuf := ctx.Allocate(len(values) * width)
+	defer keyBuf.Release()
+	keys := arrow.GetData[K](keyBuf.Buf())[:len(values)]
+
+	nanKey, nullKey := ^K(1), ^K(0)
+	if key.NullPlacement == NullsAtStart {
+		nanKey, nullKey = 1, 0
+	}
+	hasNulls := arr.NullN() != 0
+	for i, value := range values {
+		if hasNulls && arr.IsNull(i) {
+			keys[i] = nullKey
+			continue
+		}
+		bits := toBits(value)
+		if bits&exponentMask == exponentMask && bits&fractionMask != 0 {
+			keys[i] = nanKey
+			continue
+		}
+		// Collapse signed zeros, which compare equal in default ordering.
+		if bits & ^signBit == 0 {
+			bits = 0
+		}
+		if bits&signBit != 0 {
+			bits = ^bits
+		} else {
+			bits ^= signBit
+		}
+		if key.Order == Descending {
+			bits = ^bits
+		}
+		keys[i] = bits
+	}
+	radixSortIntegerIndices(ctx, indices, keys, width, 0, Ascending)
+}
+
 func radixSortFloatTotalOrder[F any, K int16 | int32 | int64](ctx *exec.KernelCtx, indices []uint64, values []F, numBytes int, signBit uint64, order SortOrder, toKey func(F) K) {
 	if len(values) < 2 {
 		return
