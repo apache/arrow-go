@@ -437,7 +437,7 @@ func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) 
 //
 // You can provide an allocator to use through the context via compute.WithAllocator.
 //
-// You can provide the extension set to use through the context via WithExtensionIDSet.
+// You can provide the ExtensionIDSet to use through the context via WithExtensionIDSet.
 //
 // Note: Substrait expressions do not have an equivalent to LargeString/LargeBinary, so
 // field references which expect a string or binary will allow their Large counterparts
@@ -466,7 +466,7 @@ func ExecuteScalarExpression(ctx context.Context, inputSchema *arrow.Schema, exp
 // ExecuteScalarSubstrait uses the provided Substrait extended expression to
 // determine the expected input schema (replacing missing fields in the partial
 // input datum with null scalars and re-ordering columns if necessary) and
-// extension set to use. You can provide the extension registry to use
+// ExtensionIDSet to use. You can provide the extension registry to use
 // through the context via WithExtensionRegistry, otherwise the default
 // Arrow registry will be used. You can provide a memory.Allocator to use
 // the same way via compute.WithAllocator.

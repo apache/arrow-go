@@ -41,8 +41,8 @@ import (
 )
 
 var (
-	extSet     = exprs.NewDefaultExtensionSet()
-	u32Type, _ = exprs.ToSubstraitType(arrow.PrimitiveTypes.Uint32, true, extSet)
+	extSet           = exprs.NewDefaultExtensionSet()
+	_, u32TypeRef, _ = extSet.EncodeTypeVariation(arrow.PrimitiveTypes.Uint32)
 
 	boringSchema = types.NamedStruct{
 		Names: []string{
@@ -56,7 +56,9 @@ var (
 				&types.Int8Type{},
 				&types.Int32Type{},
 				&types.Int32Type{Nullability: types.NullabilityRequired},
-				u32Type,
+				&types.Int32Type{
+					TypeVariationRef: u32TypeRef,
+				},
 				&types.Int64Type{},
 				&types.Float32Type{},
 				&types.Float32Type{Nullability: types.NullabilityRequired},
