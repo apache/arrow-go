@@ -59,6 +59,8 @@ type Scalar interface {
 	ValidateFull() error
 	// Cast the value to the desired DataType (returns an error if unable to do so)
 	// should take semantics into account and modify the value accordingly.
+	// The caller owns the result and must release it if it is Releasable,
+	// including when the result is the receiver.
 	CastTo(arrow.DataType) (Scalar, error)
 
 	// internal only functions for delegation
@@ -471,6 +473,7 @@ func (s *Extension) CastTo(to arrow.DataType) (Scalar, error) {
 	}
 
 	if arrow.TypeEqual(s.Type, to) {
+		s.Retain()
 		return s, nil
 	}
 
