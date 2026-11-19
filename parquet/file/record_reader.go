@@ -990,6 +990,27 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 
 	switch bldr := br.bldr.(type) {
 	case *array.BinaryBuilder:
+		// Size the initial append. Later pages keep the builder's geometric growth
+		// so reading a batch spanning many pages does not copy the buffer per page.
+		if bldr.Len() == 0 {
+			const maxReserveBytes = 8 << 20
+			totalBytes := 0
+			for _, val := range values {
+				if len(val) > maxReserveBytes-totalBytes {
+					totalBytes = maxReserveBytes + 1
+					break
+				}
+				totalBytes += len(val)
+			}
+			if totalBytes <= maxReserveBytes {
+				bldr.Reserve(len(values))
+				bldr.ReserveData(totalBytes)
+				for _, val := range values {
+					bldr.UnsafeAppend(val)
+				}
+				break
+			}
+		}
 		for _, val := range values {
 			bldr.Append(val)
 		}
