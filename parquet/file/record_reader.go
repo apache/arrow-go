@@ -990,8 +990,26 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 
 	switch bldr := br.bldr.(type) {
 	case *array.BinaryBuilder:
+		// Bound the extra sizing pass and leave large payloads on the incremental path.
+		const maxReserveBytes = 8 << 20
+		totalBytes := 0
 		for _, val := range values {
-			bldr.Append(val)
+			if len(val) > maxReserveBytes-totalBytes {
+				totalBytes = -1
+				break
+			}
+			totalBytes += len(val)
+		}
+		if totalBytes >= 0 {
+			bldr.Reserve(len(values))
+			bldr.ReserveData(totalBytes)
+			for _, val := range values {
+				bldr.UnsafeAppend(val)
+			}
+		} else {
+			for _, val := range values {
+				bldr.Append(val)
+			}
 		}
 	case *array.BinaryDictionaryBuilder:
 		for _, val := range values {
