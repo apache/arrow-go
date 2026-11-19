@@ -22,7 +22,6 @@ import (
 	"cmp"
 	"fmt"
 	"math"
-	"slices"
 	"sync/atomic"
 	"unsafe"
 
@@ -174,30 +173,50 @@ func NewChunkResolver(chunks []arrow.Array) *ChunkResolver {
 }
 
 func (c *ChunkResolver) Resolve(idx int64) (chunk, index int64) {
-	// some algorithms consecutively access indexes that are a
-	// relatively small distance from each other, falling into
-	// the same chunk.
-	// This is trivial when merging (assuming each side of the
-	// merge uses its own resolver), but also in the inner
-	// recursive invocations of partitioning.
+	// Consecutive lookups often stay in the same chunk, especially when
+	// merging or gathering sorted indices.
 	if len(c.offsets) <= 1 {
 		return 0, idx
 	}
 
 	cached := c.cached.Load()
-	cacheHit := idx >= c.offsets[cached] && idx < c.offsets[cached+1]
-	if cacheHit {
-		return cached, idx - c.offsets[cached]
+	start, end := c.offsets[cached], c.offsets[cached+1]
+	if idx >= start && idx < end {
+		return cached, idx - start
 	}
 
-	chkIdx, found := slices.BinarySearch(c.offsets, idx)
-	if !found {
-		chkIdx--
+	// When a lookup crosses a chunk boundary, check the neighboring chunk
+	// before doing a binary search. This is common when batches contain
+	// many short chunks or indices are in reverse order.
+	if idx >= end {
+		next := cached + 1
+		if next+1 < int64(len(c.offsets)) && idx < c.offsets[next+1] {
+			c.cached.Store(next)
+			return next, idx - c.offsets[next]
+		}
+	} else if cached > 0 {
+		prev := cached - 1
+		if idx >= c.offsets[prev] {
+			c.cached.Store(prev)
+			return prev, idx - c.offsets[prev]
+		}
 	}
 
-	chunk, index = int64(chkIdx), idx-c.offsets[chkIdx]
+	// Find the last chunk start <= idx. Empty chunks repeat offsets, so a
+	// search for the first matching offset can select an empty chunk.
+	lo, hi := 0, len(c.offsets)-1
+	for lo+1 < hi {
+		mid := int(uint(lo+hi) / 2)
+		if c.offsets[mid] <= idx {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+
+	chunk = int64(lo)
 	c.cached.Store(chunk)
-	return
+	return chunk, idx - c.offsets[lo]
 }
 
 type arrayTypes interface {
