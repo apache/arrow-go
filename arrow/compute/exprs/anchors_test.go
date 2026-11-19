@@ -29,26 +29,26 @@ import (
 
 func TestAnchorHelpers(t *testing.T) {
 	ext := NewDefaultExtensionSet()
-	for _, encode := range []func(arrow.DataType) (extensions.ID, uint32, bool){ext.encodeType, ext.encodeTypeVariation} {
-		id, anchor, ok := encode(arrow.PrimitiveTypes.Uint32)
+	for _, encode := range []func(ExtensionIDSet, arrow.DataType) (extensions.ID, uint32, bool){encodeType, encodeTypeVariation} {
+		id, anchor, ok := encode(ext, arrow.PrimitiveTypes.Uint32)
 		require.True(t, ok)
-		decodedID, dt, ok := ext.decodeTypeArrow(anchor)
+		decodedID, dt, ok := decodeTypeArrow(ext, anchor)
 		require.True(t, ok)
 		assert.Equal(t, id, decodedID)
 		assert.Equal(t, arrow.PrimitiveTypes.Uint32, dt)
 	}
 
-	_, _, ok := ext.decodeTypeArrow(^uint32(0))
+	_, _, ok := decodeTypeArrow(ext, ^uint32(0))
 	assert.False(t, ok)
 
 	registry := ext.GetSubstraitRegistry()
 	id := extensions.ID{URN: SubstraitArithmeticFuncsURI, Name: "add:i32_i32"}
 	anchor := registry.GetFuncAnchor(id)
-	decodedID, convert, ok := ext.decodeFunction(anchor)
+	decodedID, convert, ok := decodeFunction(ext, anchor)
 	require.True(t, ok)
 	assert.Equal(t, "add", decodedID.Name)
 	assert.NotNil(t, convert)
 
-	_, _, ok = ext.decodeFunction(^uint32(0))
+	_, _, ok = decodeFunction(ext, ^uint32(0))
 	assert.False(t, ok)
 }

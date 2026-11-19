@@ -134,7 +134,7 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 
 // ToArrowSchema takes a substrait NamedStruct and an extension set (for
 // type resolution mapping) and creates the equivalent Arrow Schema.
-func ToArrowSchema(base types.NamedStruct, ext *extensionSet) (*arrow.Schema, error) {
+func ToArrowSchema(base types.NamedStruct, ext ExtensionIDSet) (*arrow.Schema, error) {
 	fields := make([]arrow.Field, len(base.Names))
 	for i, typ := range base.Struct.Types {
 		dt, nullable, err := FromSubstraitType(typ, ext)
@@ -168,12 +168,12 @@ func GetExtensionRegistry(ctx context.Context) *ExtensionIDRegistry {
 	return v
 }
 
-func WithExtensionIDSet(ctx context.Context, ext *extensionSet) context.Context {
+func WithExtensionIDSet(ctx context.Context, ext ExtensionIDSet) context.Context {
 	return context.WithValue(ctx, extCtxKey{}, ext)
 }
 
-func GetExtensionIDSet(ctx context.Context) *extensionSet {
-	v, ok := ctx.Value(extCtxKey{}).(*extensionSet)
+func GetExtensionIDSet(ctx context.Context) ExtensionIDSet {
+	v, ok := ctx.Value(extCtxKey{}).(ExtensionIDSet)
 	if !ok {
 		return NewExtensionSet(
 			expr.NewEmptyExtensionRegistry(extensions.GetDefaultCollectionWithNoError()),
@@ -194,7 +194,7 @@ func intervalYearToMonthDatum(mem memory.Allocator, years, months int32) (comput
 		scalar.NewFixedSizeListScalar(arr), intervalYear())}, nil
 }
 
-func literalToDatum(mem memory.Allocator, lit expr.Literal, ext *extensionSet) (compute.Datum, error) {
+func literalToDatum(mem memory.Allocator, lit expr.Literal, ext ExtensionIDSet) (compute.Datum, error) {
 	switch v := lit.(type) {
 	case *expr.PrimitiveLiteral[bool]:
 		return compute.NewDatum(scalar.NewBooleanScalar(v.Value)), nil
@@ -496,7 +496,7 @@ func ExecuteScalarSubstrait(ctx context.Context, expression *expr.Extended, part
 	return ExecuteScalarExpression(WithExtensionIDSet(ctx, set), sc, toExecute, partialInput)
 }
 
-func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.ExecBatch, ext *extensionSet) (compute.Datum, error) {
+func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.ExecBatch, ext ExtensionIDSet) (compute.Datum, error) {
 	if e.Root != expr.RootReference {
 		return nil, fmt.Errorf("%w: only RootReference is implemented", arrow.ErrNotImplemented)
 	}
@@ -558,7 +558,7 @@ func execFieldRef(ctx context.Context, e *expr.FieldReference, input compute.Exe
 	return out, nil
 }
 
-func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext *extensionSet) (compute.Datum, error) {
+func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.Expression, ext ExtensionIDSet) (compute.Datum, error) {
 	if !exp.IsScalar() {
 		return nil, fmt.Errorf("%w: ExecuteScalarExpression cannot execute non-scalar expressions",
 			arrow.ErrInvalid)
@@ -620,7 +620,7 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 			}
 		}
 
-		_, conv, ok := ext.decodeFunction(e.FuncRef())
+		_, conv, ok := decodeFunction(ext, e.FuncRef())
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", arrow.ErrNotImplemented, e.Name())
 		}
