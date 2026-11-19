@@ -56,7 +56,8 @@ type Reader struct {
 	pageIndexReader   *metadata.PageIndexReader
 	bloomFilterReader *metadata.BloomFilterReader
 
-	bufferPool sync.Pool
+	bufferPool  sync.Pool
+	pageBuffers chan pageReaderBuffers
 }
 
 type ReadOption func(*Reader)
@@ -122,7 +123,6 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 	if f.props == nil {
 		f.props = parquet.NewReaderProperties(memory.NewGoAllocator())
 	}
-
 	f.bufferPool = sync.Pool{
 		New: func() interface{} {
 			buf := memory.NewResizableBuffer(f.props.Allocator())
@@ -137,6 +137,11 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 		if err := f.parseMetaData(); err != nil {
 			return nil, err
 		}
+	}
+	// Page readers can return buffers after Reader.Close. Cached buffers rely
+	// on the Go garbage collector for cleanup, so this requires the Go allocator.
+	if _, ok := f.props.Allocator().(*memory.GoAllocator); ok && f.fileDecryptor == nil && f.NumRowGroups() > 1 {
+		f.pageBuffers = make(chan pageReaderBuffers, 4)
 	}
 
 	f.pageIndexReader = &metadata.PageIndexReader{
@@ -334,6 +339,7 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 		r:               f.r,
 		fileDecryptor:   f.fileDecryptor,
 		bufferPool:      &f.bufferPool,
+		pageBuffers:     f.pageBuffers,
 		pageIndexReader: f.pageIndexReader,
 		// don't pre-emptively initialize the row group page index reader
 		// do it on demand, but ensure that it is goroutine safe.

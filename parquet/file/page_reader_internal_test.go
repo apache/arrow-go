@@ -35,6 +35,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPageReaderScratchCacheLimit(t *testing.T) {
+	const limit = 1 << 20
+	tests := []struct {
+		name           string
+		decompressSize int
+		dataSize       int
+		cachedPairs    int
+	}{
+		{"at the limit", limit, limit, 1},
+		{"oversized decompress buffer", limit + 1, limit, 0},
+		{"oversized data buffer", limit, limit + 1, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := make(chan pageReaderBuffers, 1)
+			p := &serializedPageReader{mem: memory.NewGoAllocator(), bufferPool: pool}
+			p.initBuffers()
+			p.decompressBuffer.ResizeNoShrink(tt.decompressSize)
+			p.dataPageBuffer.ResizeNoShrink(tt.dataSize)
+
+			require.NoError(t, p.Close())
+			require.Len(t, pool, tt.cachedPairs)
+		})
+	}
+}
+
 func TestPageReaderRejectsOversizedPages(t *testing.T) {
 	p := &serializedPageReader{
 		maxCompressedPageSize:   64,

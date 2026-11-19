@@ -43,7 +43,8 @@ import (
 type PageReader interface {
 	// Set the maximum Page header size allowed to be read
 	SetMaxPageHeaderSize(int)
-	// Return the current page, or nil if there are no more
+	// Return the current page, or nil if there are no more. The page and its data
+	// are borrowed until the reader advances, seeks, resets or closes.
 	Page() Page
 	// Fetch the next page, returns false if there are no more pages
 	Next() bool
@@ -442,7 +443,12 @@ type serializedPageReader struct {
 	decompressBuffer *memory.Buffer
 	dataPageBuffer   *memory.Buffer
 	dictPageBuffer   *memory.Buffer
+	bufferPool       chan pageReaderBuffers
 	err              error
+}
+
+type pageReaderBuffers struct {
+	decompress, data *memory.Buffer
 }
 
 func (p *serializedPageReader) Close() error {
@@ -452,26 +458,49 @@ func (p *serializedPageReader) Close() error {
 		p.curPage = nil
 	}
 	if p.decompressBuffer != nil {
-		p.decompressBuffer.Release()
+		// Four pairs of 1 MiB buffers cap the cached capacity at 8 MiB per file.
+		// Pages that exceed the default 1 MiB page target can leave larger
+		// scratch buffers, which are released here.
+		const maxCachedBufferSize = 1 << 20
+		buffers := pageReaderBuffers{p.decompressBuffer, p.dataPageBuffer}
 		p.dictPageBuffer.Release()
-		p.dataPageBuffer.Release()
+		p.decompressBuffer, p.dictPageBuffer, p.dataPageBuffer = nil, nil, nil
+
+		if buffers.decompress.Cap() <= maxCachedBufferSize && buffers.data.Cap() <= maxCachedBufferSize {
+			select {
+			case p.bufferPool <- buffers:
+				return nil
+			default:
+			}
+		}
+		buffers.decompress.Release()
+		buffers.data.Release()
 	}
 	return nil
+}
+
+func (p *serializedPageReader) initBuffers() {
+	select {
+	case buffers := <-p.bufferPool:
+		p.decompressBuffer, p.dataPageBuffer = buffers.decompress, buffers.data
+	default:
+		p.decompressBuffer = memory.NewResizableBuffer(p.mem)
+		p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
+	}
+	// GetDictionaryPage returns a page independently of the reader's current page.
+	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
+	p.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
 }
 
 func (p *serializedPageReader) init(compressType compress.Compression, ctx *CryptoContext) error {
 	if p.mem == nil {
 		p.mem = memory.NewGoAllocator()
 	}
-	p.decompressBuffer = memory.NewResizableBuffer(p.mem)
-	p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
-	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
-	p.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
-
 	codec, err := compress.GetCodec(compressType)
 	if err != nil {
 		return err
 	}
+	p.initBuffers()
 	p.codec = codec
 	if _, ok := codec.(compress.StreamingCodec); !ok {
 		// A codec registered via compress.RegisterCodec need not implement
@@ -545,6 +574,7 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 		return
 	}
 	if ctx != nil {
+		p.bufferPool = nil
 		p.cryptoCtx = *ctx
 		p.chunkStartsWithDict = ctx.StartDecryptWithDictionaryPage
 		p.initDecryption()
@@ -553,6 +583,9 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 		p.chunkStartsWithDict = false
 		p.dataPageAad = ""
 		p.dataPageHeaderAad = ""
+	}
+	if p.decompressBuffer == nil {
+		p.initBuffers()
 	}
 }
 
