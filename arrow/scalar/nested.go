@@ -91,6 +91,7 @@ func (l *List) CastTo(to arrow.DataType) (Scalar, error) {
 	}
 
 	if arrow.TypeEqual(l.Type, to) {
+		l.Retain()
 		return l, nil
 	}
 
@@ -142,6 +143,7 @@ type ListView struct {
 
 func (l *ListView) CastTo(to arrow.DataType) (Scalar, error) {
 	if l.Valid && arrow.TypeEqual(l.Type, to) {
+		l.Retain()
 		return l, nil
 	}
 	return l.List.CastTo(to)
@@ -165,6 +167,7 @@ type LargeListView struct {
 
 func (l *LargeListView) CastTo(to arrow.DataType) (Scalar, error) {
 	if l.Valid && arrow.TypeEqual(l.Type, to) {
+		l.Retain()
 		return l, nil
 	}
 	return l.List.CastTo(to)
@@ -886,6 +889,7 @@ func (s *RunEndEncoded) CastTo(to arrow.DataType) (Scalar, error) {
 	}
 
 	if arrow.TypeEqual(s.Type, to) {
+		s.Retain()
 		return s, nil
 	}
 

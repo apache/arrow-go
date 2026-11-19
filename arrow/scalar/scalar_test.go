@@ -1680,6 +1680,7 @@ func TestListViewScalarEqualsAndCastTo(t *testing.T) {
 
 			got, err := a.CastTo(a.DataType())
 			require.NoError(t, err)
+			defer releaseScalar(got)
 			assert.Same(t, a, got)
 
 			_, err = scalar.MakeScalarParam(oneTwo, v.badType)
@@ -3758,4 +3759,46 @@ func TestRunEndEncodedScalarValidateRejectsMissingNonNullValue(t *testing.T) {
 
 	assert.ErrorContains(t, sc.Validate(), "has no value")
 	assert.ErrorContains(t, sc.ValidateFull(), "has no value")
+}
+
+func TestRunEndEncodedCastOwnsValue(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	for _, target := range []string{"list", "same encoding", "different run ends"} {
+		t.Run(target, func(t *testing.T) {
+			arr, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader("[1, 2]"))
+			require.NoError(t, err)
+			list := scalar.NewListScalar(arr)
+			arr.Release()
+			from := scalar.NewRunEndEncodedScalar(list, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int16, list.DataType()))
+			to := list.DataType()
+			switch target {
+			case "same encoding":
+				to = from.DataType()
+			case "different run ends":
+				to = arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, to)
+			}
+			got, err := from.CastTo(to)
+			require.NoError(t, err)
+			from.Release()
+			require.Positive(t, mem.CurrentAlloc(), "cast result should still own the list buffers")
+			releaseScalar(got)
+		})
+	}
+}
+
+func TestExtensionIdentityCastOwnsStorage(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	typ := extensions.NewUUIDType()
+	buf := memory.NewResizableBuffer(mem)
+	buf.Resize(16)
+	storage := scalar.NewFixedSizeBinaryScalar(buf, typ.StorageType())
+	buf.Release()
+	input := scalar.NewExtensionScalar(storage, typ)
+	result, err := input.CastTo(typ)
+	require.NoError(t, err)
+	input.Release()
+	require.Positive(t, mem.CurrentAlloc(), "cast result should still own the UUID storage")
+	releaseScalar(result)
 }

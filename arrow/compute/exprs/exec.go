@@ -120,13 +120,10 @@ func makeExecBatch(ctx context.Context, schema *arrow.Schema, partial compute.Da
 					if err != nil {
 						return out, err
 					}
-					if !s.Value[idx].IsValid() {
-						// CastTo of a null returns a new scalar, which the datum owns
-						out.Values[i] = &compute.ScalarDatum{Value: val}
-						continue
-					}
+					out.Values[i] = &compute.ScalarDatum{Value: val}
+				} else {
+					out.Values[i] = compute.NewDatum(val)
 				}
-				out.Values[i] = compute.NewDatum(val)
 			}
 			return
 		}

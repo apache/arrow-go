@@ -361,3 +361,21 @@ func TestLiteralToDatumNullUserDefinedRelease(t *testing.T) {
 	got.Release()
 	assert.Nil(t, dict.Buffers())
 }
+
+func TestExecuteLiteralReleasesCastedScalar(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+	inputType := arrow.StructOf(arrow.Field{Name: "a", Type: arrow.BinaryTypes.Binary})
+	arr, _, err := array.FromJSON(mem, inputType, strings.NewReader(`[{"a":"eA=="}]`))
+	require.NoError(t, err)
+	defer arr.Release()
+	input, err := scalar.GetScalar(arr, 0)
+	require.NoError(t, err)
+	defer input.(scalar.Releasable).Release()
+
+	schema := arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.BinaryTypes.String}}, nil)
+	result, err := ExecuteScalarExpression(context.Background(), schema,
+		expr.NewPrimitiveLiteral(int32(1), false), compute.NewDatumWithoutOwning(input))
+	require.NoError(t, err)
+	result.Release()
+}
