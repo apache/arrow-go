@@ -247,14 +247,15 @@ func asyncStreamOnSchema(self *CArrowAsyncDeviceStreamHandler, schema *CArrowSch
 	handler.ch <- AsyncRecordBatchStream{Schema: sc,
 		AdditionalMetadata: meta, Stream: recordStream}
 
-	self.private_data = createHandle(cgo.NewHandle(&cAsyncStreamHandler{
+	streamHandler := &cAsyncStreamHandler{
 		producer:  self.producer,
 		ctx:       handler.ctx,
 		taskQueue: taskQueue,
-	}))
+	}
+	self.private_data = createHandle(cgo.NewHandle(streamHandler))
 
 	C.goCallRequest(self.producer, C.int64_t(handler.queueSize))
-	go asyncTaskQueue(handler.ctx, sc, recordStream, taskQueue, self.producer)
+	go asyncTaskQueue(handler.ctx, sc, recordStream, taskQueue, streamHandler)
 	return 0
 }
 
@@ -332,6 +333,11 @@ func asyncTaskExtract(task *CArrowAsyncTask, out *CArrowDeviceArray) C.int {
 	h := getHandle(task.private_data)
 	rec := h.Value().(arrow.RecordBatch)
 	defer rec.Release()
+
+	// a NULL out means the consumer doesn't want the data
+	if out == nil {
+		return C.int(0)
+	}
 
 	out.device_id, out.device_type = C.int64_t(-1), C.ARROW_DEVICE_CPU
 	ExportArrowRecordBatch(rec, &out.array, nil)

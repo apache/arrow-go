@@ -1703,6 +1703,54 @@ func TestAsyncReleaseAfterOnSchemaFailure(t *testing.T) {
 	}
 }
 
+// A producer may free its ArrowAsyncProducer once release returns, so the
+// consumer must not call request() for tasks still buffered at that point.
+func TestAsyncNoRequestAfterRelease(t *testing.T) {
+	handler := testAsyncHandler()
+	defer freeAsyncHandler(handler)
+
+	ch := CreateAsyncDeviceStreamHandler(context.Background(), 4, handler)
+	var schema CArrowSchema
+	ExportArrowSchema(arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32}}, nil), &schema)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		asyncProduceThenRelease(handler, &schema, 3)
+	}()
+
+	asyncStream := <-ch
+	require.NoError(t, asyncStream.Err)
+	for range asyncStream.Stream {
+	}
+	<-done
+	defer freeAsyncProducer()
+
+	late, extracts := asyncProducerCounts()
+	assert.Zero(t, late, "request called after release")
+	assert.Equal(t, 3, extracts, "buffered tasks must still be extracted")
+}
+
+// A consumer may pass NULL to extract_data when it doesn't want the data.
+func TestAsyncTaskExtractNull(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{1, 2, 3}, nil)
+	arr := bldr.NewArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32}}, nil), []arrow.Array{arr}, 3)
+
+	// a Go-side handle slot (not createHandle's malloc) so nothing is left to free
+	hnd := cgo.NewHandle(rec)
+	defer hnd.Delete()
+	hptr := uintptr(hnd)
+	task := CArrowAsyncTask{private_data: unsafe.Pointer(&hptr)}
+	assert.Zero(t, int(asyncTaskExtract(&task, nil)))
+}
+
 func TestAsyncPropagateError(t *testing.T) {
 	reclist := arrdata.Records["primitives"]
 

@@ -22,6 +22,7 @@ package cdata
 // #include <stdlib.h>
 // #include <stdint.h>
 // #include <string.h>
+// #include <errno.h>
 // #include "abi.h"
 // #include "helpers.h"
 //
@@ -58,6 +59,49 @@ package cdata
 //
 // static void call_async_release(struct ArrowAsyncDeviceStreamHandler* handler) {
 // 	handler->release(handler);
+// }
+//
+// static volatile int g_async_released;
+// static volatile int g_async_late_requests;
+// static volatile int g_async_extracts;
+// static struct ArrowAsyncProducer* g_async_producer;
+//
+// static void test_async_request(struct ArrowAsyncProducer* p, int64_t n) {
+// 	if (__atomic_load_n(&g_async_released, __ATOMIC_SEQ_CST)) __atomic_fetch_add(&g_async_late_requests, 1, __ATOMIC_SEQ_CST);
+// }
+//
+// static int async_late_requests() { return g_async_late_requests; }
+// static int async_extracts() { return g_async_extracts; }
+// static void free_async_producer() { free(g_async_producer); }
+//
+// static void test_async_cancel(struct ArrowAsyncProducer* p) {}
+//
+// static int test_async_extract(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out) {
+// 	// stay busy until release so the later tasks are still buffered then
+// 	while (!__atomic_load_n(&g_async_released, __ATOMIC_SEQ_CST)) {}
+// 	__atomic_fetch_add(&g_async_extracts, 1, __ATOMIC_SEQ_CST);
+// 	return EINVAL; // no data; consumer skips the task
+// }
+//
+// // run_async_producer acts as a conforming producer: n tasks, end of
+// // stream, then release. request() calls after release are counted.
+// static int run_async_producer(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema, int n) {
+// 	__atomic_store_n(&g_async_released, 0, __ATOMIC_SEQ_CST);
+// 	g_async_late_requests = g_async_extracts = 0;
+// 	g_async_producer = get_test_async_producer(ARROW_DEVICE_CPU);
+// 	g_async_producer->request = test_async_request;
+// 	g_async_producer->cancel = test_async_cancel;
+// 	handler->producer = g_async_producer;
+// 	int rc = handler->on_schema(handler, schema);
+// 	for (int i = 0; rc == 0 && i < n; i++) {
+// 		struct ArrowAsyncTask task = {test_async_extract, NULL};
+// 		rc = handler->on_next_task(handler, &task, NULL);
+// 	}
+// 	if (rc == 0) rc = handler->on_next_task(handler, NULL, NULL);
+// 	handler->release(handler);
+// 	// from here the producer may be freed
+// 	__atomic_store_n(&g_async_released, 1, __ATOMIC_SEQ_CST);
+// 	return rc;
 // }
 //
 // void release_test_arr(struct ArrowArray* arr);
@@ -215,6 +259,23 @@ func asyncOnSchemaThenRelease(handler *CArrowAsyncDeviceStreamHandler, schema *C
 		C.call_async_release(handler)
 	}
 	return status, handler.release == nil
+}
+
+// asyncProduceThenRelease runs a producer that sends n tasks and end of
+// stream and then releases handler. Call freeAsyncProducer once the
+// consumer is done.
+func asyncProduceThenRelease(handler *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema, n int) {
+	C.run_async_producer(handler, schema, C.int(n))
+}
+
+// asyncProducerCounts returns the request calls made after release and
+// the tasks extracted.
+func asyncProducerCounts() (late, extracts int) {
+	return int(C.async_late_requests()), int(C.async_extracts())
+}
+
+func freeAsyncProducer() {
+	C.free_async_producer()
 }
 
 func testNested(fmts, names []string, isnull []bool) **CArrowSchema {
