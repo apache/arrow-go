@@ -548,13 +548,15 @@ type RecordReader interface {
 	array.RecordReader
 	arrio.Reader
 	// SeekToRow will shift the record reader so that subsequent calls to Read
-	// or Next will begin from the specified row.
+	// or Next will begin from the specified row. A successful seek clears
+	// the end-of-stream state so that reading can resume after EOF.
 	//
 	// If the record reader was constructed with a request for a subset of row
 	// groups, then rows are counted across the requested row groups, not the
 	// entire file. This prevents reading row groups that were requested to be
 	// skipped, and allows treating the subset of row groups as a single collection
-	// of rows.
+	// of rows. A reader constructed with GetRecordReaderWithRowRanges counts
+	// only rows in the selected ranges.
 	//
 	// If the file contains Offset indexes for a given column, then it will be
 	// utilized to skip pages as needed to find the requested row. Otherwise page
@@ -567,6 +569,10 @@ type RecordReader interface {
 //
 // For both cases, if you pass nil for column indexes or rowgroups it will default to reading all of them.
 func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups []int) (RecordReader, error) {
+	return fr.getRecordReader(ctx, colIndices, rowGroups, nil)
+}
+
+func (fr *FileReader) getRecordReader(ctx context.Context, colIndices, rowGroups []int, ranges []RowRange) (RecordReader, error) {
 	if err := fr.checkRowGroups(rowGroups); err != nil {
 		return nil, err
 	}
@@ -589,6 +595,27 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 		}
 	}
 
+	nrows := int64(0)
+	for _, rg := range rowGroups {
+		nrows += fr.rdr.MetaData().RowGroup(rg).NumRows()
+	}
+
+	selection, err := newRowRangeSelection(ranges, nrows)
+	if err != nil {
+		return nil, err
+	}
+	if selection != nil {
+		if len(selection.ranges) == 0 {
+			rowGroups = []int{}
+		}
+		for _, col := range colIndices {
+			if fr.rdr.MetaData().Schema.Column(col).MaxRepetitionLevel() > 0 {
+				selection.hasRepeatedColumns = true
+				break
+			}
+		}
+	}
+
 	// TODO(mtopol): add optimizations to pre-buffer data from the file
 
 	readers, sc, err := fr.GetFieldReaders(ctx, colIndices, rowGroups)
@@ -598,11 +625,6 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 
 	if len(readers) == 0 {
 		return nil, errors.New("no leaf column readers matched col indices")
-	}
-
-	nrows := int64(0)
-	for _, rg := range rowGroups {
-		nrows += fr.rdr.MetaData().RowGroup(rg).NumRows()
 	}
 
 	var batchSize int64
@@ -618,6 +640,7 @@ func (fr *FileReader) GetRecordReader(ctx context.Context, colIndices, rowGroups
 		sc:           sc,
 		fieldReaders: readers,
 		mem:          fr.mem,
+		selection:    selection,
 	}
 	rr.refCount.Add(1)
 	return rr, nil
@@ -802,8 +825,8 @@ func (c *columnIterator) FindChunkForRow(rowIdx int64) (file.PageReader, int64, 
 		return nil, 0, nil
 	}
 
-	if rowIdx < 0 || rowIdx > c.rdr.NumRows() {
-		return nil, 0, fmt.Errorf("invalid row index %d, file only has %d rows", rowIdx, c.rdr.NumRows())
+	if rowIdx < 0 {
+		return nil, 0, fmt.Errorf("%w: negative row index %d", arrow.ErrInvalid, rowIdx)
 	}
 
 	idx := int64(0)
@@ -856,11 +879,23 @@ type recordReader struct {
 	cur          arrow.RecordBatch
 	err          error
 	mem          memory.Allocator
+	selection    *rowRangeSelection
 
 	refCount atomic.Int64
 }
 
 func (r *recordReader) SeekToRow(row int64) error {
+	if r.selection != nil {
+		return r.seekToSelectedRow(row)
+	}
+	if err := r.seekToInputRow(row); err != nil {
+		return err
+	}
+	r.err = nil
+	return nil
+}
+
+func (r *recordReader) seekToInputRow(row int64) error {
 	if r.cur != nil {
 		r.cur.Release()
 		r.cur = nil
@@ -910,11 +945,11 @@ func (r *recordReader) Release() {
 
 func (r *recordReader) Schema() *arrow.Schema { return r.sc }
 
-func (r *recordReader) next() bool {
+func (r *recordReader) readBatch(batchSize int64) bool {
 	cols := make([]arrow.Array, len(r.sc.Fields()))
 	defer releaseArrays(cols)
 	readField := func(idx int, rdr *ColumnReader) error {
-		data, err := rdr.NextBatch(r.batchSize)
+		data, err := rdr.NextBatch(batchSize)
 		if err != nil {
 			return err
 		}
@@ -1012,6 +1047,13 @@ func (r *recordReader) Next() bool {
 	}
 
 	return r.next()
+}
+
+func (r *recordReader) next() bool {
+	if r.selection != nil {
+		return r.nextSelectedBatch()
+	}
+	return r.readBatch(r.batchSize)
 }
 
 func (r *recordReader) RecordBatch() arrow.RecordBatch { return r.cur }
