@@ -174,6 +174,40 @@ func (suite *RunEndEncodeDecodeSuite) TestDecodeWithOffset() {
 	assertDatumsEqual(suite.T(), &compute.ArrayDatum{Value: inputOffset}, result, nil, nil)
 }
 
+func (suite *RunEndEncodeDecodeSuite) TestDecodeSliceEndingMidRun() {
+	// skip chunked examples for ease of testing
+	expected, ok := suite.expected.(*compute.ArrayDatum)
+	if !ok {
+		suite.T().SkipNow()
+	}
+
+	input := suite.input.(*compute.ArrayDatum)
+	if input.Len() < 2 {
+		suite.T().SkipNow()
+	}
+
+	// drop the last logical value so that the slice ends before the
+	// last run end, with and without a leading offset
+	for _, bounds := range [][2]int64{{0, input.Len() - 1}, {1, input.Len() - 1}} {
+		if bounds[0] >= bounds[1] {
+			continue
+		}
+		suite.Run(fmt.Sprintf("slice[%d:%d]", bounds[0], bounds[1]), func() {
+			expectedSlice := array.NewSliceData(expected.Value, bounds[0], bounds[1])
+			defer expectedSlice.Release()
+			inputSlice := array.NewSliceData(input.Value, bounds[0], bounds[1])
+			defer inputSlice.Release()
+
+			result, err := compute.RunEndDecode(suite.ctx, &compute.ArrayDatum{Value: expectedSlice})
+			suite.Require().NoError(err)
+			defer result.Release()
+
+			assertDatumsEqual(suite.T(), &compute.ArrayDatum{Value: inputSlice}, result, nil, nil)
+			suite.Equal(int64(inputSlice.NullN()), result.(*compute.ArrayDatum).NullN())
+		})
+	}
+}
+
 func (suite *RunEndEncodeDecodeSuite) TestDecodeWithChildOffset() {
 	// artificially add a bunch of nulls to the values child of the
 	// run-end encoded array both before and after the data and then

@@ -607,10 +607,12 @@ func (de *decodeBool[R]) ExpandAllRuns(out *exec.ExecResult) int64 {
 		runLength, numValid int64
 		outputValues        = out.Buffers[1].Buf
 		prevRunEnd          = R(de.inputOffset)
+		logicalEnd          = R(de.inputOffset + de.inputLen)
 		hasValidity         = len(de.inputValidity) != 0 && len(out.Buffers[0].Buf) != 0
 	)
 
 	for i, runEnd := range de.inputRunEnds[de.inputPhysicalOffset:] {
+		runEnd = min(runEnd, logicalEnd)
 		runLength, prevRunEnd = int64(runEnd-prevRunEnd), runEnd
 		// if this run is a null, clear the bits and update writeOffset
 		if hasValidity {
@@ -667,10 +669,12 @@ func (de *decodeFixedWidth[R]) ExpandAllRuns(out *exec.ExecResult) int64 {
 		width               = de.valueType.(arrow.FixedWidthDataType).Bytes()
 		inputValues         = de.inputValues[(de.inputValueOffset+de.inputPhysicalOffset)*int64(width):]
 		prevRunEnd          = R(de.inputOffset)
+		logicalEnd          = R(de.inputOffset + de.inputLen)
 		hasValidity         = len(de.inputValidity) != 0 && len(out.Buffers[0].Buf) != 0
 	)
 
 	for i, runEnd := range de.inputRunEnds[de.inputPhysicalOffset:] {
+		runEnd = min(runEnd, logicalEnd)
 		runLength, prevRunEnd = int64(runEnd-prevRunEnd), runEnd
 		// if this run is a null, clear the bits and update writeOffset
 		if hasValidity {
@@ -722,10 +726,12 @@ func (de *decodeBinary[R, O]) PreallocOutput(ctx *exec.KernelCtx, out *exec.Exec
 	var (
 		runLength  int64
 		prevRunEnd = R(de.inputLogicalOffset)
+		logicalEnd = R(de.inputLogicalOffset + de.inputLen)
 		totalSize  int
 	)
 
 	for i, runEnd := range de.inputRunEnds[de.inputPhysicalOffset:] {
+		runEnd = min(runEnd, logicalEnd)
 		runLength, prevRunEnd = int64(runEnd-prevRunEnd), runEnd
 
 		start := de.inputOffsets[de.inputPhysicalOffset+int64(i)]
@@ -754,10 +760,12 @@ func (de *decodeBinary[R, O]) ExpandAllRuns(out *exec.ExecResult) int64 {
 		outputOffsets                 = exec.GetSpanOffsets[O](out, 1)
 		outputValues                  = out.Buffers[2].Buf
 		prevRunEnd                    = R(de.inputLogicalOffset)
+		logicalEnd                    = R(de.inputLogicalOffset + de.inputLen)
 		hasValidity                   = len(de.inputValidity) != 0 && len(out.Buffers[0].Buf) != 0
 	)
 
 	for i, runEnd := range de.inputRunEnds[de.inputPhysicalOffset:] {
+		runEnd = min(runEnd, logicalEnd)
 		runLength, prevRunEnd = int64(runEnd-prevRunEnd), runEnd
 
 		// if this run is a null, clear the bits and update writeOffset
@@ -812,6 +820,11 @@ func newDecoder[R RunEndsType](input *exec.ArraySpan) decoder {
 	logicalOffset := R(input.Offset)
 	runEnds := exec.GetSpanValues[R](&input.Children[0], 1)
 	physicalOffset := sort.Search(len(runEnds), func(i int) bool { return runEnds[i] > logicalOffset })
+	// a sliced array can end before its last run does, so stop at the run
+	// holding the last logical value. The decoders clamp that run's end.
+	logicalEnd := R(input.Offset + input.Len)
+	physicalEnd := sort.Search(len(runEnds), func(i int) bool { return runEnds[i] >= logicalEnd }) + 1
+	runEnds = runEnds[:min(physicalEnd, len(runEnds))]
 
 	switch dt := input.Children[1].Type.(type) {
 	case *arrow.BooleanType:
