@@ -48,12 +48,6 @@ func (e *customExtensionSet) GetSubstraitRegistry() expr.ExtensionRegistry {
 	return e.substraitRegistry
 }
 
-var (
-	_ func() exprs.ExtensionIDSet                                                   = exprs.NewDefaultExtensionSet
-	_ func(expr.ExtensionRegistry) exprs.ExtensionIDSet                             = exprs.NewExtensionSetDefault
-	_ func(expr.ExtensionRegistry, *exprs.ExtensionIDRegistry) exprs.ExtensionIDSet = exprs.NewExtensionSet
-)
-
 func TestCustomExtensionSet(t *testing.T) {
 	ext := &customExtensionSet{
 		arrowRegistry:     exprs.NewExtensionIDRegistry(),
