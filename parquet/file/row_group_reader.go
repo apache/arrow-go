@@ -45,6 +45,7 @@ type RowGroupReader struct {
 	pageIndexReader   *metadata.PageIndexReader
 	rgPageIndexReader func() (*metadata.RowGroupPageIndexReader, error)
 	bufferPool        *sync.Pool
+	pageBuffers       *sync.Pool
 }
 
 // MetaData returns the metadata of the current Row Group
@@ -124,6 +125,7 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 	if cryptoMetadata == nil {
 		descr := r.fileMetadata.Schema.Column(i)
 		pr := &serializedPageReader{
+			bufferPool:              r.pageBuffers,
 			r:                       stream,
 			chunk:                   col,
 			colIdx:                  i,

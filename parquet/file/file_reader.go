@@ -56,7 +56,8 @@ type Reader struct {
 	pageIndexReader   *metadata.PageIndexReader
 	bloomFilterReader *metadata.BloomFilterReader
 
-	bufferPool sync.Pool
+	bufferPool  sync.Pool
+	pageBuffers *sync.Pool
 }
 
 type ReadOption func(*Reader)
@@ -121,6 +122,9 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 
 	if f.props == nil {
 		f.props = parquet.NewReaderProperties(memory.NewGoAllocator())
+	}
+	if _, ok := f.props.Allocator().(*memory.GoAllocator); ok {
+		f.pageBuffers = &sync.Pool{}
 	}
 
 	f.bufferPool = sync.Pool{
@@ -334,6 +338,7 @@ func (f *Reader) RowGroup(i int) *RowGroupReader {
 		r:               f.r,
 		fileDecryptor:   f.fileDecryptor,
 		bufferPool:      &f.bufferPool,
+		pageBuffers:     f.pageBuffers,
 		pageIndexReader: f.pageIndexReader,
 		// don't pre-emptively initialize the row group page index reader
 		// do it on demand, but ensure that it is goroutine safe.

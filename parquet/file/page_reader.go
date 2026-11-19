@@ -442,7 +442,12 @@ type serializedPageReader struct {
 	decompressBuffer *memory.Buffer
 	dataPageBuffer   *memory.Buffer
 	dictPageBuffer   *memory.Buffer
+	bufferPool       *sync.Pool
 	err              error
+}
+
+type pageReaderBuffers struct {
+	decompress, data *memory.Buffer
 }
 
 func (p *serializedPageReader) Close() error {
@@ -452,26 +457,45 @@ func (p *serializedPageReader) Close() error {
 		p.curPage = nil
 	}
 	if p.decompressBuffer != nil {
-		p.decompressBuffer.Release()
+		const maxCachedBufferSize = 1 << 20
+		if p.bufferPool != nil && p.decompressBuffer.Cap() <= maxCachedBufferSize &&
+			p.dataPageBuffer.Cap() <= maxCachedBufferSize {
+			p.bufferPool.Put(&pageReaderBuffers{p.decompressBuffer, p.dataPageBuffer})
+		} else {
+			p.decompressBuffer.Release()
+			p.dataPageBuffer.Release()
+		}
 		p.dictPageBuffer.Release()
-		p.dataPageBuffer.Release()
+		p.decompressBuffer, p.dictPageBuffer, p.dataPageBuffer = nil, nil, nil
 	}
 	return nil
+}
+
+func (p *serializedPageReader) initBuffers() {
+	var buffers *pageReaderBuffers
+	if p.bufferPool != nil {
+		buffers, _ = p.bufferPool.Get().(*pageReaderBuffers)
+	}
+	if buffers == nil {
+		p.decompressBuffer = memory.NewResizableBuffer(p.mem)
+		p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
+	} else {
+		p.decompressBuffer, p.dataPageBuffer = buffers.decompress, buffers.data
+	}
+	// GetDictionaryPage returns a page independently of the reader's current page.
+	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
+	p.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
 }
 
 func (p *serializedPageReader) init(compressType compress.Compression, ctx *CryptoContext) error {
 	if p.mem == nil {
 		p.mem = memory.NewGoAllocator()
 	}
-	p.decompressBuffer = memory.NewResizableBuffer(p.mem)
-	p.dataPageBuffer = memory.NewResizableBuffer(p.mem)
-	p.dictPageBuffer = memory.NewResizableBuffer(p.mem)
-	p.decompressBuffer.ResizeNoShrink(defaultPageHeaderSize)
-
 	codec, err := compress.GetCodec(compressType)
 	if err != nil {
 		return err
 	}
+	p.initBuffers()
 	p.codec = codec
 	if _, ok := codec.(compress.StreamingCodec); !ok {
 		// A codec registered via compress.RegisterCodec need not implement
@@ -545,6 +569,7 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 		return
 	}
 	if ctx != nil {
+		p.bufferPool = nil
 		p.cryptoCtx = *ctx
 		p.chunkStartsWithDict = ctx.StartDecryptWithDictionaryPage
 		p.initDecryption()
@@ -553,6 +578,9 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 		p.chunkStartsWithDict = false
 		p.dataPageAad = ""
 		p.dataPageHeaderAad = ""
+	}
+	if p.decompressBuffer == nil {
+		p.initBuffers()
 	}
 }
 
