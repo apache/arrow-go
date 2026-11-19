@@ -153,6 +153,7 @@ func makeBinaryCastData[OffsetT int32 | int64](input *exec.ArraySpan, dt arrow.D
 	defer offsetsBuf.Release()
 	offsetsBuf.Resize((n + 1) * int(unsafe.Sizeof(OffsetT(0))))
 	offsets := arrow.GetData[OffsetT](offsetsBuf.Bytes())
+	offsets[0] = 0
 
 	valuesBuf := memory.NewResizableBuffer(mem)
 	defer valuesBuf.Release()
