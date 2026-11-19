@@ -217,6 +217,8 @@ type FileReader struct {
 
 	mem            memory.Allocator
 	swapEndianness bool
+
+	zstd zstdDecoders
 }
 
 // NewMappedFileReader is like NewFileReader but instead of using a ReadAtSeeker,
@@ -338,7 +340,7 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 		}
 		kind, err = func() (dictutils.Kind, error) {
 			defer msg.Release()
-			return readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+			return readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem, &f.zstd)
 		}()
 		if err != nil {
 			return err
@@ -477,17 +479,17 @@ func (f *FileReader) RecordBatchAt(i int) (arrow.RecordBatch, error) {
 		return nil, fmt.Errorf("arrow/ipc: message %d is not a RecordBatch", i)
 	}
 
-	return loadRecordBatch(f.schema, &f.memo, msg.meta, msg.body, f.swapEndianness, f.mem)
+	return loadRecordBatch(f.schema, &f.memo, msg.meta, msg.body, f.swapEndianness, f.mem, &f.zstd)
 }
 
-func loadRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) (rec arrow.RecordBatch, err error) {
+func loadRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta, body *memory.Buffer, swapEndianness bool, mem memory.Allocator, zd *zstdDecoders) (rec arrow.RecordBatch, err error) {
 	defer func() {
 		if pErr := recover(); pErr != nil {
 			rec = nil
 			err = utils.FormatRecoveredError("arrow/ipc: error reading record batch", pErr)
 		}
 	}()
-	return newRecordBatch(schema, memo, meta, body, swapEndianness, mem), nil
+	return newRecordBatch(schema, memo, meta, body, swapEndianness, mem, zd), nil
 }
 
 // RecordAt returns the i-th record from the file. Ownership is transferred to the
@@ -521,7 +523,7 @@ func (f *FileReader) ReadAt(i int64) (arrow.RecordBatch, error) {
 	return f.RecordBatch(int(i))
 }
 
-func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) arrow.RecordBatch {
+func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator, zd *zstdDecoders) arrow.RecordBatch {
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.RecordBatch
@@ -532,7 +534,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 
 	bodyCompress := md.Compression(nil)
 	if bodyCompress != nil {
-		codec = getDecompressor(bodyCompress.Codec())
+		codec = getDecompressor(bodyCompress.Codec(), zd)
 		defer codec.Close()
 	}
 
@@ -910,7 +912,7 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
-func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator) (dictutils.Kind, error) {
+func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator, zd *zstdDecoders) (dictutils.Kind, error) {
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.DictionaryBatch
@@ -922,7 +924,7 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 	md.Data(&data)
 	bodyCompress := data.Compression(nil)
 	if bodyCompress != nil {
-		codec = getDecompressor(bodyCompress.Codec())
+		codec = getDecompressor(bodyCompress.Codec(), zd)
 		defer codec.Close()
 	}
 

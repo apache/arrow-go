@@ -64,7 +64,7 @@ func TestLoadRecordBatchReturnsMalformedMetadataErrors(t *testing.T) {
 	body := memory.NewBufferBytes(nil)
 	defer body.Release()
 
-	rec, err := loadRecordBatch(arrow.NewSchema(nil, nil), &dictutils.Memo{}, meta, body, false, memory.DefaultAllocator)
+	rec, err := loadRecordBatch(arrow.NewSchema(nil, nil), &dictutils.Memo{}, meta, body, false, memory.DefaultAllocator, new(zstdDecoders))
 	require.Error(t, err)
 	require.Nil(t, rec)
 }

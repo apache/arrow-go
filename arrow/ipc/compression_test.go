@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
@@ -68,7 +69,7 @@ func compressibleBytes(n int, seed int64) []byte {
 func TestDecompressorRoundTrip(t *testing.T) {
 	for _, tc := range testCodecs {
 		t.Run(tc.name, func(t *testing.T) {
-			dec := getDecompressor(tc.codec)
+			dec := getDecompressor(tc.codec, new(zstdDecoders))
 			defer dec.Close()
 
 			for i, n := range []int{1, 100, 4096, 300_000, 17, 300_000} {
@@ -84,7 +85,7 @@ func TestDecompressorRoundTrip(t *testing.T) {
 func TestDecompressorEmptyDestination(t *testing.T) {
 	for _, tc := range testCodecs {
 		t.Run(tc.name, func(t *testing.T) {
-			dec := getDecompressor(tc.codec)
+			dec := getDecompressor(tc.codec, new(zstdDecoders))
 			defer dec.Close()
 			assert.NoError(t, dec.Decompress(nil, nil))
 			assert.NoError(t, dec.Decompress([]byte{}, []byte{1, 2, 3}))
@@ -97,7 +98,7 @@ func TestDecompressorSizeMismatch(t *testing.T) {
 
 	for _, tc := range testCodecs {
 		t.Run(tc.name, func(t *testing.T) {
-			dec := getDecompressor(tc.codec)
+			dec := getDecompressor(tc.codec, new(zstdDecoders))
 			defer dec.Close()
 			compressed := compressBuffer(t, tc.codec, want)
 
@@ -114,7 +115,7 @@ func TestDecompressorSizeMismatch(t *testing.T) {
 	// zstd frames declare their content size, so a prefix that is too small
 	// is caught instead of silently truncating.
 	t.Run("zstd/short-destination", func(t *testing.T) {
-		dec := getDecompressor(flatbuf.CompressionTypeZSTD)
+		dec := getDecompressor(flatbuf.CompressionTypeZSTD, new(zstdDecoders))
 		defer dec.Close()
 		assert.Error(t, dec.Decompress(make([]byte, len(want)-1), compressBuffer(t, flatbuf.CompressionTypeZSTD, want)))
 	})
@@ -125,7 +126,7 @@ func TestZstdDecompressorBoundedByDestination(t *testing.T) {
 	compressed := compressBuffer(t, flatbuf.CompressionTypeZSTD, make([]byte, 64<<20))
 	require.Less(t, len(compressed), 64<<10)
 
-	dec := getDecompressor(flatbuf.CompressionTypeZSTD)
+	dec := getDecompressor(flatbuf.CompressionTypeZSTD, new(zstdDecoders))
 	defer dec.Close()
 
 	dst := make([]byte, 16)
@@ -153,7 +154,7 @@ func TestZstdDecompressorRejectsHugeDeclaredSizeWithoutAllocating(t *testing.T) 
 	require.True(t, hdr.HasFCS)
 	require.Equal(t, uint64(declared), hdr.FrameContentSize)
 
-	dec := getDecompressor(flatbuf.CompressionTypeZSTD)
+	dec := getDecompressor(flatbuf.CompressionTypeZSTD, new(zstdDecoders))
 	defer dec.Close()
 
 	// warm up, so decoder state that is created lazily isn't counted below
@@ -181,7 +182,7 @@ func TestZstdDecompressorRejectsHugeDeclaredSizeWithoutAllocating(t *testing.T) 
 func TestZstdDecompressorSpareCapacity(t *testing.T) {
 	const n, capacity = 100, 128
 
-	dec := getDecompressor(flatbuf.CompressionTypeZSTD)
+	dec := getDecompressor(flatbuf.CompressionTypeZSTD, new(zstdDecoders))
 	defer dec.Close()
 
 	compress := func(size int) []byte {
@@ -219,7 +220,7 @@ func TestDecompressorRecoversAfterTruncatedInput(t *testing.T) {
 
 	for _, tc := range testCodecs {
 		t.Run(tc.name, func(t *testing.T) {
-			dec := getDecompressor(tc.codec)
+			dec := getDecompressor(tc.codec, new(zstdDecoders))
 			defer dec.Close()
 			compressed := compressBuffer(t, tc.codec, want)
 
@@ -283,6 +284,50 @@ func TestReadCompressedConcurrently(t *testing.T) {
 			for err := range errs {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+// A channel made inside a testing/synctest bubble must not be used outside it,
+// so compressed reads and writes in one bubble must not leave state behind
+// that later reads and writes elsewhere pick up.
+func TestCompressedRoundTripAcrossSynctestBubbles(t *testing.T) {
+	for _, tc := range testCodecs {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := benchmarkRecordBatch(4, 2048)
+			defer rec.Release()
+
+			roundTrip := func(t *testing.T) {
+				var stream bytes.Buffer
+				w := NewWriter(&stream, WithSchema(rec.Schema()), tc.opt)
+				require.NoError(t, w.Write(rec))
+				require.NoError(t, w.Close())
+
+				rdr, err := NewReader(bytes.NewReader(stream.Bytes()))
+				require.NoError(t, err)
+				defer rdr.Release()
+				require.True(t, rdr.Next())
+				assert.True(t, array.RecordEqual(rec, rdr.RecordBatch()))
+				require.NoError(t, rdr.Err())
+
+				var file bytes.Buffer
+				fw, err := NewFileWriter(&file, WithSchema(rec.Schema()), tc.opt)
+				require.NoError(t, err)
+				require.NoError(t, fw.Write(rec))
+				require.NoError(t, fw.Close())
+
+				fr, err := NewFileReader(bytes.NewReader(file.Bytes()))
+				require.NoError(t, err)
+				defer fr.Close()
+				got, err := fr.RecordBatchAt(0)
+				require.NoError(t, err)
+				defer got.Release()
+				assert.True(t, array.RecordEqual(rec, got))
+			}
+
+			synctest.Test(t, roundTrip)
+			roundTrip(t)
+			synctest.Test(t, roundTrip)
 		})
 	}
 }

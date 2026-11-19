@@ -57,6 +57,12 @@ type zstdCompressor struct {
 // level, 1-4 for the zstd.EncoderLevel a WithZstdLevel value maps to. A new
 // encoder allocates its window and match tables (about 2 MB at the default
 // level), which dominates the cost of compressing a small record batch.
+//
+// Unlike decoders, encoders can be shared process-wide: they are only used
+// through the streaming API (Reset, Write, Close), which keeps no channel
+// between streams, so an encoder used inside a testing/synctest bubble can be
+// reused outside it. EncodeAll would break that, since it receives from a
+// channel the encoder makes on first use.
 var zstdEncoderPools [zstd.SpeedBestCompression + 1]sync.Pool
 
 func zstdEncoderPoolIndex(zstdLevel int) int {
@@ -135,25 +141,46 @@ type decompressor interface {
 	Close()
 }
 
-var zstdDecompressorPool = sync.Pool{
-	New: func() any {
-		// WithDecoderConcurrency(1): Each pooled decoder is used by one goroutine at a time, so a single
-		// block decoder is enough. The default would create up to four that
-		// could never run in parallel;
-		//
-		// WithDecodeAllCapLimit(true): The cap limit bounds DecodeAll to cap(dst), so a frame claiming a
-		// larger content size can't allocate beyond the buffer the caller
-		// sized from the uncompressed length prefix.
-		dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecodeAllCapLimit(true))
-		if err != nil {
-			panic(err)
-		}
-		return &zstdDecompressor{Decoder: dec}
-	},
+// zstdDecoders reuses zstd decoders within one reader. Decoders are not
+// shared between readers: a zstd.Decoder owns a channel, and a channel made
+// inside a testing/synctest bubble must not be used outside that bubble, so a
+// decoder has to stay with the reader whose goroutines created it.
+//
+// The zero value is ready to use. It is safe for concurrent use, since
+// FileReader.RecordBatchAt may be called concurrently, and keeps at most as
+// many decoders as were in use at once.
+type zstdDecoders struct {
+	mu   sync.Mutex
+	idle []*zstdDecompressor
+}
+
+func (c *zstdDecoders) get() *zstdDecompressor {
+	c.mu.Lock()
+	if n := len(c.idle); n > 0 {
+		z := c.idle[n-1]
+		c.idle = c.idle[:n-1]
+		c.mu.Unlock()
+		return z
+	}
+	c.mu.Unlock()
+
+	// WithDecoderConcurrency(1): Each decoder is used by one goroutine at a time, so a single
+	// block decoder is enough. The default would create up to four that
+	// could never run in parallel;
+	//
+	// WithDecodeAllCapLimit(true): The cap limit bounds DecodeAll to cap(dst), so a frame claiming a
+	// larger content size can't allocate beyond the buffer the caller
+	// sized from the uncompressed length prefix.
+	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecodeAllCapLimit(true))
+	if err != nil {
+		panic(err)
+	}
+	return &zstdDecompressor{Decoder: dec, owner: c}
 }
 
 type zstdDecompressor struct {
 	*zstd.Decoder
+	owner *zstdDecoders
 }
 
 func (z *zstdDecompressor) Decompress(dst, src []byte) error {
@@ -174,12 +201,15 @@ func (z *zstdDecompressor) Decompress(dst, src []byte) error {
 	return nil
 }
 
-// Close returns the decoder to the pool. z.Decoder.Close() is deliberately
-// not called: zstd.NewReader(nil) starts no goroutines, so a pooled decoder
+// Close returns the decoder to its reader. z.Decoder.Close() is deliberately
+// not called: zstd.NewReader(nil) starts no goroutines, so an idle decoder
 // only holds GC-reclaimable state and there is nothing to tear down. Closing
 // it would make the decoder unusable for the next borrower.
 func (z *zstdDecompressor) Close() {
-	zstdDecompressorPool.Put(z)
+	c := z.owner
+	c.mu.Lock()
+	c.idle = append(c.idle, z)
+	c.mu.Unlock()
 }
 
 type lz4Decompressor struct {
@@ -213,12 +243,14 @@ func (z *lz4Decompressor) Close() {
 	z.Reset(nil)
 }
 
-func getDecompressor(codec flatbuf.CompressionType) decompressor {
+// getDecompressor returns a decompressor for codec. zstd decoders come from,
+// and return to, zd.
+func getDecompressor(codec flatbuf.CompressionType, zd *zstdDecoders) decompressor {
 	switch codec {
 	case flatbuf.CompressionTypeLZ4_FRAME:
 		return &lz4Decompressor{Reader: lz4.NewReader(nil)}
 	case flatbuf.CompressionTypeZSTD:
-		return zstdDecompressorPool.Get().(*zstdDecompressor)
+		return zd.get()
 	}
 	return nil
 }
