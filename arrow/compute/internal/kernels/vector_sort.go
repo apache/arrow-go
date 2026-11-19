@@ -477,9 +477,10 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 		} else {
 			k0 := keys[0]
 			c0 := comparators[0]
-			if nRows >= radixSortMinRows && !c0.columnHasValidityNulls() &&
-				(sortIndicesSingleIntRadix(ctx, chunks[0], indices, k0.Order) ||
-					(k0.FloatTotalOrder && sortIndicesSingleFloatTotalOrderRadix(ctx, chunks[0], indices, k0.Order))) {
+			if nRows >= radixSortMinRows &&
+				(sortIndicesSingleIntRadix(ctx, chunks[0], indices, k0.Order, k0.NullPlacement) ||
+					(!c0.columnHasValidityNulls() && k0.FloatTotalOrder &&
+						sortIndicesSingleFloatTotalOrderRadix(ctx, chunks[0], indices, k0.Order))) {
 				out.Buffers[1].WrapBuffer(buf)
 				return out, nil
 			}

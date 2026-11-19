@@ -34,43 +34,66 @@ type radixInteger interface {
 	~int8 | ~int16 | ~int32 | ~int64 | ~uint8 | ~uint16 | ~uint32 | ~uint64
 }
 
-// sortIndicesSingleIntRadix handles the common case of a single chunk of
-// non-null integer values. Other types, nulls and multi-chunk arrays continue
-// to use the stable comparator sort.
-func sortIndicesSingleIntRadix(ctx *exec.KernelCtx, arr arrow.Array, indices []uint64, order SortOrder) bool {
+// sortIndicesSingleIntRadix handles single-chunk integer and temporal values,
+// including nullable arrays. Other types and multi-chunk arrays continue to
+// use the stable comparator sort.
+func sortIndicesSingleIntRadix(ctx *exec.KernelCtx, arr arrow.Array, indices []uint64, order SortOrder, nullPlacement NullPlacement) bool {
 	switch values := arr.(type) {
 	case *array.Int8:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 1, 1<<7, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 1, 1<<7, order, nullPlacement)
 	case *array.Int16:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 2, 1<<15, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 2, 1<<15, order, nullPlacement)
 	case *array.Int32:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 4, 1<<31, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 4, 1<<31, order, nullPlacement)
 	case *array.Int64:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 8, 1<<63, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 8, 1<<63, order, nullPlacement)
 	case *array.Uint8:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 1, 0, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 1, 0, order, nullPlacement)
 	case *array.Uint16:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 2, 0, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 2, 0, order, nullPlacement)
 	case *array.Uint32:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 4, 0, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 4, 0, order, nullPlacement)
 	case *array.Uint64:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 8, 0, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 8, 0, order, nullPlacement)
 	case *array.Date32:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 4, 1<<31, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 4, 1<<31, order, nullPlacement)
 	case *array.Date64:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 8, 1<<63, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 8, 1<<63, order, nullPlacement)
 	case *array.Time32:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 4, 1<<31, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 4, 1<<31, order, nullPlacement)
 	case *array.Time64:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 8, 1<<63, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 8, 1<<63, order, nullPlacement)
 	case *array.Timestamp:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 8, 1<<63, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 8, 1<<63, order, nullPlacement)
 	case *array.Duration:
-		radixSortIntegerIndices(ctx, indices, values.Values(), 8, 1<<63, order)
+		radixSortNullableIntegerIndices(ctx, arr, indices, values.Values(), 8, 1<<63, order, nullPlacement)
 	default:
 		return false
 	}
 	return true
+}
+
+// radixSortNullableIntegerIndices keeps nulls in stable input order while
+// allowing the non-null rows to use the radix fast path. The partition buffer
+// doubles as radix scratch, so only one index-sized temporary is allocated.
+func radixSortNullableIntegerIndices[T radixInteger](ctx *exec.KernelCtx, arr arrow.Array, indices []uint64, values []T, numBytes int, signBit uint64, order SortOrder, nullPlacement NullPlacement) {
+	if arr.NullN() == len(indices) {
+		// All rows compare equal; the input permutation is already stable.
+		return
+	}
+
+	var scratch []uint64
+	if arr.NullN() != 0 {
+		buf := ctx.Allocate(len(indices) * arrow.Uint64SizeBytes)
+		defer buf.Release()
+		scratch = arrow.GetData[uint64](buf.Buf())[:len(indices)]
+
+		partition := partitionNullsOnly(indices, scratch, 0, len(indices), nullPlacement,
+			func(idx uint64) bool { return arr.IsNull(int(idx)) })
+		indices = indices[partition.nonNullsLo:partition.nonNullsHi]
+	}
+
+	radixSortIntegerIndicesWithScratch(ctx, indices, values, numBytes, signBit, order, scratch)
 }
 
 // sortIndicesSingleFloatTotalOrderRadix is the SortKey.FloatTotalOrder counterpart of
@@ -115,6 +138,12 @@ func radixSortFloatTotalOrder[F any, K int16 | int32 | int64](ctx *exec.KernelCt
 // All histograms are gathered before scattering so bytes that are constant
 // across the input can be skipped, including the upper bytes of small values.
 func radixSortIntegerIndices[T radixInteger](ctx *exec.KernelCtx, indices []uint64, values []T, numBytes int, signBit uint64, order SortOrder) {
+	radixSortIntegerIndicesWithScratch(ctx, indices, values, numBytes, signBit, order, nil)
+}
+
+// radixSortIntegerIndicesWithScratch accepts a caller-owned scratch slice,
+// avoiding another allocation after the stable null partition.
+func radixSortIntegerIndicesWithScratch[T radixInteger](ctx *exec.KernelCtx, indices []uint64, values []T, numBytes int, signBit uint64, order SortOrder, scratch []uint64) {
 	if len(indices) < 2 {
 		return
 	}
@@ -167,9 +196,13 @@ func radixSortIntegerIndices[T radixInteger](ctx *exec.KernelCtx, indices []uint
 		return
 	}
 
-	scratchBuf := ctx.Allocate(len(indices) * arrow.Uint64SizeBytes)
-	defer scratchBuf.Release()
-	scratch := arrow.GetData[uint64](scratchBuf.Buf())[:len(indices)]
+	if len(scratch) < len(indices) {
+		scratchBuf := ctx.Allocate(len(indices) * arrow.Uint64SizeBytes)
+		defer scratchBuf.Release()
+		scratch = arrow.GetData[uint64](scratchBuf.Buf())[:len(indices)]
+	} else {
+		scratch = scratch[:len(indices)]
+	}
 	src, dst := indices, scratch
 	for pass := 0; pass < numBytes; pass++ {
 		if !active[pass] {
