@@ -343,6 +343,93 @@ func TestSliceAndWrite(t *testing.T) {
 	})
 }
 
+func TestWriteSlicedListView(t *testing.T) {
+	roundTrip := func(t *testing.T, mem memory.Allocator, arr arrow.Array) {
+		t.Helper()
+		schema := arrow.NewSchema([]arrow.Field{{Name: "lv", Type: arr.DataType(), Nullable: true}}, nil)
+		rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
+		defer rec.Release()
+
+		var buf bytes.Buffer
+		w := NewWriter(&buf, WithSchema(schema), WithAllocator(mem))
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+
+		r, err := NewReader(&buf, WithAllocator(mem))
+		require.NoError(t, err)
+		defer r.Release()
+
+		require.True(t, r.Next(), "%v", r.Err())
+		got := r.RecordBatch().Column(0)
+		require.NoError(t, array.ValidateFull(got))
+		assert.Truef(t, array.Equal(arr, got), "expected %v, got %v", arr, got)
+
+		// the offsets of null and empty views must stay within the
+		// written values too
+		var offsets []int64
+		switch got := got.(type) {
+		case *array.ListView:
+			for _, o := range got.Offsets()[:got.Len()] {
+				offsets = append(offsets, int64(o))
+			}
+		case *array.LargeListView:
+			offsets = got.Offsets()[:got.Len()]
+		}
+		numValues := int64(got.(array.VarLenListLike).ListValues().Len())
+		for i, o := range offsets {
+			assert.GreaterOrEqualf(t, o, int64(0), "offset %d", i)
+			assert.LessOrEqualf(t, o, numValues, "offset %d", i)
+		}
+	}
+
+	for _, dt := range []arrow.DataType{
+		arrow.ListViewOf(arrow.PrimitiveTypes.Int32),
+		arrow.LargeListViewOf(arrow.PrimitiveTypes.Int32),
+	} {
+		t.Run(dt.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			arr, _, err := array.FromJSON(mem, dt, strings.NewReader(`[[1, 2], [3], null, [], [4, 5, 6], [7]]`))
+			require.NoError(t, err)
+			defer arr.Release()
+
+			for beg := 0; beg <= arr.Len(); beg++ {
+				for end := beg; end <= arr.Len(); end++ {
+					t.Run(fmt.Sprintf("slice[%d:%d]", beg, end), func(t *testing.T) {
+						slice := array.NewSlice(arr, int64(beg), int64(end))
+						defer slice.Release()
+						roundTrip(t, mem, slice)
+					})
+				}
+			}
+		})
+	}
+
+	t.Run("out of order offsets", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+
+		values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`))
+		require.NoError(t, err)
+		defer values.Release()
+
+		offsets := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{6, 4, 1, 8, 0}))
+		sizes := memory.NewBufferBytes(arrow.Int32Traits.CastToBytes([]int32{2, 3, 2, 0, 1}))
+		data := array.NewData(arrow.ListViewOf(arrow.PrimitiveTypes.Int32), 5,
+			[]*memory.Buffer{nil, offsets, sizes}, []arrow.ArrayData{values.Data()}, 0, 0)
+		defer data.Release()
+		arr := array.NewListViewData(data)
+		defer arr.Release()
+
+		// [[4, 5, 6], [1, 2], []]: the first view does not start at the
+		// smallest offset and the empty view's offset is past the others
+		slice := array.NewSlice(arr, 1, 4)
+		defer slice.Release()
+		roundTrip(t, mem, slice)
+	})
+}
+
 func TestNewTruncatedBitmap(t *testing.T) {
 	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer alloc.AssertSize(t, 0)
