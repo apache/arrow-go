@@ -403,9 +403,10 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 	length := len(out)
 
 	i := 0
-	// read until we are byte-aligned
-	for ; i < length && b.bitoffset != 0; i++ {
-		if i == 0 || b.bitoffset%8 == 0 {
+	// Read only the leading partial byte one bit at a time. Once aligned,
+	// the bulk byte-to-bool decoder can handle the rest of the batch.
+	for ; i < length && b.bitoffset%8 != 0; i++ {
+		if i == 0 {
 			if err := b.ensureBoolBitAvailable(); err != nil {
 				return i, err
 			}
@@ -416,6 +417,17 @@ func (b *BitReader) GetBatchBools(out []bool) (int, error) {
 			return i, err
 		}
 	}
+
+	// A short call can stop in the middle of the current source byte.
+	// Keep that buffered position for the next call rather than rewinding it.
+	if i == length {
+		return i, nil
+	}
+
+	// The scalar reader's offset is relative to its current 64-bit word.
+	// Advance to the next byte before seeking for bulk reads.
+	b.byteoffset += int64(b.bitoffset / 8)
+	b.bitoffset = 0
 
 	if _, err := b.reader.Seek(b.byteoffset, io.SeekStart); err != nil {
 		return i, err
