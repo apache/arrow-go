@@ -548,7 +548,8 @@ type RecordReader interface {
 	array.RecordReader
 	arrio.Reader
 	// SeekToRow will shift the record reader so that subsequent calls to Read
-	// or Next will begin from the specified row.
+	// or Next will begin from the specified row. A successful seek clears
+	// the end-of-stream state so that reading can resume after EOF.
 	//
 	// If the record reader was constructed with a request for a subset of row
 	// groups, then rows are counted across the requested row groups, not the

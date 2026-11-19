@@ -36,9 +36,14 @@ type RowRange struct {
 //
 // As with GetRecordReader, nil colIndices or rowGroups selects all columns or
 // row groups, respectively. Nil ranges selects all rows and an empty, non-nil
-// slice selects no rows. Batches may be shorter than the configured batch size
-// at range boundaries. For projections containing repeated columns, gaps are
-// read sequentially to preserve row alignment across page boundaries.
+// slice selects no rows.
+//
+// Adjacent ranges are coalesced. Batches stop at range boundaries even if they
+// are shorter than the configured batch size. An isolated single-row range
+// produces a one-row batch.
+//
+// For projections containing repeated columns, gaps are read sequentially to
+// preserve row alignment across page boundaries.
 func (fr *FileReader) GetRecordReaderWithRowRanges(ctx context.Context, colIndices, rowGroups []int, ranges []RowRange) (RecordReader, error) {
 	return fr.getRecordReader(ctx, colIndices, rowGroups, ranges)
 }
@@ -112,6 +117,7 @@ func (r *recordReader) seekToRangeRow(row int64) error {
 
 // Arbitrary seeks into repeated Data Page V1 columns without offset indexes
 // can lose row alignment (GH-1522). Read through gaps in repeated projections.
+// Remove this workaround once https://github.com/apache/arrow-go/pull/1608 lands.
 func (r *recordReader) readThroughGap(rows int64) error {
 	for rows > 0 {
 		if !r.readBatch(min(r.batchSize, rows)) {
