@@ -477,11 +477,20 @@ func SortIndices(ctx *exec.KernelCtx, columns []*arrow.Chunked, keys []SortKey) 
 		} else {
 			k0 := keys[0]
 			c0 := comparators[0]
-			if nRows >= radixSortMinRows && !c0.columnHasValidityNulls() &&
-				(sortIndicesSingleIntRadix(ctx, chunks[0], indices, k0.Order) ||
-					(k0.FloatTotalOrder && sortIndicesSingleFloatTotalOrderRadix(ctx, chunks[0], indices, k0.Order))) {
-				out.Buffers[1].WrapBuffer(buf)
-				return out, nil
+			if nRows >= radixSortMinRows {
+				// Integer and total-order float radix sorting require no validity nulls.
+				if !c0.columnHasValidityNulls() &&
+					(sortIndicesSingleIntRadix(ctx, chunks[0], indices, k0.Order) ||
+						(k0.FloatTotalOrder && sortIndicesSingleFloatTotalOrderRadix(ctx, chunks[0], indices, k0.Order))) {
+					out.Buffers[1].WrapBuffer(buf)
+					return out, nil
+				}
+				// Default float ordering can encode nulls and NaNs directly into the
+				// radix keys, including their placement independent of sort direction.
+				if !k0.FloatTotalOrder && sortIndicesSingleFloatDefaultRadix(ctx, chunks[0], indices, k0) {
+					out.Buffers[1].WrapBuffer(buf)
+					return out, nil
+				}
 			}
 			if !c0.columnHasValidityNulls() && !c0.hasNullLikeValues() {
 				slices.SortStableFunc(indices, func(a, b uint64) int { return c0.compareRowsForKey(a, b, k0) })
