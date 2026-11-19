@@ -458,6 +458,9 @@ func (p *serializedPageReader) Close() error {
 		p.curPage = nil
 	}
 	if p.decompressBuffer != nil {
+		// Four pairs of 1 MiB buffers cap the cached capacity at 8 MiB per file.
+		// Pages that exceed the default 1 MiB page target can leave larger
+		// scratch buffers, which are released here.
 		const maxCachedBufferSize = 1 << 20
 		buffers := pageReaderBuffers{p.decompressBuffer, p.dataPageBuffer}
 		p.dictPageBuffer.Release()

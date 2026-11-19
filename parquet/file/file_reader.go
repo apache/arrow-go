@@ -138,6 +138,8 @@ func NewParquetReader(r parquet.ReaderAtSeeker, opts ...ReadOption) (*Reader, er
 			return nil, err
 		}
 	}
+	// Page readers can return buffers after Reader.Close. Cached buffers rely
+	// on the Go garbage collector for cleanup, so this requires the Go allocator.
 	if _, ok := f.props.Allocator().(*memory.GoAllocator); ok && f.fileDecryptor == nil && f.NumRowGroups() > 1 {
 		f.pageBuffers = make(chan pageReaderBuffers, 4)
 	}

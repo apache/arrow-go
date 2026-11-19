@@ -35,27 +35,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPageReaderBoundedBufferReuse(t *testing.T) {
-	pool := make(chan pageReaderBuffers, 1)
-	mem := memory.NewGoAllocator()
-	first := &serializedPageReader{mem: mem, bufferPool: pool}
-	second := &serializedPageReader{mem: mem, bufferPool: pool}
-	first.initBuffers()
-	second.initBuffers()
-	input, data, dict := first.decompressBuffer, first.dataPageBuffer, first.dictPageBuffer
-	data.Resize(128)
-	require.NoError(t, first.Close())
-	require.NoError(t, first.Close())
-	require.NoError(t, second.Close())
-	require.Len(t, pool, 1)
+func TestPageReaderScratchCacheLimit(t *testing.T) {
+	const limit = 1 << 20
+	tests := []struct {
+		name           string
+		decompressSize int
+		dataSize       int
+		cachedPairs    int
+	}{
+		{"at the limit", limit, limit, 1},
+		{"oversized decompress buffer", limit + 1, limit, 0},
+		{"oversized data buffer", limit, limit + 1, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := make(chan pageReaderBuffers, 1)
+			p := &serializedPageReader{mem: memory.NewGoAllocator(), bufferPool: pool}
+			p.initBuffers()
+			p.decompressBuffer.ResizeNoShrink(tt.decompressSize)
+			p.dataPageBuffer.ResizeNoShrink(tt.dataSize)
 
-	second.initBuffers()
-	require.Same(t, input, second.decompressBuffer)
-	require.Same(t, data, second.dataPageBuffer)
-	require.NotSame(t, dict, second.dictPageBuffer)
-	second.dataPageBuffer.Resize(2 << 20)
-	require.NoError(t, second.Close())
-	require.Empty(t, pool)
+			require.NoError(t, p.Close())
+			require.Len(t, pool, tt.cachedPairs)
+		})
+	}
 }
 
 func TestPageReaderRejectsOversizedPages(t *testing.T) {
