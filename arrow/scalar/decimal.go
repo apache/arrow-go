@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
@@ -109,15 +108,15 @@ func (s *decimalScalar[T]) CastTo(to arrow.DataType) (Scalar, error) {
 	}
 }
 
-func toDecimal256[T decimal.DecimalTypes](v T) decimal256.Num {
+func toDecimal256[T decimal.DecimalTypes](v T) decimal.Decimal256 {
 	switch v := any(v).(type) {
 	case decimal.Decimal32:
-		return decimal256.FromI64(int64(v))
+		return decimal.Decimal256FromI64(int64(v))
 	case decimal.Decimal64:
-		return decimal256.FromI64(int64(v))
+		return decimal.Decimal256FromI64(int64(v))
 	case decimal128.Num:
-		return decimal256.FromDecimal128(v)
+		return decimal.Decimal256FromDecimal128(v)
 	default:
-		return v.(decimal256.Num)
+		return v.(decimal.Decimal256)
 	}
 }

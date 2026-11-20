@@ -31,7 +31,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/dictutils"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
@@ -2150,15 +2149,15 @@ func decimal256ToJSON(arr *array.Decimal256) []interface{} {
 	return o
 }
 
-func decimal256FromJSON(vs []interface{}) []decimal256.Num {
+func decimal256FromJSON(vs []interface{}) []decimal.Decimal256 {
 	var tmp big.Int
-	o := make([]decimal256.Num, len(vs))
+	o := make([]decimal.Decimal256, len(vs))
 	for i, v := range vs {
 		if err := tmp.UnmarshalJSON([]byte(v.(string))); err != nil {
 			panic(fmt.Errorf("could not convert %v (%T) to decimal256: %w", v, v, err))
 		}
 
-		o[i] = decimal256.FromBigInt(&tmp)
+		o[i] = decimal.Decimal256FromBigInt(&tmp)
 	}
 	return o
 }

@@ -335,7 +335,7 @@ func setDecimalValue(v reflect.Value, arr arrow.Array, i int) error {
 			return err
 		}
 		if v.Type() != typeOfDec256 {
-			return fmt.Errorf("cannot set decimal256.Num into %s: %w", v.Type(), ErrTypeMismatch)
+			return fmt.Errorf("cannot set decimal.Decimal256 into %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		num := a.Value(i)
 		v.Set(reflect.ValueOf(num))

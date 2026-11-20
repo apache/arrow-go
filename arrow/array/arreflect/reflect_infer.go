@@ -25,7 +25,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 )
 
 var (
@@ -34,7 +33,7 @@ var (
 	typeOfDec32     = reflect.TypeOf(decimal.Decimal32(0))
 	typeOfDec64     = reflect.TypeOf(decimal.Decimal64(0))
 	typeOfDec128    = reflect.TypeOf(decimal128.Num{})
-	typeOfDec256    = reflect.TypeOf(decimal256.Num{})
+	typeOfDec256    = reflect.TypeOf(decimal.Decimal256{})
 	typeOfByteSlice = reflect.TypeOf([]byte{})
 	typeOfInt       = reflect.TypeOf(int(0))
 	typeOfUint      = reflect.TypeOf(uint(0))

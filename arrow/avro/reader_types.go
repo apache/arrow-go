@@ -25,8 +25,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	avro "github.com/twmb/avro"
@@ -699,7 +699,7 @@ func appendDecimal256Data(b *array.Decimal256Builder, data interface{}, typ arro
 	case nil:
 		b.AppendNull()
 	case *big.Rat:
-		b.Append(decimal256.FromBigInt(bigRatToBigInt(dt, typ)))
+		b.Append(decimal.Decimal256FromBigInt(bigRatToBigInt(dt, typ)))
 	default:
 		return fmt.Errorf("avro: unsupported value of type %T for Decimal256 column", data)
 	}

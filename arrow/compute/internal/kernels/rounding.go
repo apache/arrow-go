@@ -26,8 +26,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	dec "github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"golang.org/x/exp/constraints"
 )
@@ -112,7 +112,7 @@ func isPositive(s scalar.Scalar) bool {
 	case *scalar.Decimal128:
 		return s.Value.Greater(decimal128.Num{})
 	case *scalar.Decimal256:
-		return s.Value.Greater(decimal256.Num{})
+		return s.Value.Greater(dec.Decimal256{})
 	case *scalar.Int8:
 		return s.Value > 0
 	case *scalar.Uint8, *scalar.Uint16, *scalar.Uint32, *scalar.Uint64:
@@ -221,7 +221,7 @@ func getFloatRoundImpl[T constraints.Float](mode RoundMode) func(T) T {
 	panic("invalid rounding mode")
 }
 
-func getDecRounding[T decimal128.Num | decimal256.Num](mode RoundMode, opsImpl *roundDecImpl[T]) func(val, remainder T, pow10 T, scale int32) T {
+func getDecRounding[T decimal128.Num | dec.Decimal256](mode RoundMode, opsImpl *roundDecImpl[T]) func(val, remainder T, pow10 T, scale int32) T {
 	var (
 		z   T
 		one = opsImpl.fromI64(1)
@@ -393,7 +393,7 @@ func roundToMultipleFloating[T constraints.Float](ctx *exec.KernelCtx, batch *ex
 	return ScalarUnaryNotNull(rnd.call)(ctx, batch, out)
 }
 
-type roundDecImpl[T decimal128.Num | decimal256.Num] struct {
+type roundDecImpl[T decimal128.Num | dec.Decimal256] struct {
 	*decOps[T]
 	scaleMultiplier     func(int) T
 	halfScaleMultiplier func(int) T
@@ -421,22 +421,22 @@ var (
 		fromI64:             func(v int64) decimal128.Num { return decimal128.FromI64(v) },
 		str:                 func(a decimal128.Num, scale int32) string { return a.ToString(scale) },
 	}
-	roundDec256 = roundDecImpl[decimal256.Num]{
+	roundDec256 = roundDecImpl[dec.Decimal256]{
 		decOps:              &dec256Ops,
-		scaleMultiplier:     decimal256.GetScaleMultiplier,
-		halfScaleMultiplier: decimal256.GetHalfScaleMultiplier,
-		divide:              func(a, b decimal256.Num) (res, rem decimal256.Num) { return a.Div(b) },
-		fitsInPrec:          func(a decimal256.Num, prec int32) bool { return a.FitsInPrecision(prec) },
-		less:                func(a, b decimal256.Num) bool { return a.Less(b) },
-		reduceScale:         func(a decimal256.Num, scale int32, round bool) decimal256.Num { return a.ReduceScaleBy(scale, round) },
-		increaseScale:       func(a decimal256.Num, scale int32) decimal256.Num { return a.IncreaseScaleBy(scale) },
-		lowBits:             func(a decimal256.Num) uint64 { return a.LowBits() },
-		fromI64:             func(v int64) decimal256.Num { return decimal256.FromI64(v) },
-		str:                 func(a decimal256.Num, scale int32) string { return a.ToString(scale) },
+		scaleMultiplier:     dec.Decimal256ScaleMultiplier,
+		halfScaleMultiplier: dec.Decimal256HalfScaleMultiplier,
+		divide:              func(a, b dec.Decimal256) (res, rem dec.Decimal256) { return a.Div(b) },
+		fitsInPrec:          func(a dec.Decimal256, prec int32) bool { return a.FitsInPrecision(prec) },
+		less:                func(a, b dec.Decimal256) bool { return a.Less(b) },
+		reduceScale:         func(a dec.Decimal256, scale int32, round bool) dec.Decimal256 { return a.ReduceScaleBy(scale, round) },
+		increaseScale:       func(a dec.Decimal256, scale int32) dec.Decimal256 { return a.IncreaseScaleBy(scale) },
+		lowBits:             func(a dec.Decimal256) uint64 { return a.LowBits() },
+		fromI64:             func(v int64) dec.Decimal256 { return dec.Decimal256FromI64(v) },
+		str:                 func(a dec.Decimal256, scale int32) string { return a.ToString(scale) },
 	}
 )
 
-type roundDec[T decimal128.Num | decimal256.Num] struct {
+type roundDec[T decimal128.Num | dec.Decimal256] struct {
 	ty      arrow.DecimalType
 	mode    RoundMode
 	ndigits int64
@@ -494,14 +494,14 @@ func (rnd *roundDec[T]) call(_ *exec.KernelCtx, arg T, e *error) T {
 	return arg
 }
 
-func getRoundKernelDecimal[T decimal128.Num | decimal256.Num]() exec.ArrayKernelExec {
+func getRoundKernelDecimal[T decimal128.Num | dec.Decimal256]() exec.ArrayKernelExec {
 	var def T
 	switch any(def).(type) {
 	case decimal128.Num:
 		return func(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 			return roundKernelDecimal(&roundDec128, ctx, batch, out)
 		}
-	case decimal256.Num:
+	case dec.Decimal256:
 		return func(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 			return roundKernelDecimal(&roundDec256, ctx, batch, out)
 		}
@@ -509,7 +509,7 @@ func getRoundKernelDecimal[T decimal128.Num | decimal256.Num]() exec.ArrayKernel
 	panic("should never get here")
 }
 
-func roundKernelDecimal[T decimal128.Num | decimal256.Num](opsImpl *roundDecImpl[T], ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+func roundKernelDecimal[T decimal128.Num | dec.Decimal256](opsImpl *roundDecImpl[T], ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	opts := ctx.State.(RoundState)
 	rnd := roundDec[T]{
 		ty:      out.Type.(arrow.DecimalType),
@@ -529,14 +529,14 @@ func roundKernelDecimal[T decimal128.Num | decimal256.Num](opsImpl *roundDecImpl
 	return ScalarUnaryNotNull(rnd.call)(ctx, batch, out)
 }
 
-func getRoundToMultipleKernelDecimal[T decimal128.Num | decimal256.Num]() exec.ArrayKernelExec {
+func getRoundToMultipleKernelDecimal[T decimal128.Num | dec.Decimal256]() exec.ArrayKernelExec {
 	var def T
 	switch any(def).(type) {
 	case decimal128.Num:
 		return func(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 			return roundToMultipleDecimal(&roundDec128, ctx, batch, out)
 		}
-	case decimal256.Num:
+	case dec.Decimal256:
 		return func(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 			return roundToMultipleDecimal(&roundDec256, ctx, batch, out)
 		}
@@ -544,7 +544,7 @@ func getRoundToMultipleKernelDecimal[T decimal128.Num | decimal256.Num]() exec.A
 	panic("should never get here")
 }
 
-func roundToMultipleDecimal[T decimal128.Num | decimal256.Num](opsImpl *roundDecImpl[T], ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
+func roundToMultipleDecimal[T decimal128.Num | dec.Decimal256](opsImpl *roundDecImpl[T], ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 	opts := ctx.State.(RoundToMultipleState)
 	rnd := roundToMultipleDec[T]{
 		ty:      out.Type.(arrow.DecimalType),
@@ -598,7 +598,7 @@ func (rnd *roundToMultiple[T]) call(_ *exec.KernelCtx, arg T, e *error) T {
 	return roundVal
 }
 
-type roundToMultipleDec[T decimal128.Num | decimal256.Num] struct {
+type roundToMultipleDec[T decimal128.Num | dec.Decimal256] struct {
 	ty   arrow.DecimalType
 	mode RoundMode
 
@@ -707,7 +707,7 @@ func UnaryRoundExec(ty arrow.Type) exec.ArrayKernelExec {
 	case arrow.DECIMAL128:
 		return getRoundKernelDecimal[decimal128.Num]()
 	case arrow.DECIMAL256:
-		return getRoundKernelDecimal[decimal256.Num]()
+		return getRoundKernelDecimal[dec.Decimal256]()
 	}
 	panic("should never get here")
 }
@@ -721,7 +721,7 @@ func UnaryRoundToMultipleExec(ty arrow.Type) exec.ArrayKernelExec {
 	case arrow.DECIMAL128:
 		return getRoundToMultipleKernelDecimal[decimal128.Num]()
 	case arrow.DECIMAL256:
-		return getRoundToMultipleKernelDecimal[decimal256.Num]()
+		return getRoundToMultipleKernelDecimal[dec.Decimal256]()
 	}
 	panic("should never get here")
 }
@@ -775,7 +775,7 @@ func GetSimpleRoundKernels(mode RoundMode) []exec.ScalarKernel {
 	return append(kernels, NullExecKernel(1))
 }
 
-func fixedRoundDecimalExec[T decimal128.Num | decimal256.Num](opsImpl *roundDecImpl[T], mode RoundMode) exec.ArrayKernelExec {
+func fixedRoundDecimalExec[T decimal128.Num | dec.Decimal256](opsImpl *roundDecImpl[T], mode RoundMode) exec.ArrayKernelExec {
 	return func(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.ExecResult) error {
 		rnd := roundDec[T]{
 			ty:      out.Type.(arrow.DecimalType),
@@ -795,14 +795,14 @@ func fixedRoundDecimalExec[T decimal128.Num | decimal256.Num](opsImpl *roundDecI
 	}
 }
 
-func FixedRoundDecimalExec[T decimal128.Num | decimal256.Num](mode RoundMode) exec.ArrayKernelExec {
+func FixedRoundDecimalExec[T decimal128.Num | dec.Decimal256](mode RoundMode) exec.ArrayKernelExec {
 	var def T
 	switch any(def).(type) {
 	case decimal128.Num:
 		return func() exec.ArrayKernelExec {
 			return fixedRoundDecimalExec(&roundDec128, mode)
 		}()
-	case decimal256.Num:
+	case dec.Decimal256:
 		return func() exec.ArrayKernelExec {
 			return fixedRoundDecimalExec(&roundDec256, mode)
 		}()

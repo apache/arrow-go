@@ -27,8 +27,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
+	dec "github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -227,7 +227,7 @@ func genGoCompareKernel[T arrow.FixedWidthType](op *cmpOp[T]) *CompareData {
 	}
 }
 
-type decCmp[T decimal128.Num | decimal256.Num] struct {
+type decCmp[T decimal128.Num | dec.Decimal256] struct {
 	Gt func(T, T) bool
 	Ge func(T, T) bool
 }
@@ -237,12 +237,12 @@ var dec128Cmp = decCmp[decimal128.Num]{
 	Ge: func(a, b decimal128.Num) bool { return a.GreaterEqual(b) },
 }
 
-var dec256Cmp = decCmp[decimal256.Num]{
-	Gt: func(a, b decimal256.Num) bool { return a.Greater(b) },
-	Ge: func(a, b decimal256.Num) bool { return a.GreaterEqual(b) },
+var dec256Cmp = decCmp[dec.Decimal256]{
+	Gt: func(a, b dec.Decimal256) bool { return a.Greater(b) },
+	Ge: func(a, b dec.Decimal256) bool { return a.GreaterEqual(b) },
 }
 
-func getCmpDec[T decimal128.Num | decimal256.Num](op CompareOperator, fns decCmp[T]) *cmpOp[T] {
+func getCmpDec[T decimal128.Num | dec.Decimal256](op CompareOperator, fns decCmp[T]) *cmpOp[T] {
 	switch op {
 	case CmpEQ:
 		return &cmpOp[T]{
@@ -369,7 +369,7 @@ func getCmpDec[T decimal128.Num | decimal256.Num](op CompareOperator, fns decCmp
 	return nil
 }
 
-func genDecimalCompareKernel[T decimal128.Num | decimal256.Num](op CompareOperator) (ex exec.ArrayKernelExec, data exec.KernelState) {
+func genDecimalCompareKernel[T decimal128.Num | dec.Decimal256](op CompareOperator) (ex exec.ArrayKernelExec, data exec.KernelState) {
 	ex = compareKernel[T]
 
 	var def T
@@ -381,7 +381,7 @@ func genDecimalCompareKernel[T decimal128.Num | decimal256.Num](op CompareOperat
 			funcAS: comparePrimitiveArrayScalar(cmp.arrScalar),
 			funcSA: comparePrimitiveScalarArray(cmp.scalarArr),
 		}
-	case decimal256.Num:
+	case dec.Decimal256:
 		cmp := getCmpDec(op, dec256Cmp)
 		data = &CompareData{
 			funcAA: comparePrimitiveArrayArray(cmp.arrArr),
@@ -551,7 +551,7 @@ func numericCompareKernel[T arrow.NumericType](ty exec.InputType, op CompareOper
 	return
 }
 
-func decimalCompareKernel[T decimal128.Num | decimal256.Num](ty exec.InputType, op CompareOperator) (kn exec.ScalarKernel) {
+func decimalCompareKernel[T decimal128.Num | dec.Decimal256](ty exec.InputType, op CompareOperator) (kn exec.ScalarKernel) {
 	ex, data := genDecimalCompareKernel[T](op)
 	kn = exec.NewScalarKernelWithSig(&exec.KernelSignature{
 		InputTypes: []exec.InputType{ty, ty},
@@ -708,7 +708,7 @@ func CompareKernels(op CompareOperator) []exec.ScalarKernel {
 
 	in128, in256 := exec.NewIDInput(arrow.DECIMAL128), exec.NewIDInput(arrow.DECIMAL256)
 	kns = append(kns, decimalCompareKernel[decimal128.Num](in128, op),
-		decimalCompareKernel[decimal256.Num](in256, op))
+		decimalCompareKernel[dec.Decimal256](in256, op))
 
 	inFSB := exec.NewIDInput(arrow.FIXED_SIZE_BINARY)
 	kns = append(kns, exec.NewScalarKernel([]exec.InputType{inFSB, inFSB}, outType,

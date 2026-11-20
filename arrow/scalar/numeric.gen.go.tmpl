@@ -107,21 +107,21 @@ func (s *{{.Name}}) CastTo(dt arrow.DataType) (Scalar, error) {
 {{end -}}
     case *arrow.Decimal256Type:
 {{if eq .Name "Float32" -}}
-        v, err := decimal256.FromFloat32(s.Value, dt.Precision, dt.Scale)
+        v, err := decimal.Decimal256FromFloat32(s.Value, dt.Precision, dt.Scale)
         if err != nil {
             return nil, err
         }
         return NewDecimal256Scalar(v, dt), nil
 {{else if eq .Name "Float64" -}}
-        v, err := decimal256.FromFloat64(s.Value, dt.Precision, dt.Scale)
+        v, err := decimal.Decimal256FromFloat(s.Value, dt.Precision, dt.Scale)
         if err != nil {
             return nil, err
         }
         return NewDecimal256Scalar(v, dt), nil
 {{else if eq .Name "Uint64" -}}
-        return NewDecimal256Scalar(decimal256.FromU64(s.Value), dt), nil
+        return NewDecimal256Scalar(decimal.Decimal256FromU64(s.Value), dt), nil
 {{else -}}
-        return NewDecimal256Scalar(decimal256.FromI64(int64(s.Value)), dt), nil
+        return NewDecimal256Scalar(decimal.Decimal256FromI64(int64(s.Value)), dt), nil
 {{end -}}
 	}
 

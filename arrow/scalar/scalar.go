@@ -31,8 +31,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/encoded"
 	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/float16"
@@ -322,7 +322,7 @@ func (s *Decimal128) CastTo(to arrow.DataType) (Scalar, error) {
 		return NewDecimal128Scalar(newVal, to), nil
 	case arrow.DECIMAL256:
 		to := to.(*arrow.Decimal256Type)
-		newVal, err := decimal256.FromDecimal128(s.Value).Rescale(dt.Scale, to.Scale)
+		newVal, err := decimal.Decimal256FromDecimal128(s.Value).Rescale(dt.Scale, to.Scale)
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +347,7 @@ func NewDecimal128Scalar(val decimal128.Num, typ arrow.DataType) *Decimal128 {
 
 type Decimal256 struct {
 	scalar
-	Value decimal256.Num
+	Value decimal.Decimal256
 }
 
 func (s *Decimal256) Data() []byte {
@@ -400,7 +400,7 @@ func (s *Decimal256) CastTo(to arrow.DataType) (Scalar, error) {
 	return nil, fmt.Errorf("cannot cast non-nil decimal256 scalar to type %s", to)
 }
 
-func NewDecimal256Scalar(val decimal256.Num, typ arrow.DataType) *Decimal256 {
+func NewDecimal256Scalar(val decimal.Decimal256, typ arrow.DataType) *Decimal256 {
 	return &Decimal256{scalar{typ, true}, val}
 }
 
@@ -916,7 +916,7 @@ func MakeArrayFromScalar(sc Scalar, length int, mem memory.Allocator) (arrow.Arr
 		defer data.Release()
 		return array.MakeFromData(data), nil
 	case *Decimal256:
-		data := finishFixedWidth(arrow.Decimal256Traits.CastToBytes([]decimal256.Num{s.Value}))
+		data := finishFixedWidth(arrow.Decimal256Traits.CastToBytes([]decimal.Decimal256{s.Value}))
 		defer data.Release()
 		return array.MakeFromData(data), nil
 	case *Dictionary:
@@ -1218,7 +1218,7 @@ func Hash(seed maphash.Seed, s Scalar) uint64 {
 			binary.Write(&h, endian.Native, v.LowBits())
 			hash()
 			binary.Write(&h, endian.Native, uint64(v.HighBits()))
-		case decimal256.Num:
+		case decimal.Decimal256:
 			arr := v.Array()
 			binary.Write(&h, endian.Native, arr[3])
 			hash()

@@ -23,8 +23,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -805,10 +805,10 @@ func makeDecimal256sRecords() []arrow.RecordBatch {
 		}, nil,
 	)
 
-	dec256s := func(vs []uint64) []decimal256.Num {
-		o := make([]decimal256.Num, len(vs))
+	dec256s := func(vs []uint64) []decimal.Decimal256 {
+		o := make([]decimal.Decimal256, len(vs))
 		for i, v := range vs {
-			o[i] = decimal256.New(v, v, v, v)
+			o[i] = decimal.NewDecimal256(v, v, v, v)
 		}
 		return o
 	}
@@ -1333,7 +1333,7 @@ func arrayOf(mem memory.Allocator, a interface{}, valids []bool) arrow.Array {
 		aa := bldr.NewDecimal128Array()
 		return aa
 
-	case []decimal256.Num:
+	case []decimal.Decimal256:
 		bldr := array.NewDecimal256Builder(mem, decimal256Type)
 		defer bldr.Release()
 

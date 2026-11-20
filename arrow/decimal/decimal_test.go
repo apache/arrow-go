@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -685,6 +686,144 @@ func TestFromStringLongFraction(t *testing.T) {
 			n64, err := decimal.Decimal64FromString(tt.s, 18, tt.scale)
 			require.NoError(t, err)
 			assert.EqualValues(t, tt.expected, n64)
+		})
+	}
+}
+
+func TestMaxScale(t *testing.T) {
+	assert.Equal(t, 9, decimal.MaxScale[decimal.Decimal32]())
+	assert.Equal(t, 18, decimal.MaxScale[decimal.Decimal64]())
+	assert.Equal(t, 38, decimal.MaxScale[decimal.Decimal128]())
+	assert.Equal(t, 76, decimal.MaxScale[decimal.Decimal256]())
+}
+
+func TestDecimal256FromI64AndDecimal128(t *testing.T) {
+	ints := []int64{
+		0, 1, -1, 2, -2, math.MaxInt32, math.MinInt32, 1 << 32, -(1 << 32),
+		math.MaxInt64, math.MinInt64, math.MinInt64 + 1,
+	}
+	x := uint64(0x9e3779b97f4a7c15)
+	next := func() uint64 {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		return x
+	}
+	for range 1000 {
+		ints = append(ints, int64(next())>>(next()%63))
+	}
+
+	for _, v := range ints {
+		ext := uint64(0)
+		if v < 0 {
+			ext = math.MaxUint64
+		}
+		n := decimal.Decimal256FromI64(v)
+		if want := [4]uint64{uint64(v), ext, ext, ext}; n.Array() != want {
+			t.Fatalf("Decimal256FromI64(%d).Array() = %x, want %x", v, n.Array(), want)
+		}
+		if n.BigInt().Cmp(big.NewInt(v)) != 0 {
+			t.Fatalf("Decimal256FromI64(%d) = %v", v, n.BigInt())
+		}
+
+		lo := next()
+		for _, d := range []decimal128.Num{decimal128.New(v, lo), decimal128.New(v, 0), decimal128.New(v, math.MaxUint64), decimal128.FromI64(v)} {
+			n := decimal.Decimal256FromDecimal128(d)
+			if want := [4]uint64{d.LowBits(), uint64(d.HighBits()), ext, ext}; n.Array() != want {
+				t.Fatalf("Decimal256FromDecimal128(%v).Array() = %x, want %x", d, n.Array(), want)
+			}
+			if n.BigInt().Cmp(d.BigInt()) != 0 {
+				t.Fatalf("Decimal256FromDecimal128(%v) = %v", d, n.BigInt())
+			}
+		}
+	}
+}
+
+func TestDecimal256FromBigInt(t *testing.T) {
+	one := big.NewInt(1)
+	pow2 := func(shift uint) *big.Int {
+		return new(big.Int).Lsh(one, shift)
+	}
+	maxPos := new(big.Int).Sub(pow2(255), one)
+	minNeg := new(big.Int).Neg(maxPos)
+
+	distinct := new(big.Int).SetBits([]big.Word{0x1111})
+	distinct.Lsh(distinct, 64).Or(distinct, new(big.Int).SetUint64(0x2222333344445555))
+	distinct.Lsh(distinct, 64).Or(distinct, new(big.Int).SetUint64(0x6666777788889999))
+	distinct.Lsh(distinct, 64).Or(distinct, new(big.Int).SetUint64(0xaaaabbbbccccdddd))
+
+	exactCases := []struct {
+		name string
+		val  *big.Int
+		want [4]uint64
+	}{
+		{"zero", big.NewInt(0), [4]uint64{0, 0, 0, 0}},
+		{"pos_1", big.NewInt(1), [4]uint64{1, 0, 0, 0}},
+		{"neg_1", big.NewInt(-1), [4]uint64{math.MaxUint64, math.MaxUint64, math.MaxUint64, math.MaxUint64}},
+		{"pos_2word_pow64", pow2(64), [4]uint64{0, 1, 0, 0}},
+		{"neg_2word_pow64", new(big.Int).Neg(pow2(64)), [4]uint64{0, math.MaxUint64, math.MaxUint64, math.MaxUint64}},
+		{"pos_3word_pow128", pow2(128), [4]uint64{0, 0, 1, 0}},
+		{"neg_3word_pow128", new(big.Int).Neg(pow2(128)), [4]uint64{0, 0, math.MaxUint64, math.MaxUint64}},
+		{"pos_4word_pow192", pow2(192), [4]uint64{0, 0, 0, 1}},
+		{"neg_4word_pow192", new(big.Int).Neg(pow2(192)), [4]uint64{0, 0, 0, math.MaxUint64}},
+		{"pos_distinct", distinct, [4]uint64{0xaaaabbbbccccdddd, 0x6666777788889999, 0x2222333344445555, 0x1111}},
+		{"neg_distinct", new(big.Int).Neg(distinct), [4]uint64{^uint64(0xaaaabbbbccccdddd) + 1, ^uint64(0x6666777788889999), ^uint64(0x2222333344445555), ^uint64(0x1111)}},
+		{"max_pos_2_255_minus_1", maxPos, [4]uint64{math.MaxUint64, math.MaxUint64, math.MaxUint64, math.MaxInt64}},
+		{"min_neg_minus_2_255_plus_1", minNeg, [4]uint64{1, 0, 0, 1 << 63}},
+	}
+	for _, tc := range exactCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := decimal.Decimal256FromBigInt(tc.val)
+			assert.Equal(t, tc.want, got.Array())
+			assert.Equal(t, 0, got.BigInt().Cmp(tc.val), "round-trip %s: got %v, want %v", tc.name, got.BigInt(), tc.val)
+		})
+	}
+
+	// Carry-propagation and multi-word round-trip coverage across 1..255 bits.
+	x := uint64(0x9e3779b97f4a7c15)
+	next := func() uint64 {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		return x
+	}
+	var buf [32]byte
+	for bitlen := uint(1); bitlen <= 255; bitlen++ {
+		for _, sign := range []int{1, -1} {
+			for i := 0; i < 4; i++ {
+				w := next()
+				for j := 0; j < 8; j++ {
+					buf[i*8+j] = byte(w >> (8 * j))
+				}
+			}
+			v := new(big.Int).SetBytes(buf[:])
+			v.Rsh(v, 256-bitlen)
+			if sign < 0 {
+				v.Neg(v)
+			}
+			got := decimal.Decimal256FromBigInt(v)
+			if got.BigInt().Cmp(v) != 0 {
+				t.Fatalf("Decimal256FromBigInt(bitlen=%d, sign=%d): got %v, want %v", bitlen, sign, got.BigInt(), v)
+			}
+		}
+	}
+
+	const overflowMsg = "arrow/decimal256: cannot represent value larger than 256bits"
+	for _, tc := range []struct {
+		name string
+		val  *big.Int
+	}{
+		{"pos_2_255", pow2(255)},
+		{"neg_2_255", new(big.Int).Neg(pow2(255))},
+		{"pos_2_256", pow2(256)},
+		{"neg_2_256", new(big.Int).Neg(pow2(256))},
+		{"pos_2_300", pow2(300)},
+		{"neg_2_300", new(big.Int).Neg(pow2(300))},
+	} {
+		t.Run("overflow_"+tc.name, func(t *testing.T) {
+			assert.PanicsWithValue(t, overflowMsg, func() {
+				_ = decimal.Decimal256FromBigInt(tc.val)
+			})
 		})
 	}
 }
