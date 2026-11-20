@@ -19,6 +19,7 @@ package array
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -318,6 +319,25 @@ type LargeListBuilder struct {
 	baseListBuilder
 }
 
+func checkListOffsetInt32(o int) int32 {
+	if o < 0 || o > math.MaxInt32 {
+		panic("arrow/array: list offset overflow")
+	}
+	return int32(o)
+}
+
+func checkListViewDimensionsInt32(offset, size int) {
+	if offset < 0 || offset > math.MaxInt32 {
+		panic("arrow/array: list-view offset overflow")
+	}
+	if size < 0 || size > math.MaxInt32 {
+		panic("arrow/array: list-view size overflow")
+	}
+	if int64(offset)+int64(size) > math.MaxInt32 {
+		panic("arrow/array: list-view offset and size overflow")
+	}
+}
+
 // NewListBuilder returns a builder, using the provided memory allocator.
 // The created list builder will create a list whose elements will be of type etype.
 func NewListBuilder(mem memory.Allocator, etype arrow.DataType) *ListBuilder {
@@ -328,7 +348,7 @@ func NewListBuilder(mem memory.Allocator, etype arrow.DataType) *ListBuilder {
 			values:          NewBuilder(mem, etype),
 			offsets:         offsetBldr,
 			dt:              arrow.ListOf(etype),
-			appendOffsetVal: func(o int) { offsetBldr.Append(int32(o)) },
+			appendOffsetVal: func(o int) { offsetBldr.Append(checkListOffsetInt32(o)) },
 		},
 	}
 	lb.refCount.Add(1)
@@ -345,7 +365,7 @@ func NewListBuilderWithField(mem memory.Allocator, field arrow.Field) *ListBuild
 			values:          NewBuilder(mem, field.Type),
 			offsets:         offsetBldr,
 			dt:              arrow.ListOfField(field),
-			appendOffsetVal: func(o int) { offsetBldr.Append(int32(o)) },
+			appendOffsetVal: func(o int) { offsetBldr.Append(checkListOffsetInt32(o)) },
 		},
 	}
 	lb.refCount.Add(1)
@@ -422,9 +442,10 @@ func (b *baseListBuilder) appendNextOffset() {
 func unsafeAppendRepeatedInt(builder Builder, value, n int) {
 	switch builder := builder.(type) {
 	case *Int32Builder:
+		val := checkListOffsetInt32(value)
 		end := builder.length + n
 		for i := builder.length; i < end; i++ {
-			builder.rawData[i] = int32(value)
+			builder.rawData[i] = val
 		}
 		builder.unsafeAppendBoolsToBitmap(nil, n)
 	case *Int64Builder:
@@ -440,8 +461,8 @@ func unsafeAppendRepeatedInt(builder Builder, value, n int) {
 
 func (b *baseListBuilder) Append(v bool) {
 	b.Reserve(1)
-	b.unsafeAppendBoolToBitmap(v)
 	b.appendNextOffset()
+	b.unsafeAppendBoolToBitmap(v)
 }
 
 func (b *baseListBuilder) AppendWithSize(v bool, _ int) {
@@ -450,8 +471,8 @@ func (b *baseListBuilder) AppendWithSize(v bool, _ int) {
 
 func (b *baseListBuilder) AppendNull() {
 	b.Reserve(1)
-	b.unsafeAppendBoolToBitmap(false)
 	b.appendNextOffset()
+	b.unsafeAppendBoolToBitmap(false)
 }
 
 func (b *baseListBuilder) AppendNulls(n int) {
@@ -460,10 +481,10 @@ func (b *baseListBuilder) AppendNulls(n int) {
 	}
 
 	b.Reserve(n)
+	unsafeAppendRepeatedInt(b.offsets, b.values.Len(), n)
 	bitutil.SetBitsTo(b.nullBitmap.Bytes(), int64(b.length), int64(n), false)
 	b.length += n
 	b.nulls += n
-	unsafeAppendRepeatedInt(b.offsets, b.values.Len(), n)
 }
 
 func (b *baseListBuilder) AppendEmptyValue() {
@@ -476,8 +497,8 @@ func (b *baseListBuilder) AppendEmptyValues(n int) {
 	}
 
 	b.Reserve(n)
-	b.unsafeAppendBoolsToBitmap(nil, n)
 	unsafeAppendRepeatedInt(b.offsets, b.values.Len(), n)
+	b.unsafeAppendBoolsToBitmap(nil, n)
 }
 
 func (b *ListBuilder) AppendValues(offsets []int32, valid []bool) {
@@ -1102,6 +1123,7 @@ type baseListViewBuilder struct {
 
 	// actual list-view type
 	dt              arrow.DataType
+	checkDimensions func(offset, size int)
 	appendOffsetVal func(int)
 	appendSizeVal   func(int)
 }
@@ -1127,6 +1149,7 @@ func NewListViewBuilder(mem memory.Allocator, etype arrow.DataType) *ListViewBui
 			offsets:         offsetBldr,
 			sizes:           sizeBldr,
 			dt:              arrow.ListViewOf(etype),
+			checkDimensions: checkListViewDimensionsInt32,
 			appendOffsetVal: func(o int) { offsetBldr.Append(int32(o)) },
 			appendSizeVal:   func(s int) { sizeBldr.Append(int32(s)) },
 		},
@@ -1147,6 +1170,7 @@ func NewListViewBuilderWithField(mem memory.Allocator, field arrow.Field) *ListV
 			offsets:         offsetBldr,
 			sizes:           sizeBldr,
 			dt:              arrow.ListViewOfField(field),
+			checkDimensions: checkListViewDimensionsInt32,
 			appendOffsetVal: func(o int) { offsetBldr.Append(int32(o)) },
 			appendSizeVal:   func(s int) { sizeBldr.Append(int32(s)) },
 		},
@@ -1227,6 +1251,9 @@ func (b *baseListViewBuilder) Release() {
 }
 
 func (b *baseListViewBuilder) AppendDimensions(offset int, listSize int) {
+	if b.checkDimensions != nil {
+		b.checkDimensions(offset, listSize)
+	}
 	b.Reserve(1)
 	b.unsafeAppendBoolToBitmap(true)
 	b.appendOffsetVal(offset)
@@ -1239,9 +1266,13 @@ func (b *baseListViewBuilder) Append(v bool) {
 
 func (b *baseListViewBuilder) AppendWithSize(v bool, listSize int) {
 	debug.Assert(v || listSize == 0, "invalid list-view should have size 0")
+	offset := b.values.Len()
+	if b.checkDimensions != nil {
+		b.checkDimensions(offset, listSize)
+	}
 	b.Reserve(1)
 	b.unsafeAppendBoolToBitmap(v)
-	b.appendOffsetVal(b.values.Len())
+	b.appendOffsetVal(offset)
 	b.appendSizeVal(listSize)
 }
 
@@ -1252,6 +1283,9 @@ func (b *baseListViewBuilder) AppendNull() {
 func (b *baseListViewBuilder) AppendNulls(n int) {
 	if n <= 0 {
 		return
+	}
+	if b.checkDimensions != nil {
+		b.checkDimensions(b.values.Len(), 0)
 	}
 
 	b.Reserve(n)
@@ -1268,6 +1302,9 @@ func (b *baseListViewBuilder) AppendEmptyValue() {
 func (b *baseListViewBuilder) AppendEmptyValues(n int) {
 	if n <= 0 {
 		return
+	}
+	if b.checkDimensions != nil {
+		b.checkDimensions(b.values.Len(), 0)
 	}
 
 	b.Reserve(n)
@@ -1435,15 +1472,24 @@ func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return err
 		}
 		// consume ']'
-		_, err := dec.Token()
+		if _, err := dec.Token(); err != nil {
+			return err
+		}
+		// Unlike the sizes passed to AppendWithSize, a JSON list's size comes from
+		// the decoded data, so overflow is reported instead of panicking.
+		size := b.values.Len() - offset
+		if b.checkDimensions != nil && (size < 0 || size > math.MaxInt32 ||
+			int64(offset)+int64(size) > math.MaxInt32) {
+			return fmt.Errorf("%w: list-view size overflow", arrow.ErrInvalid)
+		}
 		// replace the last size with the actual size
 		switch b.sizes.(type) {
 		case *Int32Builder:
-			b.sizes.(*Int32Builder).rawData[b.sizes.Len()-1] = int32(b.values.Len() - offset)
+			b.sizes.(*Int32Builder).rawData[b.sizes.Len()-1] = int32(size)
 		case *Int64Builder:
-			b.sizes.(*Int64Builder).rawData[b.sizes.Len()-1] = int64(b.values.Len() - offset)
+			b.sizes.(*Int64Builder).rawData[b.sizes.Len()-1] = int64(size)
 		}
-		return err
+		return nil
 	case nil:
 		b.AppendNull()
 	default:
