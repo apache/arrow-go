@@ -191,7 +191,7 @@ type arrowColumnWriter struct {
 //
 // Using an arrow column writer is a convenience to avoid having to process the arrow array yourself
 // and determine the correct definition and repetition levels manually.
-func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int) (arrowColumnWriter, error) {
+func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *SchemaManifest, rgw file.RowGroupWriter, leafColIdx int, writeFiniteVector bool) (arrowColumnWriter, error) {
 	if data.Len() == 0 {
 		return arrowColumnWriter{leafCount: calcLeafCount(data.DataType()), rgw: rgw}, nil
 	}
@@ -234,6 +234,18 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 	}
 	isNullable = nullableRoot(manifest, schemaField)
 
+	var vectorLeaves []bool
+	if writeFiniteVector {
+		for leaf := 0; leaf < leafCount; leaf++ {
+			if isFiniteVectorLeaf(manifest.descr.Column(leafColIdx + leaf).SchemaNode()) {
+				if vectorLeaves == nil {
+					vectorLeaves = make([]bool, leafCount)
+				}
+				vectorLeaves[leaf] = true
+			}
+		}
+	}
+
 	builders := make([]*multipathLevelBuilder, 0)
 	releaseBuilders := func() {
 		for _, bldr := range builders {
@@ -250,7 +262,7 @@ func newArrowColumnWriter(data *arrow.Chunked, offset, size int64, manifest *Sch
 		arrToWrite := array.NewSlice(chunk, chunkOffset, chunkOffset+chunkWriteSize)
 
 		if arrToWrite.Len() > 0 {
-			bldr, err := newMultipathLevelBuilder(arrToWrite, isNullable)
+			bldr, err := buildMultipathLevels(arrToWrite, isNullable, vectorLeaves)
 			arrToWrite.Release()
 			if err != nil {
 				releaseBuilders()
@@ -349,6 +361,11 @@ func visitedLeafValues(res *multipathLevelResult, mem memory.Allocator) (arrow.A
 // Leaf_field_nullable indicates whether the leaf array is considered nullable
 // according to its schema in a Table or its parent array.
 func WriteArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, leafArr arrow.Array, defLevels, repLevels []int16, leafFieldNullable bool) error {
+	if isFiniteVectorLeaf(cw.Descr().SchemaNode()) {
+		if err := checkFiniteVectorValues(leafArr); err != nil {
+			return fmt.Errorf("FINITE_VECTOR column %q: %w", cw.Descr().Path(), err)
+		}
+	}
 	// Leaf nulls are canonical when there is only a single null element after a list
 	// and it is at the leaf.
 	colLevelInfo := cw.LevelInfo()
@@ -373,6 +390,48 @@ func WriteArrowToColumn(ctx context.Context, cw file.ColumnChunkWriter, leafArr 
 		return writeDictionaryArrow(arrCtx, cw, leafArr, defLevels, repLevels, maybeParentNulls)
 	}
 	return writeDenseArrow(arrCtx, cw, leafArr, defLevels, repLevels, maybeParentNulls)
+}
+
+func isFiniteVectorLeaf(node schema.Node) bool {
+	list := node.Parent()
+	if list == nil || list.Parent() == nil {
+		return false
+	}
+	_, ok := list.Parent().LogicalType().(schema.FiniteVectorLogicalType)
+	return ok
+}
+
+func checkFiniteVectorValues(values arrow.Array) error {
+	for values.DataType().ID() == arrow.EXTENSION {
+		values = values.(array.ExtensionArray).Storage()
+	}
+	if values.DataType().ID() == arrow.DICTIONARY {
+		return fmt.Errorf("%w: dictionary arrays are not supported for FINITE_VECTOR elements", arrow.ErrInvalid)
+	}
+	if values.NullN() > 0 {
+		return fmt.Errorf("%w: contains a null element", arrow.ErrInvalid)
+	}
+	switch typed := values.(type) {
+	case *array.Float16:
+		for _, value := range typed.Values() {
+			if value.IsNaN() || value.IsInf() {
+				return fmt.Errorf("%w: contains a non-finite element", arrow.ErrInvalid)
+			}
+		}
+	case *array.Float32:
+		for _, value := range typed.Values() {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return fmt.Errorf("%w: contains a non-finite element", arrow.ErrInvalid)
+			}
+		}
+	case *array.Float64:
+		for _, value := range typed.Values() {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return fmt.Errorf("%w: contains a non-finite element", arrow.ErrInvalid)
+			}
+		}
+	}
+	return nil
 }
 
 type binaryarr interface {

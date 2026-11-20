@@ -320,6 +320,29 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	case arrow.FIXED_SIZE_LIST, arrow.LIST, arrow.LARGE_LIST:
 		elemField := field.Type.(arrow.ListLikeType).ElemField()
 
+		if list, ok := field.Type.(*arrow.FixedSizeListType); ok && arrprops.writeFiniteVector &&
+			list.Len() > 0 && isFiniteVectorValueType(elemField.Type) {
+			required := elemField
+			required.Nullable = false
+			element, err := fieldToNode("element", required, props, arrprops)
+			if err != nil {
+				return nil, err
+			}
+			if schema.IsFiniteVectorElement(element) {
+				logical, err := schema.NewFiniteVectorLogicalType(list.Len())
+				if err != nil {
+					return nil, err
+				}
+				middle, err := schema.NewGroupNode("list", parquet.Repetitions.Repeated,
+					schema.FieldList{element}, -1)
+				if err != nil {
+					return nil, err
+				}
+				return schema.NewGroupNodeLogical(name, repType, schema.FieldList{middle},
+					logical, fieldIDFromMeta(field.Metadata))
+			}
+		}
+
 		child, err := fieldToNode(name, elemField, props, arrprops)
 		if err != nil {
 			return nil, err
@@ -372,6 +395,19 @@ func fieldToNode(name string, field arrow.Field, props *parquet.WriterProperties
 	}
 
 	return schema.NewPrimitiveNodeLogical(name, repType, logicalType, typ, length, fieldIDFromMeta(field.Metadata))
+}
+
+func isFiniteVectorValueType(typ arrow.DataType) bool {
+	for typ.ID() == arrow.EXTENSION {
+		typ = typ.(arrow.ExtensionType).StorageType()
+	}
+	switch typ.ID() {
+	case arrow.BOOL, arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
+		arrow.FLOAT16, arrow.FLOAT32, arrow.FLOAT64, arrow.DECIMAL, arrow.DECIMAL256:
+		return true
+	}
+	return false
 }
 
 const fieldIDKey = "PARQUET:field_id"
@@ -978,7 +1014,13 @@ func variantToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx
 }
 
 func groupToSchemaField(n *schema.GroupNode, currentLevels file.LevelInfo, ctx *schemaTree, parent, out *SchemaField) error {
-	if n.LogicalType().Equals(schema.NewListLogicalType()) {
+	if vector, ok := n.LogicalType().(schema.FiniteVectorLogicalType); ok {
+		if err := listToSchemaField(n, currentLevels, ctx, parent, out); err != nil {
+			return err
+		}
+		out.Field.Type = arrow.FixedSizeListOfField(vector.NumElements(), *out.Children[0].Field)
+		return nil
+	} else if n.LogicalType().Equals(schema.NewListLogicalType()) {
 		return listToSchemaField(n, currentLevels, ctx, parent, out)
 	} else if n.LogicalType().Equals(schema.MapLogicalType{}) {
 		return mapToSchemaField(n, currentLevels, ctx, parent, out)
@@ -1131,6 +1173,13 @@ func getNestedFactory(origin, inferred arrow.DataType) func(fieldList []arrow.Fi
 				return arrow.LargeListOfField(list[0])
 			}
 		}
+	case arrow.FIXED_SIZE_LIST:
+		size := inferred.(*arrow.FixedSizeListType).Len()
+		if original, ok := origin.(*arrow.FixedSizeListType); ok && original.Len() == size {
+			return func(list []arrow.Field) arrow.DataType {
+				return arrow.FixedSizeListOfField(size, list[0])
+			}
+		}
 	case arrow.MAP:
 		if origin.ID() == arrow.MAP {
 			return func(list []arrow.Field) arrow.DataType {
@@ -1209,11 +1258,17 @@ func applyOriginalStorageMetadata(origin arrow.Field, inferred *SchemaField) (mo
 		}
 
 		modified = origin.Type.ID() != inferred.Field.Type.ID()
-		childModified, err := applyOriginalMetadata(arrow.Field{Type: origin.Type.(arrow.ListLikeType).Elem()}, &inferred.Children[0])
+		originalElement := origin.Type.(arrow.ListLikeType).ElemField()
+		childModified, err := applyOriginalMetadata(originalElement, &inferred.Children[0])
 		if err != nil {
 			return modified, err
 		}
 		modified = modified || childModified
+		if inferred.Field.Type.ID() == arrow.FIXED_SIZE_LIST &&
+			originalElement.Nullable && !inferred.Children[0].Field.Nullable {
+			inferred.Children[0].Field.Nullable = true
+			modified = true
+		}
 		if modified {
 			inferred.Field.Type = factory([]arrow.Field{*inferred.Children[0].Field})
 		}

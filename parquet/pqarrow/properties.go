@@ -34,6 +34,7 @@ type ArrowWriterProperties struct {
 	allowTruncatedTimestamps bool
 	storeSchema              bool
 	noMapLogicalType         bool
+	writeFiniteVector        bool
 	// compliantNestedTypes     bool
 }
 
@@ -110,6 +111,15 @@ func WithTruncatedTimestamps(allow bool) WriterOption {
 func WithStoreSchema() WriterOption {
 	return func(c *config) {
 		c.props.storeSchema = true
+	}
+}
+
+// WithFiniteVectorLogicalType writes eligible fixed-size lists as FINITE_VECTOR.
+// This is off by default. A present vector cannot contain nulls, NaN or infinity.
+// Readers must support FINITE_VECTOR to preserve the size without an Arrow schema.
+func WithFiniteVectorLogicalType() WriterOption {
+	return func(c *config) {
+		c.props.writeFiniteVector = true
 	}
 }
 
