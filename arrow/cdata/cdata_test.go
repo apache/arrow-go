@@ -1119,6 +1119,68 @@ func TestSlicedStructRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSlicedUnionRoundTrip(t *testing.T) {
+	for _, mode := range []arrow.UnionMode{arrow.SparseMode, arrow.DenseMode} {
+		for _, childOffset := range []int64{0, 1} {
+			for _, parentOffset := range []int64{0, 1, 4} {
+				t.Run(fmt.Sprintf("%s/child=%d/parent=%d", mode, childOffset, parentOffset), func(t *testing.T) {
+					mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+					defer mem.AssertSize(t, 0)
+
+					// fromJSON builds an array from json values, sliced by
+					// childOffset after prepending that many padding values.
+					fromJSON := func(dt arrow.DataType, values string, offset int64) arrow.Array {
+						values = strings.Repeat("0,", int(offset)) + values
+						arr, _, err := array.FromJSON(mem, dt, strings.NewReader("["+values+"]"))
+						require.NoError(t, err)
+						defer arr.Release()
+						return array.NewSlice(arr, offset, int64(arr.Len()))
+					}
+
+					typeIDs := fromJSON(arrow.PrimitiveTypes.Int8, `5,10,5,5,10,10`, 0)
+					defer typeIDs.Release()
+
+					var (
+						u0, u1 arrow.Array
+						parent arrow.Array
+						err    error
+					)
+					names := []string{"u0", "u1"}
+					codes := []arrow.UnionTypeCode{5, 10}
+					if mode == arrow.SparseMode {
+						u0 = fromJSON(arrow.PrimitiveTypes.Int32, `101,0,303,null,0,0`, childOffset)
+						u1 = fromJSON(arrow.PrimitiveTypes.Uint8, `0,22,0,0,55,66`, childOffset)
+						parent, err = array.NewSparseUnionFromArraysWithFieldCodes(typeIDs, []arrow.Array{u0, u1}, names, codes)
+					} else {
+						offsets := fromJSON(arrow.PrimitiveTypes.Int32, `0,0,1,2,1,2`, 0)
+						defer offsets.Release()
+						u0 = fromJSON(arrow.PrimitiveTypes.Int32, `101,303,null`, childOffset)
+						u1 = fromJSON(arrow.PrimitiveTypes.Uint8, `22,55,66`, childOffset)
+						parent, err = array.NewDenseUnionFromArraysWithFieldCodes(typeIDs, offsets, []arrow.Array{u0, u1}, names, codes)
+					}
+					defer u0.Release()
+					defer u1.Release()
+					require.NoError(t, err)
+					defer parent.Release()
+
+					sliced := array.NewSlice(parent, parentOffset, int64(parent.Len()))
+					defer sliced.Release()
+					var data CArrowArray
+					var schema CArrowSchema
+					ExportArrowArray(sliced, &data, &schema)
+					defer ReleaseCArrowArray(&data)
+					defer ReleaseCArrowSchema(&schema)
+					_, imported, err := ImportCArray(&data, &schema)
+					require.NoError(t, err)
+					defer imported.Release()
+					require.NoError(t, imported.(array.Union).ValidateFull())
+					assert.True(t, array.Equal(sliced, imported), "expected %s; got %s", sliced, imported)
+				})
+			}
+		}
+	}
+}
+
 func TestZeroSizeFixedSizeListRoundTrip(t *testing.T) {
 	for _, element := range []arrow.DataType{arrow.Null, arrow.PrimitiveTypes.Int64, arrow.ListOf(arrow.BinaryTypes.String)} {
 		t.Run(element.String(), func(t *testing.T) {
