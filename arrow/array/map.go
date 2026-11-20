@@ -150,7 +150,7 @@ type MapBuilder struct {
 func NewMapBuilder(mem memory.Allocator, keytype, itemtype arrow.DataType, keysSorted bool) *MapBuilder {
 	etype := arrow.MapOf(keytype, itemtype)
 	etype.KeysSorted = keysSorted
-	listBldr := NewListBuilder(mem, etype.Elem())
+	listBldr := NewListBuilderWithField(mem, etype.ElemField())
 	keyBldr := listBldr.ValueBuilder().(*StructBuilder).FieldBuilder(0)
 	keyBldr.Retain()
 	itemBldr := listBldr.ValueBuilder().(*StructBuilder).FieldBuilder(1)
@@ -167,7 +167,7 @@ func NewMapBuilder(mem memory.Allocator, keytype, itemtype arrow.DataType, keysS
 }
 
 func NewMapBuilderWithType(mem memory.Allocator, dt *arrow.MapType) *MapBuilder {
-	listBldr := NewListBuilder(mem, dt.Elem())
+	listBldr := NewListBuilderWithField(mem, dt.ElemField())
 	keyBldr := listBldr.ValueBuilder().(*StructBuilder).FieldBuilder(0)
 	keyBldr.Retain()
 	itemBldr := listBldr.ValueBuilder().(*StructBuilder).FieldBuilder(1)
@@ -280,6 +280,7 @@ func (b *MapBuilder) UnsafeAppendBoolToBitmap(v bool) {
 
 func (b *MapBuilder) init(capacity int)                  { b.listBuilder.init(capacity) }
 func (b *MapBuilder) resize(newBits int, init func(int)) { b.listBuilder.resize(newBits, init) }
+func (b *MapBuilder) setRowBuffered(v bool)              { b.listBuilder.setRowBuffered(v) }
 
 func (b *MapBuilder) adjustStructBuilderLen() {
 	keyLen, itemLen := b.keyBuilder.Len(), b.itemBuilder.Len()
