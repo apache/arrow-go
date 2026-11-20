@@ -1313,10 +1313,14 @@ func TestGetDictionaryPageOffsetPastDataPageOffset(t *testing.T) {
 	defer fr.Close()
 
 	for col := range fr.MetaData().Schema.NumColumns() {
+		cc, err := fr.MetaData().RowGroup(0).ColumnChunk(col)
+		require.NoError(t, err)
+
 		pr, err := fr.RowGroup(0).GetColumnPageReader(col)
 		require.NoError(t, err)
 		_, err = pr.GetDictionaryPage()
-		require.Error(t, err)
+		require.ErrorContains(t, err, fmt.Sprintf("dictionary page offset %d is past data page offset %d",
+			cc.DictionaryPageOffset(), cc.DataPageOffset()))
 		require.NoError(t, pr.Close())
 	}
 }

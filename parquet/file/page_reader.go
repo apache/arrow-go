@@ -406,6 +406,13 @@ func (d *DictionaryPage) Release() {
 // IsSorted returns whether the dictionary itself is sorted
 func (d *DictionaryPage) IsSorted() bool { return d.sorted }
 
+type cachedDictPage struct {
+	valid    bool
+	nvals    int32
+	encoding format.Encoding
+	sorted   bool
+}
+
 type serializedPageReader struct {
 	r             parquet.BufferedReader
 	chunk         *metadata.ColumnChunkMetaData
@@ -442,6 +449,7 @@ type serializedPageReader struct {
 	decompressBuffer *memory.Buffer
 	dataPageBuffer   *memory.Buffer
 	dictPageBuffer   *memory.Buffer
+	cachedDict       cachedDictPage
 	err              error
 }
 
@@ -537,6 +545,7 @@ func (p *serializedPageReader) Reset(r parquet.BufferedReader, nrows int64, comp
 	}
 	p.rowsSeen, p.pageOrd, p.nrows = 0, 0, nrows
 	p.curPageHdr, p.curPage, p.err = nil, nil, nil
+	p.cachedDict = cachedDictPage{}
 	p.r = r
 	p.columnCanStream = false
 
@@ -755,7 +764,48 @@ func (p *serializedPageReader) dictionaryAtDataOffset() bool {
 	return p.dataOffset <= p.baseOffset && (p.chunkStartsWithDict || p.cryptoCtx.MetaDecryptor == nil)
 }
 
+func (p *serializedPageReader) dictionaryPage() *DictionaryPage {
+	return &DictionaryPage{
+		page: page{
+			buf:      memory.NewBufferBytes(p.dictPageBuffer.Bytes()),
+			typ:      format.PageType_DICTIONARY_PAGE,
+			nvals:    p.cachedDict.nvals,
+			encoding: p.cachedDict.encoding,
+		},
+		sorted: p.cachedDict.sorted,
+	}
+}
+
+func (p *serializedPageReader) decodeDictPage(rd io.Reader, dictHeader *format.DictionaryPageHeader, lenCompressed, lenUncompressed int) error {
+	if dictHeader.GetNumValues() < 0 {
+		return errors.New("parquet: invalid page header (negative number of values)")
+	}
+
+	// A failure below would leave the cache pointing at the resized buffer.
+	p.cachedDict = cachedDictPage{}
+	p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
+	data, err := p.decompress(rd, lenCompressed, p.dictPageBuffer.Bytes())
+	if err != nil {
+		return err
+	}
+	if len(data) != lenUncompressed {
+		return fmt.Errorf("parquet: metadata said %d bytes uncompressed dictionary page, got %d bytes", lenUncompressed, len(data))
+	}
+
+	p.cachedDict = cachedDictPage{
+		valid:    true,
+		nvals:    dictHeader.GetNumValues(),
+		encoding: dictHeader.GetEncoding(),
+		sorted:   dictHeader.IsSetIsSorted() && dictHeader.GetIsSorted(),
+	}
+	return nil
+}
+
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
+	if p.cachedDict.valid {
+		return p.dictionaryPage(), nil
+	}
+
 	probe := p.dictOffset == 0 && p.dictionaryAtDataOffset()
 	if p.dictOffset > 0 || probe {
 		// This reads the dictionary page from the start of the chunk, independent of
@@ -766,12 +816,15 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 		defer func() { p.cryptoCtx.StartDecryptWithDictionaryPage = atDictionary }()
 
 		span := p.dataOffset - p.baseOffset
+		if span < 0 {
+			return nil, fmt.Errorf("parquet: dictionary page offset %d is past data page offset %d", p.dictOffset, p.dataOffset)
+		}
 		readBufSize := int(min(span, int64(p.r.BufferSize())))
 		// The dictionary page starts the stream, and the data offset marks its end
-		// only when it is past the dictionary offset. Otherwise the length is
-		// unknown, as it is when no dictionary offset is recorded. Buffer only a
-		// page header, since the stream of a default reader holds the whole chunk.
-		if span <= 0 {
+		// when it is past the dictionary offset. When they are equal, or no
+		// dictionary offset is recorded, the length is unknown. Buffer only a page
+		// header, since the stream of a default reader holds the whole chunk.
+		if span == 0 {
 			span = math.MaxInt64
 			readBufSize = min(p.r.BufferSize(), defaultPageHeaderSize)
 		}
@@ -801,30 +854,10 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, err
 		}
 
-		if dictHeader.GetNumValues() < 0 {
-			return nil, errors.New("parquet: invalid page header (negative number of values)")
-		}
-
-		p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
-		buf := memory.NewBufferBytes(p.dictPageBuffer.Bytes())
-
-		data, err := p.decompress(rd, lenCompressed, buf.Bytes())
-		if err != nil {
+		if err := p.decodeDictPage(rd, dictHeader, lenCompressed, lenUncompressed); err != nil {
 			return nil, err
 		}
-		if len(data) != lenUncompressed {
-			return nil, fmt.Errorf("parquet: metadata said %d bytes uncompressed dictionary page, got %d bytes", lenUncompressed, len(data))
-		}
-
-		return &DictionaryPage{
-			page: page{
-				buf:      buf,
-				typ:      hdr.Type,
-				nvals:    dictHeader.GetNumValues(),
-				encoding: dictHeader.GetEncoding(),
-			},
-			sorted: dictHeader.IsSetIsSorted() && dictHeader.GetIsSorted(),
-		}, nil
+		return p.dictionaryPage(), nil
 	}
 
 	return nil, nil
@@ -1066,35 +1099,11 @@ func (p *serializedPageReader) Next() bool {
 		switch p.curPageHdr.GetType() {
 		case format.PageType_DICTIONARY_PAGE:
 			p.cryptoCtx.StartDecryptWithDictionaryPage = false
-			dictHeader := p.curPageHdr.GetDictionaryPageHeader()
-			if dictHeader.GetNumValues() < 0 {
-				p.err = errors.New("parquet: invalid page header (negative number of values)")
-				return false
-			}
-
-			p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
-			buf := memory.NewBufferBytes(p.dictPageBuffer.Bytes())
-
-			data, err := p.decompress(p.r, lenCompressed, buf.Bytes())
-			if err != nil {
+			if err := p.decodeDictPage(p.r, p.curPageHdr.GetDictionaryPageHeader(), lenCompressed, lenUncompressed); err != nil {
 				p.err = err
 				return false
 			}
-			if len(data) != lenUncompressed {
-				p.err = fmt.Errorf("parquet: metadata said %d bytes uncompressed dictionary page, got %d bytes", lenUncompressed, len(data))
-				return false
-			}
-
-			// make dictionary page
-			p.curPage = &DictionaryPage{
-				page: page{
-					buf:      buf,
-					typ:      p.curPageHdr.Type,
-					nvals:    dictHeader.GetNumValues(),
-					encoding: dictHeader.GetEncoding(),
-				},
-				sorted: dictHeader.IsSetIsSorted() && dictHeader.GetIsSorted(),
-			}
+			p.curPage = p.dictionaryPage()
 
 		case format.PageType_DATA_PAGE:
 			p.pageOrd++
