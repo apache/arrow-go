@@ -20,6 +20,7 @@ package scalar
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -181,12 +182,30 @@ func appendToBldr(bldr array.Builder, scalars []Scalar) error {
 	case *array.BinaryViewBuilder:
 		appendBinary(bldr, scalars)
 	case array.ListLikeBuilder:
-		var numChildren int
+		limit := math.MaxInt
+		existingLen := bldr.ValueBuilder().Len()
+		switch b := bldr.(type) {
+		case *array.ListBuilder, *array.ListViewBuilder:
+			limit = math.MaxInt32
+		case *array.MapBuilder:
+			limit = math.MaxInt32
+			existingLen = max(existingLen, b.KeyBuilder().Len(), b.ItemBuilder().Len())
+		}
+		if existingLen > limit {
+			return fmt.Errorf("%w: list child length exceeds maximum %d", arrow.ErrInvalid, limit)
+		}
+		remaining := limit - existingLen
+		numChildren := 0
 		for _, s := range scalars {
 			if !s.IsValid() {
 				continue
 			}
-			numChildren += s.(ListScalar).GetList().Len()
+			n := s.(ListScalar).GetList().Len()
+			if n > remaining {
+				return fmt.Errorf("%w: list child length exceeds maximum %d", arrow.ErrInvalid, limit)
+			}
+			remaining -= n
+			numChildren += n
 		}
 		bldr.ValueBuilder().Reserve(numChildren)
 
