@@ -456,7 +456,12 @@ func exportArray(arr arrow.Array, out *CArrowArray, outSchema *CArrowSchema) {
 		childPtrs := allocateArrowArrayPtrArr(arr.NumFields())
 		children := allocateArrowArrayArr(arr.NumFields())
 		for i := 0; i < arr.NumFields(); i++ {
-			exportArray(arr.Field(i), &children[i], nil)
+			// For sparse unions, Field(i) already applies the parent slice.
+			// C Data consumers apply the exported parent offset, so retain
+			// the original child data.
+			child := array.MakeFromData(arr.Data().Children()[i])
+			exportArray(child, &children[i], nil)
+			child.Release()
 			childPtrs[i] = &children[i]
 		}
 		out.children = (**CArrowArray)(unsafe.Pointer(&childPtrs[0]))
