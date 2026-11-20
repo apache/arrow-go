@@ -379,7 +379,7 @@ func TestListElementRejectsInvalidListViewOffsets(t *testing.T) {
 		{"list view negative offset", func(mem memory.Allocator) arrow.Array {
 			builder := array.NewListViewBuilder(mem, arrow.PrimitiveTypes.Int32)
 			builder.ValueBuilder().(*array.Int32Builder).Append(7)
-			builder.AppendDimensions(-1, 1)
+			builder.AppendValuesWithSizes([]int32{-1}, []int32{1}, []bool{true})
 			result := builder.NewArray()
 			builder.Release()
 			return result
