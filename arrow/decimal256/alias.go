@@ -62,7 +62,7 @@ func FromFloat64(v float64, prec, scale int32) (Num, error) {
 }
 
 // FromBigInt converts a big.Int to a Num. It panics if v.BitLen() > 255.
-func FromBigInt(v *big.Int) (n Num) { return decimal.Decimal256FromBigInt(v) }
+func FromBigInt(v *big.Int) Num { return decimal.Decimal256FromBigInt(v) }
 
 // Max returns the largest Decimal256 that was passed in the arguments
 func Max(first Num, rest ...Num) Num { return decimal.Decimal256Max(first, rest...) }

@@ -405,29 +405,49 @@ func (n Decimal256) Sign() int {
 }
 
 // Decimal256FromBigInt converts a big.Int to a Decimal256. It panics if v.BitLen() > 255.
-func Decimal256FromBigInt(v *big.Int) (n Decimal256) {
-	bitlen := v.BitLen()
-	if bitlen > 255 {
-		panic("arrow/decimal256: cannot represent value larger than 256bits")
-	} else if bitlen == 0 {
-		return
+func Decimal256FromBigInt(v *big.Int) Decimal256 {
+	b := v.Bits()
+	if len(b) == 0 {
+		return Decimal256{}
 	}
 
-	b := v.Bits()
+	var x0, x1, x2, x3 uint64
 	if bits.UintSize == 32 {
-		// Each 64-bit limb contains two native-sized big.Int words.
-		for i, word := range b {
-			n.arr[i/2] |= uint64(word) << (32 * (i % 2))
+		if v.BitLen() > 255 {
+			panic("arrow/decimal256: cannot represent value larger than 256bits")
 		}
-	} else {
+		// Each 64-bit limb contains two native-sized big.Int words.
+		var arr [4]uint64
 		for i, word := range b {
-			n.arr[i] = uint64(word)
+			arr[i/2] |= uint64(word) << (32 * (i % 2))
+		}
+		x0, x1, x2, x3 = arr[0], arr[1], arr[2], arr[3]
+	} else {
+		switch len(b) {
+		case 1:
+			x0 = uint64(b[0])
+		case 2:
+			x1, x0 = uint64(b[1]), uint64(b[0])
+		case 3:
+			x2, x1, x0 = uint64(b[2]), uint64(b[1]), uint64(b[0])
+		case 4:
+			x3 = uint64(b[3])
+			if x3>>63 != 0 {
+				panic("arrow/decimal256: cannot represent value larger than 256bits")
+			}
+			x2, x1, x0 = uint64(b[2]), uint64(b[1]), uint64(b[0])
+		default:
+			panic("arrow/decimal256: cannot represent value larger than 256bits")
 		}
 	}
 	if v.Sign() < 0 {
-		return n.Negate()
+		var carry uint64
+		x0, carry = bits.Add64(^x0, 1, 0)
+		x1, carry = bits.Add64(^x1, 0, carry)
+		x2, carry = bits.Add64(^x2, 0, carry)
+		x3, _ = bits.Add64(^x3, 0, carry)
 	}
-	return
+	return Decimal256{[4]uint64{x0, x1, x2, x3}}
 }
 
 func toBigIntPositive256(n Decimal256) *big.Int {
