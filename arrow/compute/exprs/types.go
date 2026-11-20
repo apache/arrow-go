@@ -366,7 +366,7 @@ func encodeOptionlessOverflowableArithmetic(id extensions.ID) arrowToSubstrait {
 //
 // See NewExtensionSet for more info.
 func NewExtensionSetDefault(set expr.ExtensionRegistry) ExtensionIDSet {
-	return &extensionSet{ExtensionRegistry: set, reg: DefaultExtensionIDRegistry}
+	return &extensionSet{substraitRegistry: set, reg: DefaultExtensionIDRegistry}
 }
 
 // NewExtensionSet creates a new extension set given a substrait extension registry,
@@ -376,65 +376,64 @@ func NewExtensionSetDefault(set expr.ExtensionRegistry) ExtensionIDSet {
 // serializing you only need to serialize the extensions that have been
 // inserted into the extension set.
 func NewExtensionSet(set expr.ExtensionRegistry, reg *ExtensionIDRegistry) ExtensionIDSet {
-	return &extensionSet{ExtensionRegistry: set, reg: reg}
+	return &extensionSet{substraitRegistry: set, reg: reg}
 }
 
+// extensionSet pairs Arrow implementation mappings with a Substrait extension registry.
 type extensionSet struct {
-	expr.ExtensionRegistry
-	reg *ExtensionIDRegistry
+	substraitRegistry expr.ExtensionRegistry
+	reg               *ExtensionIDRegistry
 }
 
 func (e *extensionSet) GetArrowRegistry() *ExtensionIDRegistry       { return e.reg }
-func (e *extensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.ExtensionRegistry }
+func (e *extensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.substraitRegistry }
 
-func (e *extensionSet) DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool) {
-	id, ok := e.DecodeType(anchor)
+func decodeTypeArrow(ext ExtensionIDSet, anchor uint32) (extensions.ID, arrow.DataType, bool) {
+	registry := ext.GetSubstraitRegistry()
+	id, ok := registry.DecodeType(anchor)
 	if !ok {
-		if id, ok = e.DecodeTypeVariation(anchor); !ok {
+		if id, ok = registry.DecodeTypeVariation(anchor); !ok {
 			return id, nil, false
 		}
 	}
 
-	dt, ok := e.reg.GetTypeByID(id)
+	dt, ok := ext.GetArrowRegistry().GetTypeByID(id)
 	return id, dt, ok
 }
 
-func (e *extensionSet) DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
-	id, ok := e.DecodeFunc(ref)
+func decodeFunction(ext ExtensionIDSet, ref uint32) (extensions.ID, substraitToArrow, bool) {
+	id, ok := ext.GetSubstraitRegistry().DecodeFunc(ref)
 	if !ok {
 		return id, nil, false
 	}
 
-	conv, ok := e.reg.GetSubstraitScalarToArrow(id)
+	registry := ext.GetArrowRegistry()
+	conv, ok := registry.GetSubstraitScalarToArrow(id)
 	if !ok {
 		id.Name, _, ok = strings.Cut(id.Name, ":")
 		if ok {
-			conv, ok = e.reg.GetSubstraitScalarToArrow(id)
+			conv, ok = registry.GetSubstraitScalarToArrow(id)
 		}
 	}
 	return id, conv, ok
 }
 
-func (e *extensionSet) EncodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool) {
-	id, ok := e.reg.GetIDByType(dt)
+func encodeTypeVariation(ext ExtensionIDSet, dt arrow.DataType) (extensions.ID, uint32, bool) {
+	id, ok := ext.GetArrowRegistry().GetIDByType(dt)
 	if !ok {
 		return extensions.ID{}, 0, false
 	}
 
-	return id, e.GetTypeVariationAnchor(id), true
+	return id, ext.GetSubstraitRegistry().GetTypeVariationAnchor(id), true
 }
 
-func (e *extensionSet) EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool) {
-	id, ok := e.reg.GetIDByType(dt)
+func encodeType(ext ExtensionIDSet, dt arrow.DataType) (extensions.ID, uint32, bool) {
+	id, ok := ext.GetArrowRegistry().GetIDByType(dt)
 	if !ok {
 		return extensions.ID{}, 0, false
 	}
 
-	return id, e.GetTypeAnchor(id), true
-}
-
-func (e *extensionSet) EncodeFunction(id extensions.ID) uint32 {
-	return e.GetFuncAnchor(id)
+	return id, ext.GetSubstraitRegistry().GetTypeAnchor(id), true
 }
 
 // ExtensionIDRegistry manages a set of mappings between Arrow types
@@ -566,15 +565,12 @@ func (e *ExtensionIDRegistry) GetArrowToSubstrait(name string) (conv arrowToSubs
 
 // ExtensionIDSet is an interface for managing the mapping between arrow
 // and substrait types and function extensions.
+//
+// Implementations supply the registries used for type conversion and execution.
+// Arrow manages anchor bookkeeping internally using these registries.
 type ExtensionIDSet interface {
 	GetArrowRegistry() *ExtensionIDRegistry
 	GetSubstraitRegistry() expr.ExtensionRegistry
-
-	DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool)
-	DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool)
-
-	EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool)
-	EncodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool)
 }
 
 // IsNullable is a convenience method to return whether or not
@@ -635,7 +631,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 	case arrow.INT64:
 		return &types.Int64Type{Nullability: nullability}, nil
 	case arrow.UINT8:
-		_, anchor, ok := ext.EncodeTypeVariation(dt)
+		_, anchor, ok := encodeTypeVariation(ext, dt)
 		if !ok {
 			return nil, arrow.ErrNotFound
 		}
@@ -644,7 +640,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 			TypeVariationRef: anchor,
 		}, nil
 	case arrow.UINT16:
-		_, anchor, ok := ext.EncodeTypeVariation(dt)
+		_, anchor, ok := encodeTypeVariation(ext, dt)
 		if !ok {
 			return nil, arrow.ErrNotFound
 		}
@@ -653,7 +649,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 			TypeVariationRef: anchor,
 		}, nil
 	case arrow.UINT32:
-		_, anchor, ok := ext.EncodeTypeVariation(dt)
+		_, anchor, ok := encodeTypeVariation(ext, dt)
 		if !ok {
 			return nil, arrow.ErrNotFound
 		}
@@ -662,7 +658,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 			TypeVariationRef: anchor,
 		}, nil
 	case arrow.UINT64:
-		_, anchor, ok := ext.EncodeTypeVariation(dt)
+		_, anchor, ok := encodeTypeVariation(ext, dt)
 		if !ok {
 			return nil, arrow.ErrNotFound
 		}
@@ -671,7 +667,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 			TypeVariationRef: anchor,
 		}, nil
 	case arrow.FLOAT16:
-		_, anchor, ok := ext.EncodeTypeVariation(dt)
+		_, anchor, ok := encodeTypeVariation(ext, dt)
 		if !ok {
 			return nil, arrow.ErrNotFound
 		}
@@ -706,7 +702,7 @@ func ToSubstraitType(dt arrow.DataType, nullable bool, ext ExtensionIDSet) (type
 		case "interval_day":
 			return &types.IntervalDayType{Nullability: nullability}, nil
 		default:
-			_, anchor, ok := ext.EncodeType(dt)
+			_, anchor, ok := encodeType(ext, dt)
 			if !ok {
 				return nil, arrow.ErrNotFound
 			}
@@ -802,7 +798,7 @@ func FromSubstraitType(t types.Type, ext ExtensionIDSet) (arrow.DataType, bool, 
 	nullable := IsNullable(t)
 
 	if t.GetTypeVariationReference() > 0 {
-		_, dt, ok := ext.DecodeTypeArrow(t.GetTypeVariationReference())
+		_, dt, ok := decodeTypeArrow(ext, t.GetTypeVariationReference())
 		if ok {
 			return dt, nullable, nil
 		}
@@ -927,7 +923,7 @@ func FromSubstraitType(t types.Type, ext ExtensionIDSet) (arrow.DataType, bool, 
 		return ret, nullable, nil
 	case *types.UserDefinedType:
 		anchor := t.TypeReference
-		_, dt, ok := ext.DecodeTypeArrow(anchor)
+		_, dt, ok := decodeTypeArrow(ext, anchor)
 		if !ok {
 			return nil, false, arrow.ErrNotImplemented
 		}

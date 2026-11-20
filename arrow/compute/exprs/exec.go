@@ -620,7 +620,7 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 			}
 		}
 
-		_, conv, ok := ext.DecodeFunction(e.FuncRef())
+		_, conv, ok := decodeFunction(ext, e.FuncRef())
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", arrow.ErrNotImplemented, e.Name())
 		}
