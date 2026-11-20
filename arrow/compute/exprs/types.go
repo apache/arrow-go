@@ -387,6 +387,8 @@ type extensionSet struct {
 func (e *extensionSet) GetArrowRegistry() *ExtensionIDRegistry       { return e.reg }
 func (e *extensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.ExtensionRegistry }
 
+// Deprecated: Anchor bookkeeping is an implementation detail.
+// Use FromSubstraitType to convert Substrait types to Arrow.
 func (e *extensionSet) DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool) {
 	id, ok := e.DecodeType(anchor)
 	if !ok {
@@ -399,6 +401,8 @@ func (e *extensionSet) DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.Data
 	return id, dt, ok
 }
 
+// Deprecated: Anchor bookkeeping is an implementation detail.
+// Use ExecuteScalarExpression to execute Substrait functions.
 func (e *extensionSet) DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
 	id, ok := e.DecodeFunc(ref)
 	if !ok {
@@ -415,6 +419,8 @@ func (e *extensionSet) DecodeFunction(ref uint32) (extensions.ID, substraitToArr
 	return id, conv, ok
 }
 
+// Deprecated: Anchor bookkeeping is an implementation detail.
+// Use ToSubstraitType to convert Arrow types to Substrait.
 func (e *extensionSet) EncodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool) {
 	id, ok := e.reg.GetIDByType(dt)
 	if !ok {
@@ -424,6 +430,8 @@ func (e *extensionSet) EncodeTypeVariation(dt arrow.DataType) (extensions.ID, ui
 	return id, e.GetTypeVariationAnchor(id), true
 }
 
+// Deprecated: Anchor bookkeeping is an implementation detail.
+// Use ToSubstraitType to convert Arrow types to Substrait.
 func (e *extensionSet) EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool) {
 	id, ok := e.reg.GetIDByType(dt)
 	if !ok {
@@ -433,6 +441,8 @@ func (e *extensionSet) EncodeType(dt arrow.DataType) (extensions.ID, uint32, boo
 	return id, e.GetTypeAnchor(id), true
 }
 
+// Deprecated: Allocate function anchors through the Substrait registry when
+// encoding expressions. Arrow execution does not require this helper.
 func (e *extensionSet) EncodeFunction(id extensions.ID) uint32 {
 	return e.GetFuncAnchor(id)
 }
@@ -570,10 +580,18 @@ type ExtensionIDSet interface {
 	GetArrowRegistry() *ExtensionIDRegistry
 	GetSubstraitRegistry() expr.ExtensionRegistry
 
+	// Deprecated: Anchor bookkeeping is an implementation detail.
+	// Use FromSubstraitType to convert Substrait types to Arrow.
 	DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool)
+	// Deprecated: Anchor bookkeeping is an implementation detail.
+	// Use ExecuteScalarExpression to execute Substrait functions.
 	DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool)
 
+	// Deprecated: Anchor bookkeeping is an implementation detail.
+	// Use ToSubstraitType to convert Arrow types to Substrait.
 	EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool)
+	// Deprecated: Anchor bookkeeping is an implementation detail.
+	// Use ToSubstraitType to convert Arrow types to Substrait.
 	EncodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool)
 }
 
