@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/internal/dictutils"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
 )
@@ -64,7 +63,8 @@ func TestLoadRecordBatchReturnsMalformedMetadataErrors(t *testing.T) {
 	body := memory.NewBufferBytes(nil)
 	defer body.Release()
 
-	rec, err := loadRecordBatch(arrow.NewSchema(nil, nil), &dictutils.Memo{}, meta, body, false, memory.DefaultAllocator)
+	d := ipcDecoder{schema: arrow.NewSchema(nil, nil), mem: memory.DefaultAllocator}
+	rec, err := d.loadRecordBatch(meta, body)
 	require.Error(t, err)
 	require.Nil(t, rec)
 }
