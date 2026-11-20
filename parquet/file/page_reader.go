@@ -776,6 +776,31 @@ func (p *serializedPageReader) dictionaryPage() *DictionaryPage {
 	}
 }
 
+func (p *serializedPageReader) decodeDictPage(rd io.Reader, dictHeader *format.DictionaryPageHeader, lenCompressed, lenUncompressed int) error {
+	if dictHeader.GetNumValues() < 0 {
+		return errors.New("parquet: invalid page header (negative number of values)")
+	}
+
+	// A failure below would leave the cache pointing at the resized buffer.
+	p.cachedDict = cachedDictPage{}
+	p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
+	data, err := p.decompress(rd, lenCompressed, p.dictPageBuffer.Bytes())
+	if err != nil {
+		return err
+	}
+	if len(data) != lenUncompressed {
+		return fmt.Errorf("parquet: metadata said %d bytes uncompressed dictionary page, got %d bytes", lenUncompressed, len(data))
+	}
+
+	p.cachedDict = cachedDictPage{
+		valid:    true,
+		nvals:    dictHeader.GetNumValues(),
+		encoding: dictHeader.GetEncoding(),
+		sorted:   dictHeader.IsSetIsSorted() && dictHeader.GetIsSorted(),
+	}
+	return nil
+}
+
 func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 	if p.cachedDict.valid {
 		return p.dictionaryPage(), nil
@@ -829,26 +854,8 @@ func (p *serializedPageReader) GetDictionaryPage() (*DictionaryPage, error) {
 			return nil, err
 		}
 
-		if dictHeader.GetNumValues() < 0 {
-			return nil, errors.New("parquet: invalid page header (negative number of values)")
-		}
-
-		// A failure below would leave the cache pointing at the resized buffer.
-		p.cachedDict = cachedDictPage{}
-		p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
-		data, err := p.decompress(rd, lenCompressed, p.dictPageBuffer.Bytes())
-		if err != nil {
+		if err := p.decodeDictPage(rd, dictHeader, lenCompressed, lenUncompressed); err != nil {
 			return nil, err
-		}
-		if len(data) != lenUncompressed {
-			return nil, fmt.Errorf("parquet: metadata said %d bytes uncompressed dictionary page, got %d bytes", lenUncompressed, len(data))
-		}
-
-		p.cachedDict = cachedDictPage{
-			valid:    true,
-			nvals:    dictHeader.GetNumValues(),
-			encoding: dictHeader.GetEncoding(),
-			sorted:   dictHeader.IsSetIsSorted() && dictHeader.GetIsSorted(),
 		}
 		return p.dictionaryPage(), nil
 	}
@@ -1092,30 +1099,9 @@ func (p *serializedPageReader) Next() bool {
 		switch p.curPageHdr.GetType() {
 		case format.PageType_DICTIONARY_PAGE:
 			p.cryptoCtx.StartDecryptWithDictionaryPage = false
-			dictHeader := p.curPageHdr.GetDictionaryPageHeader()
-			if dictHeader.GetNumValues() < 0 {
-				p.err = errors.New("parquet: invalid page header (negative number of values)")
-				return false
-			}
-
-			// A failure below would leave the cache pointing at the resized buffer.
-			p.cachedDict = cachedDictPage{}
-			p.dictPageBuffer.ResizeNoShrink(lenUncompressed)
-			data, err := p.decompress(p.r, lenCompressed, p.dictPageBuffer.Bytes())
-			if err != nil {
+			if err := p.decodeDictPage(p.r, p.curPageHdr.GetDictionaryPageHeader(), lenCompressed, lenUncompressed); err != nil {
 				p.err = err
 				return false
-			}
-			if len(data) != lenUncompressed {
-				p.err = fmt.Errorf("parquet: metadata said %d bytes uncompressed dictionary page, got %d bytes", lenUncompressed, len(data))
-				return false
-			}
-
-			p.cachedDict = cachedDictPage{
-				valid:    true,
-				nvals:    dictHeader.GetNumValues(),
-				encoding: dictHeader.GetEncoding(),
-				sorted:   dictHeader.IsSetIsSorted() && dictHeader.GetIsSorted(),
 			}
 			p.curPage = p.dictionaryPage()
 

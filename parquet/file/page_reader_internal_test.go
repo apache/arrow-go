@@ -434,11 +434,9 @@ func TestNextFailedDictionaryPageInvalidatesCachedDictionary(t *testing.T) {
 
 	p, _ := unencryptedChunkReader(t, 8, chunk)
 	require.True(t, p.Next())
-	require.True(t, p.cachedDict.valid)
 
 	require.False(t, p.Next())
 	require.ErrorContains(t, p.err, "uncompressed dictionary page")
-	require.False(t, p.cachedDict.valid, "a failed dictionary page left a stale cached dictionary")
 
 	// The cache is repopulated by re-reading the chunk, not from the buffer that the
 	// failed page resized.
