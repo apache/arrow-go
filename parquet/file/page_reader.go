@@ -31,6 +31,7 @@ import (
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding/streaming"
 	"github.com/apache/arrow-go/v18/parquet/internal/encryption"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
@@ -948,6 +949,35 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 	return p.err
 }
 
+// countRowsV1 returns the number of records in a V1 data page by counting
+// the level-0 repetition levels in the page's level region, which the
+// DataPageV1 layout puts first. The levels stay encoded on the page, so this
+// decodes just the repetition run and leaves the buffer untouched.
+func (p *serializedPageReader) countRowsV1(levels []byte, repEnc format.Encoding, numValues int32) (int64, error) {
+	var (
+		dec   encoding.LevelDecoder
+		batch [4096]int16
+		rows  int64
+	)
+	if _, err := dec.SetData(parquet.Encoding(repEnc), p.maxRepLevel, int(numValues), levels); err != nil {
+		return 0, err
+	}
+
+	for remaining := int(numValues); remaining > 0; {
+		decoded, _, err := dec.Decode(batch[:min(len(batch), remaining)])
+		if err != nil {
+			return 0, err
+		}
+		for _, lvl := range batch[:decoded] {
+			if lvl == 0 {
+				rows++
+			}
+		}
+		remaining -= decoded
+	}
+	return rows, nil
+}
+
 func (p *serializedPageReader) valueStream(limit io.Reader, compressed bool) (io.Reader, io.Closer) {
 	if compressed {
 		dec := p.codec.(compress.StreamingCodec).NewReader(limit)
@@ -1105,7 +1135,6 @@ func (p *serializedPageReader) Next() bool {
 			}
 
 			firstRowIdx := p.rowsSeen
-			p.rowsSeen += int64(dataHeader.GetNumValues())
 
 			dp := &DataPageV1{
 				dataPageBase: dataPageBase{page: page{
@@ -1146,6 +1175,23 @@ func (p *serializedPageReader) Next() bool {
 					return false
 				}
 				dp.buf = buf
+			}
+
+			// A V1 page header only counts leaf values, which for a repeated
+			// column is the number of levels rather than the number of records.
+			// Count the records from the repetition levels so rowsSeen and
+			// firstRowIndex stay correct for seeking and chunk termination.
+			if p.maxRepLevel > 0 {
+				rows, err := p.countRowsV1(dp.levelBuffer(),
+					dataHeader.GetRepetitionLevelEncoding(), dataHeader.GetNumValues())
+				if err != nil {
+					dp.Release()
+					p.err = err
+					return false
+				}
+				p.rowsSeen += rows
+			} else {
+				p.rowsSeen += int64(dataHeader.GetNumValues())
 			}
 			p.curPage = dp
 		case format.PageType_DATA_PAGE_V2:

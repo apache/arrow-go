@@ -451,6 +451,8 @@ func (c *columnChunkReader) initLevelDecodersV2(page *DataPageV2) (int64, error)
 func (c *columnChunkReader) initLevelDecodersV1(page *DataPageV1, repLvlEncoding, defLvlEncoding format.Encoding) (int64, error) {
 	c.numBuffered = int64(page.nvals)
 	c.numDecoded = 0
+	// a seek may have populated this with the previous page's levels
+	c.repLvlBuffer = c.repLvlBuffer[:0]
 
 	buf := page.levelBuffer()
 	maxSize := len(buf)
@@ -695,11 +697,14 @@ func (c *columnChunkReader) seekEnded(rowIdx int64) error {
 
 func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 	toSkip := nrows
-	for c.HasNext() && toSkip > 0 {
+	for c.HasNext() {
 		// if there are no repetition levels, then this is easy! each level
 		// is one row so we just use the definition levels to determine
 		// the number of physical values to discard!
 		if c.descr.MaxRepetitionLevel() == 0 {
+			if toSkip <= 0 {
+				return nrows - toSkip, nil
+			}
 			if toSkip >= (c.numBuffered - c.numDecoded) {
 				toSkip -= c.numBuffered - c.numDecoded
 				c.numDecoded = c.numBuffered
@@ -741,6 +746,14 @@ func (c *columnChunkReader) skipRows(nrows int64) (int64, error) {
 					return nrows - toSkip, err
 				}
 				c.repLvlBuffer = buf[:c.numDecoded+int64(nreps)]
+			}
+
+			// A record can span a page boundary, so the page may begin with the tail
+			// of a record a previous page already counted; the scan below discards
+			// those leading non-zero levels on the way to the target row's first level.
+			rest := c.repLvlBuffer[c.numDecoded:]
+			if toSkip <= 0 && (len(rest) == 0 || rest[0] == 0) {
+				return nrows - toSkip, nil
 			}
 
 			rowsSkipped := int64(0)
