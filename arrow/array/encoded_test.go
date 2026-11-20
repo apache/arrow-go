@@ -17,6 +17,7 @@
 package array_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -193,6 +194,21 @@ func TestRunEndEncodedValidate(t *testing.T) {
 		err := arr.Validate()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "last run end")
+	})
+
+	t.Run("offset plus length beyond int32 fails ValidateFull", func(t *testing.T) {
+		runEnds, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[1]`))
+		require.NoError(t, err)
+		defer runEnds.Release()
+		values, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(`[42]`))
+		require.NoError(t, err)
+		defer values.Release()
+
+		arr := makeRunEndEncodedArrayRaw(t, arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64), 2, 0, math.MaxInt32,
+			[]*memory.Buffer{nil}, []arrow.ArrayData{runEnds.Data(), values.Data()})
+		defer arr.Release()
+
+		assert.EqualError(t, arr.ValidateFull(), "arrow/array: last run end is 1 but it should cover 2147483649")
 	})
 
 	t.Run("duplicate run ends pass Validate but fail ValidateFull", func(t *testing.T) {

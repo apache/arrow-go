@@ -148,9 +148,9 @@ func (a *Struct) Validate() error {
 	if a.data.offset < 0 || a.data.length < 0 || int64(a.data.offset) > math.MaxInt64-int64(a.data.length) {
 		return fmt.Errorf("%w: arrow/array: struct offset and length overflow", arrow.ErrInvalid)
 	}
-	expectedLength := a.data.offset + a.data.length
+	expectedLength := int64(a.data.offset) + int64(a.data.length)
 	for i, child := range a.data.childData {
-		if child.Len() < expectedLength {
+		if int64(child.Len()) < expectedLength {
 			return fmt.Errorf("%w: arrow/array: struct child array #%d has length smaller than expected for struct array (%d < %d)",
 				arrow.ErrInvalid, i, child.Len(), expectedLength)
 		}
