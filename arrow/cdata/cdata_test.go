@@ -34,6 +34,7 @@ import (
 	"runtime/cgo"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -1805,12 +1806,72 @@ func TestAsyncTaskExtractNull(t *testing.T) {
 	defer arr.Release()
 	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32}}, nil), []arrow.Array{arr}, 3)
 
-	// a Go-side handle slot (not createHandle's malloc) so nothing is left to free
 	hnd := cgo.NewHandle(rec)
-	defer hnd.Delete()
-	hptr := uintptr(hnd)
-	task := CArrowAsyncTask{private_data: unsafe.Pointer(&hptr)}
+	task := CArrowAsyncTask{private_data: createHandle(hnd)}
 	assert.Zero(t, int(asyncTaskExtract(&task, nil)))
+	// extract_data owns the task's handle (and its slot, which ASan checks)
+	assert.Panics(t, func() { hnd.Value() }, "handle not deleted")
+}
+
+// A second extract_data call on the same task is a consumer bug; it must
+// fail with EINVAL, not touch the freed handle.
+func TestAsyncTaskExtractTwice(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	bldr := array.NewInt32Builder(mem)
+	defer bldr.Release()
+	bldr.AppendValues([]int32{1, 2, 3}, nil)
+	arr := bldr.NewArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32}}, nil), []arrow.Array{arr}, 3)
+
+	task := CArrowAsyncTask{private_data: createHandle(cgo.NewHandle(rec))}
+	assert.Zero(t, int(asyncTaskExtract(&task, nil)))
+	assert.Equal(t, int(syscall.EINVAL), int(asyncTaskExtract(&task, nil)))
+}
+
+// A producer may send tasks after cancel; the consumer must still pass each
+// to extract_data, with NULL, so the producer can clean up.
+func TestAsyncDrainTasksAfterCancel(t *testing.T) {
+	const queueSize, nTasks = 2, 6 // more tasks than the queue holds
+
+	handler := testAsyncHandler()
+	defer freeAsyncHandler(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := CreateAsyncDeviceStreamHandler(ctx, queueSize, handler)
+	var schema CArrowSchema
+	ExportArrowSchema(arrow.NewSchema([]arrow.Field{{Name: "a", Type: arrow.PrimitiveTypes.Int32}}, nil), &schema)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		asyncCancelThenProduce(handler, &schema, nTasks)
+	}()
+	// even if the test fails early: cancel (the producer waits for it), wait
+	// for the producer, then free it
+	defer freeAsyncProducer()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second): // producer blocked on a full queue
+			t.Error("producer never finished: tasks after cancel are not drained")
+		}
+	}()
+
+	asyncStream := <-ch
+	require.NoError(t, asyncStream.Err)
+	cancel()
+	for range asyncStream.Stream {
+	}
+
+	assert.Eventually(t, func() bool {
+		_, extracts := asyncProducerCounts()
+		return extracts == nTasks
+	}, 5*time.Second, time.Millisecond, "tasks sent after cancel must be extracted with NULL")
 }
 
 func TestAsyncPropagateError(t *testing.T) {

@@ -330,9 +330,19 @@ func asyncProducerCancel(producer *CArrowAsyncProducer) {
 
 //export asyncTaskExtract
 func asyncTaskExtract(task *CArrowAsyncTask, out *CArrowDeviceArray) C.int {
+	// a second call on the same task is a consumer bug; fail instead of use-after-free
+	if task.private_data == nil {
+		return C.EINVAL
+	}
 	h := getHandle(task.private_data)
 	rec := h.Value().(arrow.RecordBatch)
-	defer rec.Release()
+	// extract_data runs once per task and owns the task's handle and slot
+	defer func() {
+		rec.Release()
+		h.Delete()
+		C.free(task.private_data)
+		task.private_data = nil
+	}()
 
 	// a NULL out means the consumer doesn't want the data
 	if out == nil {

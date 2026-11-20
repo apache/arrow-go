@@ -530,6 +530,16 @@ type cAsyncStreamHandler struct {
 }
 
 func asyncTaskQueue(ctx context.Context, schema *arrow.Schema, recordStream chan<- RecordMessage, taskQueue <-chan taskState, h *cAsyncStreamHandler) {
+	// Runs after close(recordStream). A producer may still send tasks after
+	// cancel; extract them with NULL, as the spec asks, so it can clean up.
+	// release closes taskQueue, which ends the loop.
+	defer func() {
+		for task := range taskQueue {
+			if task.err == nil && task.task.extract_data != nil {
+				C.goExtractTaskData(&task.task, nil)
+			}
+		}
+	}()
 	defer close(recordStream)
 	for {
 		select {
