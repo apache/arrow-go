@@ -346,8 +346,14 @@ func unencryptedChunkReader(t *testing.T, nrows int64, chunk []byte) (*serialize
 }
 
 func serializePage(t *testing.T, pg pageSpec) []byte {
+	return serializePageWithSizes(t, pg, int32(len(pg.body)), int32(len(pg.body)))
+}
+
+// serializePageWithSizes writes a page whose header declares sizes that need not
+// match its body, as a corrupt file may.
+func serializePageWithSizes(t *testing.T, pg pageSpec, compressed, uncompressed int32) []byte {
 	t.Helper()
-	pg.hdr.CompressedPageSize, pg.hdr.UncompressedPageSize = int32(len(pg.body)), int32(len(pg.body))
+	pg.hdr.CompressedPageSize, pg.hdr.UncompressedPageSize = compressed, uncompressed
 	hdrBytes, err := thrift.NewThriftSerializer().Write(context.Background(), pg.hdr)
 	require.NoError(t, err)
 	return append(hdrBytes, pg.body...)
@@ -394,4 +400,50 @@ func TestGetDictionaryPageWithoutRecordedOffsetReadsOnlyTheDictionary(t *testing
 	require.NotNil(t, got)
 	require.EqualValues(t, dictValues, got.NumValues())
 	require.Less(t, *read, 2*len(dict), "read %d of %d chunk bytes for a %d byte dictionary page", *read, len(chunk), len(dict))
+}
+
+func TestSeekToRowDictionaryAtDataPageOffsetReadsDictionaryOnce(t *testing.T) {
+	// RLE_DICTIONARY indices 0,1,1,0,0,0,1,0 at bit width 1
+	indices := []byte{1, 3, 0x46}
+	chunk := append(
+		serializePage(t, dictPageSpec(10, 20)),
+		serializePage(t, dataPageSpec(8, format.Encoding_RLE_DICTIONARY, indices))...,
+	)
+
+	p, outerRead := unencryptedChunkReader(t, 8, chunk)
+	cr := requiredInt32Column(t, p)
+	t.Cleanup(func() { require.NoError(t, cr.Close()) })
+
+	require.NoError(t, cr.SeekToRow(0))
+	vals := make([]int32, 8)
+	_, n, err := cr.ReadBatch(8, vals, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, []int32{10, 20, 20, 10, 10, 10, 20, 10}, vals[:n])
+	require.Zero(t, *outerRead, "dictionary page was re-read from the chunk stream after seek already decoded it")
+}
+
+// A dictionary page that fails to decode must invalidate the cached dictionary,
+// or a later GetDictionaryPage reports the resized dictionary buffer under the
+// header of the page that did decode.
+func TestNextFailedDictionaryPageInvalidatesCachedDictionary(t *testing.T) {
+	first := serializePage(t, dictPageSpec(10, 20))
+	// The second page claims 16 uncompressed bytes but carries 8, which the reader
+	// rejects after resizing and partly overwriting the dictionary buffer.
+	second := dictPageSpec(4, 5)
+	chunk := append(first, serializePageWithSizes(t, second, int32(len(second.body)), 16)...)
+
+	p, _ := unencryptedChunkReader(t, 8, chunk)
+	require.True(t, p.Next())
+	require.True(t, p.cachedDict.valid)
+
+	require.False(t, p.Next())
+	require.ErrorContains(t, p.err, "uncompressed dictionary page")
+	require.False(t, p.cachedDict.valid, "a failed dictionary page left a stale cached dictionary")
+
+	// The cache is repopulated by re-reading the chunk, not from the buffer that the
+	// failed page resized.
+	dict, err := p.GetDictionaryPage()
+	require.NoError(t, err)
+	require.EqualValues(t, 2, dict.NumValues())
+	require.Equal(t, []byte{10, 0, 0, 0, 20, 0, 0, 0}, dict.Data())
 }
