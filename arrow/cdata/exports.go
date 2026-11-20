@@ -332,7 +332,12 @@ func asyncProducerCancel(producer *CArrowAsyncProducer) {
 func asyncTaskExtract(task *CArrowAsyncTask, out *CArrowDeviceArray) C.int {
 	h := getHandle(task.private_data)
 	rec := h.Value().(arrow.RecordBatch)
-	defer rec.Release()
+	// extract_data runs once per task and owns the task's handle and slot
+	defer func() {
+		rec.Release()
+		h.Delete()
+		C.free(task.private_data)
+	}()
 
 	// a NULL out means the consumer doesn't want the data
 	if out == nil {
