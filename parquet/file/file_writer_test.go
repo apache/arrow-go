@@ -1676,6 +1676,151 @@ func TestPqarrowNewFileWriter_PropagatesShortWrite(t *testing.T) {
 	require.Contains(t, err.Error(), "short write of magic number")
 }
 
+const (
+	encryptedOrdinalLimit = math.MaxInt16 + 1
+	ordinalLimitKey       = "0123456789012345"
+)
+
+func encryptionOpt(columns ...string) parquet.WriterProperty {
+	var opts []parquet.EncryptOption
+	if len(columns) > 0 {
+		cols := parquet.ColumnPathToEncryptionPropsMap{}
+		for _, c := range columns {
+			cols[c] = parquet.NewColumnEncryptionProperties(c)
+		}
+		opts = append(opts, parquet.WithEncryptedColumns(cols))
+	}
+	return parquet.WithEncryptionProperties(parquet.NewFileEncryptionProperties(ordinalLimitKey, opts...))
+}
+
+func newWideSchema(t *testing.T, n int) *schema.GroupNode {
+	t.Helper()
+	fields := make(schema.FieldList, n)
+	for i := range fields {
+		fields[i] = schema.NewInt32Node("c"+strconv.Itoa(i), parquet.Repetitions.Required, -1)
+	}
+	sc, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, -1)
+	require.NoError(t, err)
+	return sc
+}
+
+func TestEncryptedRowGroupLimit(t *testing.T) {
+	sc := newSingleColumnSchema(t)
+
+	for _, buffered := range []bool{false, true} {
+		name := "serial row group after the limit is refused and Close writes the rest"
+		if buffered {
+			name = "buffered row group after the limit is refused and Close writes the rest"
+		}
+		t.Run(name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			props := parquet.NewWriterProperties(parquet.WithAllocator(mem),
+				parquet.WithDataPageSize(1), parquet.WithBatchSize(1), encryptionOpt())
+			var buf bytes.Buffer
+			w, err := file.NewParquetWriterWithError(&buf, sc, file.WithWriterProps(props))
+			require.NoError(t, err)
+
+			for range encryptedOrdinalLimit - 1 {
+				rgw, err := w.AppendRowGroupChecked()
+				require.NoError(t, err)
+				cw, err := rgw.NextColumn()
+				require.NoError(t, err)
+				_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1}, nil, nil)
+				require.NoError(t, err)
+			}
+
+			// The last allowed row group holds flushed pages and a dictionary
+			// that only Close releases.
+			var cw file.ColumnChunkWriter
+			if buffered {
+				rgw, err := w.AppendBufferedRowGroupChecked()
+				require.NoError(t, err)
+				cw, err = rgw.Column(0)
+				require.NoError(t, err)
+			} else {
+				rgw, err := w.AppendRowGroupChecked()
+				require.NoError(t, err)
+				cw, err = rgw.NextColumn()
+				require.NoError(t, err)
+			}
+			_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1, 2, 3}, nil, nil)
+			require.NoError(t, err)
+
+			if buffered {
+				_, err = w.AppendBufferedRowGroupChecked()
+			} else {
+				_, err = w.AppendRowGroupChecked()
+			}
+			require.ErrorContains(t, err, "more than 32768 row groups")
+			require.Equal(t, encryptedOrdinalLimit, w.NumRowGroups())
+
+			require.NoError(t, w.Close())
+			assert.Equal(t, encryptedOrdinalLimit+2, w.NumRows())
+			mem.AssertSize(t, 0)
+
+			rp := parquet.NewReaderProperties(nil)
+			rp.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(ordinalLimitKey))
+			r, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(rp))
+			require.NoError(t, err)
+			assert.Equal(t, encryptedOrdinalLimit, r.NumRowGroups())
+			assert.EqualValues(t, encryptedOrdinalLimit+2, r.NumRows())
+		})
+	}
+
+	t.Run("unencrypted files are not limited", func(t *testing.T) {
+		props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
+		w, err := file.NewParquetWriterWithError(io.Discard, sc, file.WithWriterProps(props))
+		require.NoError(t, err)
+		for range encryptedOrdinalLimit + 1 {
+			rgw, err := w.AppendRowGroupChecked()
+			require.NoError(t, err)
+			cw, err := rgw.NextColumn()
+			require.NoError(t, err)
+			_, err = cw.(*file.Int32ColumnChunkWriter).WriteBatch([]int32{1}, nil, nil)
+			require.NoError(t, err)
+		}
+		require.NoError(t, w.Close())
+	})
+}
+
+func TestEncryptedColumnLimit(t *testing.T) {
+	newWriter := func(w io.Writer, columns int, opts ...parquet.WriterProperty) (*file.Writer, error) {
+		return file.NewParquetWriterWithError(w, newWideSchema(t, columns),
+			file.WithWriterProps(parquet.NewWriterProperties(opts...)))
+	}
+
+	t.Run("last allowed encrypted column is accepted", func(t *testing.T) {
+		w, err := newWriter(io.Discard, encryptedOrdinalLimit, encryptionOpt())
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+	})
+
+	t.Run("encrypted column after the limit is rejected before any write", func(t *testing.T) {
+		var buf bytes.Buffer
+		w, err := newWriter(&buf, encryptedOrdinalLimit+1, encryptionOpt())
+		require.ErrorContains(t, err, "cannot encrypt column")
+		require.Nil(t, w)
+		require.Zero(t, buf.Len())
+	})
+
+	t.Run("only the encrypted columns are checked", func(t *testing.T) {
+		w, err := newWriter(io.Discard, encryptedOrdinalLimit+1, encryptionOpt("c0"))
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+	})
+
+	t.Run("unencrypted files are not limited", func(t *testing.T) {
+		w, err := newWriter(io.Discard, encryptedOrdinalLimit+1)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+	})
+
+	t.Run("an encrypted column inside the wide range is rejected", func(t *testing.T) {
+		_, err := newWriter(io.Discard, encryptedOrdinalLimit+3, encryptionOpt("c32769"))
+		require.ErrorContains(t, err, `cannot encrypt column "c32769"`)
+	})
+}
+
 type byteLimitSink struct {
 	buf   bytes.Buffer
 	limit int
