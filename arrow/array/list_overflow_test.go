@@ -152,3 +152,32 @@ func TestListBuilderRejectsInt32OffsetOverflow(t *testing.T) {
 	defer arr.Release()
 	assert.Equal(t, 1, arr.Len())
 }
+
+func TestListViewBuilderUnmarshalOneRejectsInt32Overflow(t *testing.T) {
+	if strconv.IntSize == 32 {
+		t.Skip("requires 64-bit int")
+	}
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	bldr := NewListViewBuilder(mem, arrow.Null)
+	defer bldr.Release()
+
+	// A JSON list's size is only known after its elements are decoded, so seed the
+	// child length to make the decoded offset and size exceed the int32 domain.
+	vb := bldr.ValueBuilder().(*NullBuilder)
+	vb.length = math.MaxInt32
+	vb.nulls = math.MaxInt32
+
+	err := bldr.AppendValueFromString("[null]")
+	require.ErrorIs(t, err, arrow.ErrInvalid)
+	assert.Contains(t, err.Error(), "list-view size overflow")
+
+	vb.length = 1
+	vb.nulls = 1
+	arr := bldr.NewListViewArray()
+	defer arr.Release()
+	require.NoError(t, arr.ValidateFull())
+	assert.Equal(t, 1, arr.Len())
+}

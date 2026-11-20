@@ -1472,10 +1472,15 @@ func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 			return err
 		}
 		// consume ']'
-		_, err := dec.Token()
+		if _, err := dec.Token(); err != nil {
+			return err
+		}
+		// Unlike the sizes passed to AppendWithSize, a JSON list's size comes from
+		// the decoded data, so overflow is reported instead of panicking.
 		size := b.values.Len() - offset
-		if b.checkDimensions != nil {
-			b.checkDimensions(offset, size)
+		if b.checkDimensions != nil && (size < 0 || size > math.MaxInt32 ||
+			int64(offset)+int64(size) > math.MaxInt32) {
+			return fmt.Errorf("%w: list-view size overflow", arrow.ErrInvalid)
 		}
 		// replace the last size with the actual size
 		switch b.sizes.(type) {
@@ -1484,7 +1489,7 @@ func (b *baseListViewBuilder) UnmarshalOne(dec *json.Decoder) error {
 		case *Int64Builder:
 			b.sizes.(*Int64Builder).rawData[b.sizes.Len()-1] = int64(size)
 		}
-		return err
+		return nil
 	case nil:
 		b.AppendNull()
 	default:
