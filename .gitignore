@@ -22,3 +22,8 @@
 /dev/release/apache-rat-*.jar
 /dev/release/filtered_rat.txt
 /dev/release/rat.xml
+
+# A go.work over the root module and arrgen is the local way to build the
+# nested module against this tree rather than a released arrow-go.
+/go.work
+/go.work.sum
