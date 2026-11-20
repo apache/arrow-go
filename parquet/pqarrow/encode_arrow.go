@@ -31,7 +31,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -133,7 +132,7 @@ func decimal128FitsTargetPrecision(val decimal128.Num, precision int32) bool {
 }
 
 func decimal256FitsTargetPrecision(val decimal.Decimal256, precision int32) bool {
-	if precision <= 0 || precision > decimal256.MaxPrecision {
+	if precision <= 0 || precision > int32(decimal.MaxPrecision[decimal.Decimal256]()) {
 		return false
 	}
 	// Abs overflows for the minimum two's-complement value.

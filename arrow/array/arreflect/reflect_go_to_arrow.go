@@ -362,7 +362,7 @@ func appendDecimalValue(b array.Builder, v reflect.Value) error {
 	case *array.Decimal256Builder:
 		n, ok := reflect.TypeAssert[decimal.Decimal256](v)
 		if !ok {
-			return fmt.Errorf("expected decimal256.Num, got %s: %w", v.Type(), ErrTypeMismatch)
+			return fmt.Errorf("expected decimal.Decimal256, got %s: %w", v.Type(), ErrTypeMismatch)
 		}
 		tb.Append(n)
 	case *array.Decimal32Builder:

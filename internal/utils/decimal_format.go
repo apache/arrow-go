@@ -23,8 +23,8 @@ import (
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/decimal"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/decimal256"
 )
 
 // FormatDecimalG formats n, a value of type typ, in 'g' style. It returns an
@@ -39,7 +39,7 @@ func FormatDecimalG[T interface{ ToBigFloat(int32) *big.Float }](n T, typ arrow.
 	case arrow.DECIMAL128:
 		maxScale = decimal128.MaxScale
 	case arrow.DECIMAL256:
-		maxScale = decimal256.MaxScale
+		maxScale = int32(decimal.MaxScale[decimal.Decimal256]())
 	}
 	if maxScale > 0 && (scale < -maxScale || scale > maxScale) {
 		return "", fmt.Errorf("scale %d out of range for decimal%d, must be between %d and %d", scale, typ.BitWidth(), -maxScale, maxScale)
