@@ -200,25 +200,29 @@ func (r *mappedReaderImpl) dict(_ memory.Allocator, f *footerBlock, i int) (data
 	}, nil
 }
 
+// ipcDecoder holds what Reader and FileReader both need to turn dictionary
+// and record batch messages into arrays.
+type ipcDecoder struct {
+	schema *arrow.Schema
+	// fields dictTypeMap
+	memo           dictutils.Memo
+	mem            memory.Allocator
+	swapEndianness bool
+	zstd           zstdDecoders
+}
+
 // FileReader is an Arrow file reader.
 type FileReader struct {
+	ipcDecoder
+
 	r readerImpl
 
 	footer footerBlock
 
-	// fields dictTypeMap
-	memo dictutils.Memo
-
-	schema *arrow.Schema
 	record arrow.RecordBatch
 
 	irec int   // current record index. used for the arrio.Reader interface
 	err  error // last error
-
-	mem            memory.Allocator
-	swapEndianness bool
-
-	zstd zstdDecoders
 }
 
 // NewMappedFileReader is like NewFileReader but instead of using a ReadAtSeeker,
@@ -234,13 +238,12 @@ func NewMappedFileReader(data []byte, opts ...Option) (*FileReader, error) {
 	var (
 		cfg = newConfig(opts...)
 		f   = FileReader{
+			ipcDecoder: ipcDecoder{memo: dictutils.NewMemo(), mem: cfg.alloc},
 			r: &mappedReaderImpl{
 				data:            data,
 				maxMetadataSize: cfg.maxMetadataSize,
 				maxBodySize:     cfg.maxBodySize,
 			},
-			memo: dictutils.NewMemo(),
-			mem:  cfg.alloc,
 		}
 	)
 
@@ -256,13 +259,12 @@ func NewFileReader(r ReadAtSeeker, opts ...Option) (*FileReader, error) {
 	var (
 		cfg = newConfig(opts...)
 		f   = FileReader{
+			ipcDecoder: ipcDecoder{memo: dictutils.NewMemo(), mem: cfg.alloc},
 			r: &basicReaderImpl{
 				r:               r,
 				maxMetadataSize: cfg.maxMetadataSize,
 				maxBodySize:     cfg.maxBodySize,
 			},
-			memo: dictutils.NewMemo(),
-			mem:  cfg.alloc,
 		}
 	)
 
@@ -340,7 +342,7 @@ func (f *FileReader) readSchema(ensureNativeEndian bool) error {
 		}
 		kind, err = func() (dictutils.Kind, error) {
 			defer msg.Release()
-			return readDictionary(&f.memo, msg.meta, msg.body, f.swapEndianness, f.mem, &f.zstd)
+			return f.readDictionary(msg.meta, msg.body)
 		}()
 		if err != nil {
 			return err
@@ -479,17 +481,17 @@ func (f *FileReader) RecordBatchAt(i int) (arrow.RecordBatch, error) {
 		return nil, fmt.Errorf("arrow/ipc: message %d is not a RecordBatch", i)
 	}
 
-	return loadRecordBatch(f.schema, &f.memo, msg.meta, msg.body, f.swapEndianness, f.mem, &f.zstd)
+	return f.loadRecordBatch(msg.meta, msg.body)
 }
 
-func loadRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta, body *memory.Buffer, swapEndianness bool, mem memory.Allocator, zd *zstdDecoders) (rec arrow.RecordBatch, err error) {
+func (d *ipcDecoder) loadRecordBatch(meta, body *memory.Buffer) (rec arrow.RecordBatch, err error) {
 	defer func() {
 		if pErr := recover(); pErr != nil {
 			rec = nil
 			err = utils.FormatRecoveredError("arrow/ipc: error reading record batch", pErr)
 		}
 	}()
-	return newRecordBatch(schema, memo, meta, body, swapEndianness, mem, zd), nil
+	return d.newRecordBatch(meta, body), nil
 }
 
 // RecordAt returns the i-th record from the file. Ownership is transferred to the
@@ -523,7 +525,7 @@ func (f *FileReader) ReadAt(i int64) (arrow.RecordBatch, error) {
 	return f.RecordBatch(int(i))
 }
 
-func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator, zd *zstdDecoders) arrow.RecordBatch {
+func (d *ipcDecoder) newRecordBatch(meta, body *memory.Buffer) arrow.RecordBatch {
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.RecordBatch
@@ -534,7 +536,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 
 	bodyCompress := md.Compression(nil)
 	if bodyCompress != nil {
-		codec = getDecompressor(bodyCompress.Codec(), zd)
+		codec = getDecompressor(bodyCompress.Codec(), &d.zstd)
 		defer codec.Close()
 	}
 
@@ -548,24 +550,24 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 			meta:     &md,
 			rawBytes: body,
 			codec:    codec,
-			mem:      mem,
+			mem:      d.mem,
 		},
-		memo:    memo,
+		memo:    &d.memo,
 		max:     kMaxNestingDepth,
 		version: MetadataVersion(msg.Version()),
 	}
 
 	pos := dictutils.NewFieldPos()
-	cols := make([]arrow.Array, schema.NumFields())
-	for i := 0; i < schema.NumFields(); i++ {
-		data := ctx.loadArray(schema.Field(i).Type)
+	cols := make([]arrow.Array, d.schema.NumFields())
+	for i := 0; i < d.schema.NumFields(); i++ {
+		data := ctx.loadArray(d.schema.Field(i).Type)
 		defer data.Release()
 
-		if err := dictutils.ResolveFieldDict(memo, data, pos.Child(int32(i)), mem); err != nil {
+		if err := dictutils.ResolveFieldDict(&d.memo, data, pos.Child(int32(i)), d.mem); err != nil {
 			panic(err)
 		}
 
-		if swapEndianness {
+		if d.swapEndianness {
 			swapEndianArrayData(data.(*array.Data))
 		}
 
@@ -573,7 +575,7 @@ func newRecordBatch(schema *arrow.Schema, memo *dictutils.Memo, meta *memory.Buf
 		defer cols[i].Release()
 	}
 
-	return array.NewRecordBatchWithMetadata(schema, cols, rows, customMeta)
+	return array.NewRecordBatchWithMetadata(d.schema, cols, rows, customMeta)
 }
 
 type ipcSource struct {
@@ -912,7 +914,7 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
-func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buffer, swapEndianness bool, mem memory.Allocator, zd *zstdDecoders) (dictutils.Kind, error) {
+func (d *ipcDecoder) readDictionary(meta, body *memory.Buffer) (dictutils.Kind, error) {
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.DictionaryBatch
@@ -924,14 +926,14 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 	md.Data(&data)
 	bodyCompress := data.Compression(nil)
 	if bodyCompress != nil {
-		codec = getDecompressor(bodyCompress.Codec(), zd)
+		codec = getDecompressor(bodyCompress.Codec(), &d.zstd)
 		defer codec.Close()
 	}
 
 	id := md.Id()
 	// look up the dictionary value type, which must have been added to the
 	// memo already before calling this function
-	valueType, ok := memo.Type(id)
+	valueType, ok := d.memo.Type(id)
 	if !ok {
 		return 0, fmt.Errorf("arrow/ipc: no dictionary type found with id: %d", id)
 	}
@@ -941,24 +943,24 @@ func readDictionary(memo *dictutils.Memo, meta *memory.Buffer, body *memory.Buff
 			meta:     &data,
 			codec:    codec,
 			rawBytes: body,
-			mem:      mem,
+			mem:      d.mem,
 		},
-		memo: memo,
+		memo: &d.memo,
 		max:  kMaxNestingDepth,
 	}
 
 	dict := ctx.loadArray(valueType)
 	defer dict.Release()
 
-	if swapEndianness {
+	if d.swapEndianness {
 		swapEndianArrayData(dict.(*array.Data))
 	}
 
 	if md.IsDelta() {
-		memo.AddDelta(id, dict)
+		d.memo.AddDelta(id, dict)
 		return dictutils.KindDelta, nil
 	}
-	if memo.AddOrReplace(id, dict) {
+	if d.memo.AddOrReplace(id, dict) {
 		return dictutils.KindNew, nil
 	}
 	return dictutils.KindReplacement, nil

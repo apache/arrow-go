@@ -28,7 +28,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/dictutils"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
@@ -36,27 +35,22 @@ import (
 // Reader expects a schema (plus any dictionaries) as the first messages
 // in the stream, followed by records.
 type Reader struct {
-	r      MessageReader
-	schema *arrow.Schema
+	ipcDecoder
+
+	r MessageReader
 
 	refCount atomic.Int64
 	rec      arrow.RecordBatch
 	err      error
 
-	// types dictTypeMap
-	memo               dictutils.Memo
 	readInitialDicts   bool
 	done               bool
-	swapEndianness     bool
 	ensureNativeEndian bool
 	expectedSchema     *arrow.Schema
 
-	mem memory.Allocator
 	// size limits for the message readers this Reader creates itself
 	maxMetadataSize int64
 	maxBodySize     int64
-
-	zstd zstdDecoders
 }
 
 // NewReaderFromMessageReader allows constructing a new reader object with the
@@ -78,11 +72,9 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 	}
 
 	reader = &Reader{
-		r:        r,
-		refCount: atomic.Int64{},
-		// types:    make(dictTypeMap),
-		memo:               dictutils.NewMemo(),
-		mem:                cfg.alloc,
+		ipcDecoder:         ipcDecoder{memo: dictutils.NewMemo(), mem: cfg.alloc},
+		r:                  r,
+		refCount:           atomic.Int64{},
 		ensureNativeEndian: cfg.ensureNativeEndian,
 		expectedSchema:     cfg.schema,
 		maxMetadataSize:    cfg.maxMetadataSize,
@@ -114,11 +106,9 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 	cfg := newConfig(opts...)
 	mr := NewMessageReader(r, opts...)
 	rr = &Reader{
-		r:        mr,
-		refCount: atomic.Int64{},
-		// types:    make(dictTypeMap),
-		memo:               dictutils.NewMemo(),
-		mem:                cfg.alloc,
+		ipcDecoder:         ipcDecoder{memo: dictutils.NewMemo(), mem: cfg.alloc},
+		r:                  mr,
+		refCount:           atomic.Int64{},
 		ensureNativeEndian: cfg.ensureNativeEndian,
 		expectedSchema:     cfg.schema,
 		maxMetadataSize:    cfg.maxMetadataSize,
@@ -244,7 +234,7 @@ func (r *Reader) getInitialDicts() bool {
 			r.err = fmt.Errorf("arrow/ipc: IPC stream did not have the expected (%d) dictionaries at the start of the stream", numDicts)
 			return false
 		}
-		if _, err := readDictionary(&r.memo, msg.meta, msg.body, r.swapEndianness, r.mem, &r.zstd); err != nil {
+		if _, err := r.readDictionary(msg.meta, msg.body); err != nil {
 			r.done = true
 			r.err = err
 			return false
@@ -279,7 +269,7 @@ func (r *Reader) next() bool {
 	msg, r.err = r.r.Message()
 
 	for msg != nil && msg.Type() == MessageDictionaryBatch {
-		if _, r.err = readDictionary(&r.memo, msg.meta, msg.body, r.swapEndianness, r.mem, &r.zstd); r.err != nil {
+		if _, r.err = r.readDictionary(msg.meta, msg.body); r.err != nil {
 			r.done = true
 			return false
 		}
@@ -307,7 +297,7 @@ func (r *Reader) next() bool {
 		return false
 	}
 
-	r.rec = newRecordBatch(r.schema, &r.memo, msg.meta, msg.body, r.swapEndianness, r.mem, &r.zstd)
+	r.rec = r.newRecordBatch(msg.meta, msg.body)
 	return true
 }
 
