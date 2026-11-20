@@ -612,6 +612,90 @@ func TestRecordReaderSeekToCorruptPage(t *testing.T) {
 	assert.ErrorContains(t, rr.Err(), "invalid checksum")
 }
 
+func TestRecordReaderSeekToRowRepeatedV1WithoutPageIndex(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	const nrows = 300
+	sb := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+	defer sb.Release()
+	vb := sb.ValueBuilder().(*array.Int32Builder)
+	for i := 0; i < nrows; i++ {
+		sb.Append(true)
+		vb.AppendValues([]int32{int32(3 * i), int32(3*i + 1), int32(3*i + 2)}, nil)
+	}
+	col := sb.NewListArray()
+	defer col.Release()
+
+	lstField := arrow.Field{Name: "lst", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32), Nullable: true}
+	column := arrow.NewColumnFromArr(lstField, col)
+	defer column.Release()
+
+	tbl := array.NewTable(
+		arrow.NewSchema([]arrow.Field{lstField}, nil),
+		[]arrow.Column{column}, nrows)
+	defer tbl.Release()
+
+	for _, pageVersion := range []parquet.DataPageVersion{parquet.DataPageV1, parquet.DataPageV2} {
+		t.Run(fmt.Sprintf("page-v%d", int(pageVersion)+1), func(t *testing.T) {
+			var buf bytes.Buffer
+			wrProps := parquet.NewWriterProperties(
+				parquet.WithDataPageVersion(pageVersion),
+				parquet.WithDictionaryDefault(false),
+				parquet.WithDataPageSize(256),
+				parquet.WithBatchSize(16),
+				parquet.WithPageIndexEnabled(false),
+			)
+			require.NoError(t, pqarrow.WriteTable(tbl, &buf, nrows, wrProps, pqarrow.NewArrowWriterProperties()))
+
+			for _, seekRow := range []int64{0, 1, 150, 299} {
+				t.Run(fmt.Sprintf("seek=%d", seekRow), func(t *testing.T) {
+					pf, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(mem)))
+					require.NoError(t, err)
+					defer pf.Close()
+
+					reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{BatchSize: 1024}, mem)
+					require.NoError(t, err)
+
+					rr, err := reader.GetRecordReader(context.Background(), nil, nil)
+					require.NoError(t, err)
+					defer rr.Release()
+
+					require.NoError(t, rr.SeekToRow(seekRow))
+
+					totalRows := 0
+					var firstRow []int32
+					for {
+						rec, err := rr.Read()
+						if errors.Is(err, io.EOF) {
+							break
+						}
+						require.NoError(t, err)
+
+						lst := rec.Column(0).(*array.List)
+						for i := 0; i < lst.Len(); i++ {
+							if totalRows == 0 {
+								s, e := lst.ValueOffsets(0)
+								v := lst.ListValues().(*array.Int32)
+								for j := s; j < e; j++ {
+									firstRow = append(firstRow, v.Value(int(j)))
+								}
+							}
+							totalRows++
+						}
+						rec.Release()
+					}
+
+					// Row seekRow holds [3*seekRow, 3*seekRow+1, 3*seekRow+2]
+					// and nrows-seekRow rows remain to the end.
+					assert.Equal(t, int(nrows-seekRow), totalRows)
+					assert.Equal(t, []int32{int32(3 * seekRow), int32(3*seekRow + 1), int32(3*seekRow + 2)}, firstRow)
+				})
+			}
+		})
+	}
+}
+
 func TestRecordReaderMultiRowGroup(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
