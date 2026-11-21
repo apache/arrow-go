@@ -168,18 +168,18 @@ func (blk fileBlock) section() io.Reader {
 	return io.NewSectionReader(blk.r, blk.offset, int64(blk.meta)+blk.body)
 }
 
-func unitFromFB(unit flatbuf.TimeUnit) arrow.TimeUnit {
+func unitFromFB(unit flatbuf.TimeUnit) (arrow.TimeUnit, error) {
 	switch unit {
 	case flatbuf.TimeUnitSECOND:
-		return arrow.Second
+		return arrow.Second, nil
 	case flatbuf.TimeUnitMILLISECOND:
-		return arrow.Millisecond
+		return arrow.Millisecond, nil
 	case flatbuf.TimeUnitMICROSECOND:
-		return arrow.Microsecond
+		return arrow.Microsecond, nil
 	case flatbuf.TimeUnitNANOSECOND:
-		return arrow.Nanosecond
+		return arrow.Nanosecond, nil
 	default:
-		panic(fmt.Errorf("arrow/ipc: invalid flatbuf.TimeUnit(%d) value", unit))
+		return 0, fmt.Errorf("arrow/ipc: invalid flatbuf.TimeUnit(%d) value", unit)
 	}
 }
 
@@ -814,6 +814,8 @@ func concreteTypeFromFB(typ flatbuf.Type, data flatbuffers.Table, children []arr
 			mode = arrow.SparseMode
 		case flatbuf.UnionModeDense:
 			mode = arrow.DenseMode
+		default:
+			return nil, fmt.Errorf("arrow/ipc: invalid union mode: %d", dt.Mode())
 		}
 
 		typeIDLen := dt.TypeIdsLength()
@@ -992,7 +994,10 @@ func decimalFromFB(data flatbuf.Decimal) (arrow.DataType, error) {
 
 func timeFromFB(data flatbuf.Time) (arrow.DataType, error) {
 	bw := data.BitWidth()
-	unit := unitFromFB(data.Unit())
+	unit, err := unitFromFB(data.Unit())
+	if err != nil {
+		return nil, err
+	}
 
 	switch bw {
 	case 32:
@@ -1019,7 +1024,10 @@ func timeFromFB(data flatbuf.Time) (arrow.DataType, error) {
 }
 
 func timestampFromFB(data flatbuf.Timestamp) (arrow.DataType, error) {
-	unit := unitFromFB(data.Unit())
+	unit, err := unitFromFB(data.Unit())
+	if err != nil {
+		return nil, err
+	}
 	tz := string(data.Timezone())
 	return &arrow.TimestampType{Unit: unit, TimeZone: tz}, nil
 }

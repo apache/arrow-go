@@ -914,7 +914,14 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
-func (d *ipcDecoder) readDictionary(meta, body *memory.Buffer) (dictutils.Kind, error) {
+func (d *ipcDecoder) readDictionary(meta, body *memory.Buffer) (kind dictutils.Kind, err error) {
+	// flatbuffer accessors panic on out-of-range offsets in malformed metadata
+	defer func() {
+		if pErr := recover(); pErr != nil {
+			kind = 0
+			err = utils.FormatRecoveredError("arrow/ipc: error reading dictionary batch", pErr)
+		}
+	}()
 	var (
 		msg   = flatbuf.GetRootAsMessage(meta.Bytes(), 0)
 		md    flatbuf.DictionaryBatch
