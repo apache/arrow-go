@@ -146,6 +146,9 @@ type PrimitiveNode struct {
 	physicalType    parquet.Type
 	typeLen         int
 	decimalMetaData DecimalMetadata
+	// the thrift schema element carried a logical type this version does not know, so
+	// readers must ignore the column order too (LogicalTypes.md, "Unsupported Logical Types")
+	unknownLogical bool
 }
 
 // NewPrimitiveNodeLogical constructs a Primitive node using the provided logical type for a given
@@ -269,9 +272,13 @@ func PrimitiveNodeFromThrift(elem *format.SchemaElement) (*PrimitiveNode, error)
 	}
 
 	if elem.IsSetLogicalType() {
-		return NewPrimitiveNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()),
-			getLogicalType(elem.GetLogicalType()), parquet.Type(elem.GetType()), int(elem.GetTypeLength()),
-			fieldID)
+		logical := getLogicalType(elem.GetLogicalType())
+		n, err := NewPrimitiveNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()),
+			logical, parquet.Type(elem.GetType()), int(elem.GetTypeLength()), fieldID)
+		if err == nil && logical.IsNone() {
+			n.unknownLogical = true
+		}
+		return n, err
 	} else if elem.IsSetConvertedType() {
 		return NewPrimitiveNodeConverted(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()),
 			parquet.Type(elem.GetType()), ConvertedType(elem.GetConvertedType()),
@@ -477,7 +484,12 @@ func GroupNodeFromThrift(elem *format.SchemaElement, fields FieldList) (*GroupNo
 	}
 
 	if elem.IsSetLogicalType() {
-		return NewGroupNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()), fields, getLogicalType(elem.GetLogicalType()), id)
+		logical := getLogicalType(elem.GetLogicalType())
+		if logical.IsNone() {
+			// a logical type this version does not know is ignored, as is the converted type
+			return NewGroupNodeConverted(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()), fields, ConvertedTypes.None, id)
+		}
+		return NewGroupNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()), fields, logical, id)
 	}
 
 	converted := ConvertedTypes.None

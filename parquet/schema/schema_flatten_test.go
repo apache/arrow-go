@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	format "github.com/apache/arrow-go/v18/parquet/internal/gen-go/parquet"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -146,11 +147,12 @@ func TestInvalidConvertedTypeInDeserialize(t *testing.T) {
 	assert.True(t, n.LogicalType().IsValid())
 	assert.True(t, n.LogicalType().IsSerialized())
 	intermediary := n.toThrift()
-	// corrupt it
+	// an empty union is what the thrift decoder leaves for a logical type it does not
+	// know, which readers ignore
 	intermediary.LogicalType.STRING = nil
-	assert.Panics(t, func() {
-		PrimitiveNodeFromThrift(intermediary)
-	})
+	node, err := PrimitiveNodeFromThrift(intermediary)
+	require.NoError(t, err)
+	assert.True(t, node.LogicalType().IsNone())
 }
 
 func TestInvalidTimeUnitInTimeLogical(t *testing.T) {
