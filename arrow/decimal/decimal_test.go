@@ -183,6 +183,47 @@ func TestDecimalToReal(t *testing.T) {
 	assert.Zero(t, want.Cmp(decimal.Decimal64(3).ToBigFloat(28)))
 }
 
+func TestDecimalFromFloat64ExactScaling(t *testing.T) {
+	tests := []struct {
+		val              float64
+		precision, scale int32
+		expected         string
+	}{
+		{1, 24, 23, "100000000000000000000000"},
+		{-1, 24, 23, "-100000000000000000000000"},
+		{12345678, 26, 18, "12345678000000000000000000"},
+		{-12345678, 26, 18, "-12345678000000000000000000"},
+		{0.125, 24, 23, "12500000000000000000000"},
+		{0.5, 38, 38, "50000000000000000000000000000000000000"},
+		{1844674407370955.5, 20, 4, "18446744073709555000"},
+		{1.25, 2, 1, "12"},
+		{1.75, 2, 1, "18"},
+		{math.Nextafter(1.25, 0), 2, 1, "12"},
+		{math.Nextafter(1.25, 2), 2, 1, "13"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%g/%d/%d", tt.val, tt.precision, tt.scale), func(t *testing.T) {
+			n128, err := decimal.Decimal128FromFloat(tt.val, tt.precision, tt.scale)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, n128.BigInt().String())
+
+			n256, err := decimal.Decimal256FromFloat(tt.val, tt.precision, tt.scale)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, n256.BigInt().String())
+		})
+	}
+
+	n, err := decimal.Decimal256FromFloat(0.5, 76, 76)
+	require.NoError(t, err)
+	assert.Equal(t, "5000000000000000000000000000000000000000000000000000000000000000000000000000", n.BigInt().String())
+
+	_, err = decimal.Decimal128FromFloat(1, 23, 23)
+	require.Error(t, err)
+	_, err = decimal.Decimal256FromFloat(1, 23, 23)
+	require.Error(t, err)
+}
+
 func TestDecimalFromFloat(t *testing.T) {
 	tests := []struct {
 		val              float64

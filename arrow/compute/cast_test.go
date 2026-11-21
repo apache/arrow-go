@@ -1464,6 +1464,12 @@ func (c *CastSuite) TestFloatingToDecimal() {
 	type decFunc func(int32, int32) arrow.DataType
 
 	for _, decType := range []decFunc{dec128, dec256} {
+		c.checkCast(arrow.PrimitiveTypes.Float64, decType(24, 23),
+			`[1, -1, null]`, `["1.00000000000000000000000", "-1.00000000000000000000000", null]`)
+
+		c.checkCast(arrow.PrimitiveTypes.Float64, decType(26, 18),
+			`[12345678, -12345678]`, `["12345678.000000000000000000", "-12345678.000000000000000000"]`)
+
 		// 2**64 + 2**41 (exactly representable as a float)
 		c.checkCast(arrow.PrimitiveTypes.Float32, decType(20, 0),
 			`[1.8446746e+19, -1.8446746e+19]`,
@@ -1479,7 +1485,7 @@ func (c *CastSuite) TestFloatingToDecimal() {
 
 		c.checkCast(arrow.PrimitiveTypes.Float64, decType(20, 4),
 			`[1.8446744073709556e+15, -1.8446744073709556e+15]`,
-			`[1844674407370955.5712, -1844674407370955.5712]`)
+			`[1844674407370955.5000, -1844674407370955.5000]`)
 	}
 }
 

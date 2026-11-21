@@ -325,6 +325,26 @@ func scalePositiveFloat64_256(v float64, prec, scale int32) (float64, error) {
 }
 
 func fromPositiveFloat64_256(v float64, prec, scale int32) (Decimal256, error) {
+	if scale >= 0 && scale <= int32(MaxScale[Decimal256]()) {
+		// Scale the exact binary value using integers, then round to nearest even.
+		// Multiplying in float64 can lose coefficient digits before rounding.
+		r := new(big.Rat).SetFloat64(v)
+		if r == nil {
+			return Decimal256{}, fmt.Errorf("cannot convert %f to decimal256", v)
+		}
+		coefficient := new(big.Int).Mul(r.Num(), scaleMultipliers256[scale].BigInt())
+		var remainder big.Int
+		coefficient.QuoRem(coefficient, r.Denom(), &remainder)
+		cmp := remainder.Lsh(&remainder, 1).Cmp(r.Denom())
+		if cmp > 0 || (cmp == 0 && coefficient.Bit(0) != 0) {
+			coefficient.Add(coefficient, big.NewInt(1))
+		}
+		if coefficient.Cmp(scaleMultipliers256[prec].BigInt()) >= 0 {
+			return Decimal256{}, fmt.Errorf("cannot convert %f to decimal256(precision=%d, scale=%d): overflow", v, prec, scale)
+		}
+		return Decimal256FromBigInt(coefficient), nil
+	}
+
 	val, err := scalePositiveFloat64_256(v, prec, scale)
 	if err != nil {
 		return Decimal256{}, err
