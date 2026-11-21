@@ -42,6 +42,8 @@ func (fn *compareFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel, er
 		return nil, err
 	}
 
+	ensureDictionaryDecoded(vals...)
+
 	if hasDecimal(vals...) {
 		if err := castBinaryDecimalArgs(decPromoteAdd, vals...); err != nil {
 			return nil, err
@@ -55,7 +57,6 @@ func (fn *compareFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel, er
 		return kn, nil
 	}
 
-	ensureDictionaryDecoded(vals...)
 	ensureNoExtensionType(vals...)
 	replaceNullWithOtherType(vals...)
 	if err := validateTimestampTimezones(vals...); err != nil {

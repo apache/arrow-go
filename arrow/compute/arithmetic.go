@@ -114,6 +114,8 @@ func (fn *arithmeticFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel,
 		return nil, err
 	}
 
+	ensureDictionaryDecoded(vals...)
+
 	if err := fn.checkDecimals(vals...); err != nil {
 		return nil, err
 	}
@@ -121,8 +123,6 @@ func (fn *arithmeticFunction) DispatchBest(vals ...arrow.DataType) (exec.Kernel,
 	if kn, err := fn.DispatchExact(vals...); err == nil {
 		return kn, nil
 	}
-
-	ensureDictionaryDecoded(vals...)
 
 	// only promote types for binary funcs
 	if len(vals) == 2 {
