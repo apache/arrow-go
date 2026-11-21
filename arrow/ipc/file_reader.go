@@ -771,6 +771,7 @@ func (ctx *arrayLoaderContext) loadNull() arrow.ArrayData {
 
 func (ctx *arrayLoaderContext) loadPrimitive(dt arrow.DataType) arrow.ArrayData {
 	field, buffers := ctx.loadCommon(dt.ID(), 2)
+	defer func() { memory.ReleaseBuffers(buffers) }()
 
 	switch field.Length() {
 	case 0:
@@ -780,15 +781,14 @@ func (ctx *arrayLoaderContext) loadPrimitive(dt arrow.DataType) arrow.ArrayData 
 		buffers = append(buffers, ctx.buffer())
 	}
 
-	defer memory.ReleaseBuffers(buffers)
-
 	return array.NewData(dt, int(field.Length()), buffers, nil, int(field.NullCount()), 0)
 }
 
 func (ctx *arrayLoaderContext) loadBinary(dt arrow.DataType) arrow.ArrayData {
 	field, buffers := ctx.loadCommon(dt.ID(), 3)
-	buffers = append(buffers, ctx.buffer(), ctx.buffer())
-	defer memory.ReleaseBuffers(buffers)
+	defer func() { memory.ReleaseBuffers(buffers) }()
+	buffers = append(buffers, ctx.buffer())
+	buffers = append(buffers, ctx.buffer())
 
 	return array.NewData(dt, int(field.Length()), buffers, nil, int(field.NullCount()), 0)
 }
@@ -796,27 +796,27 @@ func (ctx *arrayLoaderContext) loadBinary(dt arrow.DataType) arrow.ArrayData {
 func (ctx *arrayLoaderContext) loadBinaryView(dt arrow.DataType) arrow.ArrayData {
 	nVariadicBufs := ctx.variadic()
 	field, buffers := ctx.loadCommon(dt.ID(), 2+int(nVariadicBufs))
+	defer func() { memory.ReleaseBuffers(buffers) }()
 	buffers = append(buffers, ctx.buffer())
 	for i := 0; i < int(nVariadicBufs); i++ {
 		buffers = append(buffers, ctx.buffer())
 	}
-	defer memory.ReleaseBuffers(buffers)
 
 	return array.NewData(dt, int(field.Length()), buffers, nil, int(field.NullCount()), 0)
 }
 
 func (ctx *arrayLoaderContext) loadFixedSizeBinary(dt *arrow.FixedSizeBinaryType) arrow.ArrayData {
 	field, buffers := ctx.loadCommon(dt.ID(), 2)
+	defer func() { memory.ReleaseBuffers(buffers) }()
 	buffers = append(buffers, ctx.buffer())
-	defer memory.ReleaseBuffers(buffers)
 
 	return array.NewData(dt, int(field.Length()), buffers, nil, int(field.NullCount()), 0)
 }
 
 func (ctx *arrayLoaderContext) loadMap(dt *arrow.MapType) arrow.ArrayData {
 	field, buffers := ctx.loadCommon(dt.ID(), 2)
+	defer func() { memory.ReleaseBuffers(buffers) }()
 	buffers = append(buffers, ctx.buffer())
-	defer memory.ReleaseBuffers(buffers)
 
 	sub := ctx.loadChild(dt.Elem())
 	defer sub.Release()
@@ -826,8 +826,8 @@ func (ctx *arrayLoaderContext) loadMap(dt *arrow.MapType) arrow.ArrayData {
 
 func (ctx *arrayLoaderContext) loadList(dt arrow.ListLikeType) arrow.ArrayData {
 	field, buffers := ctx.loadCommon(dt.ID(), 2)
+	defer func() { memory.ReleaseBuffers(buffers) }()
 	buffers = append(buffers, ctx.buffer())
-	defer memory.ReleaseBuffers(buffers)
 
 	sub := ctx.loadChild(dt.Elem())
 	defer sub.Release()
@@ -837,8 +837,9 @@ func (ctx *arrayLoaderContext) loadList(dt arrow.ListLikeType) arrow.ArrayData {
 
 func (ctx *arrayLoaderContext) loadListView(dt arrow.VarLenListLikeType) arrow.ArrayData {
 	field, buffers := ctx.loadCommon(dt.ID(), 3)
-	buffers = append(buffers, ctx.buffer(), ctx.buffer())
-	defer memory.ReleaseBuffers(buffers)
+	defer func() { memory.ReleaseBuffers(buffers) }()
+	buffers = append(buffers, ctx.buffer())
+	buffers = append(buffers, ctx.buffer())
 
 	sub := ctx.loadChild(dt.Elem())
 	defer sub.Release()
@@ -861,14 +862,16 @@ func (ctx *arrayLoaderContext) loadStruct(dt *arrow.StructType) arrow.ArrayData 
 	defer memory.ReleaseBuffers(buffers)
 
 	subs := make([]arrow.ArrayData, dt.NumFields())
+	defer func() {
+		for _, sub := range subs {
+			if sub != nil {
+				sub.Release()
+			}
+		}
+	}()
 	for i, f := range dt.Fields() {
 		subs[i] = ctx.loadChild(f.Type)
 	}
-	defer func() {
-		for i := range subs {
-			subs[i].Release()
-		}
-	}()
 
 	return array.NewData(dt, int(field.Length()), buffers, subs, int(field.NullCount()), 0)
 }
@@ -882,6 +885,7 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 	}
 
 	field, buffers := ctx.loadCommon(dt.ID(), nBuffers)
+	defer func() { memory.ReleaseBuffers(buffers) }()
 	if field.NullCount() != 0 && buffers[0] != nil {
 		panic("arrow/ipc: cannot read pre-1.0.0 union array with top-level validity bitmap")
 	}
@@ -901,16 +905,17 @@ func (ctx *arrayLoaderContext) loadUnion(dt arrow.UnionType) arrow.ArrayData {
 		}
 	}
 
-	defer memory.ReleaseBuffers(buffers)
 	subs := make([]arrow.ArrayData, dt.NumFields())
+	defer func() {
+		for _, sub := range subs {
+			if sub != nil {
+				sub.Release()
+			}
+		}
+	}()
 	for i, f := range dt.Fields() {
 		subs[i] = ctx.loadChild(f.Type)
 	}
-	defer func() {
-		for i := range subs {
-			subs[i].Release()
-		}
-	}()
 	return array.NewData(dt, int(field.Length()), buffers, subs, 0, 0)
 }
 
