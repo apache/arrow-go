@@ -151,6 +151,17 @@ func writeArrowValuesSpaced[T byteArrayArrowOffset](w *ByteArrayColumnChunkWrite
 	}
 }
 
+const maxSafeArrowBatchDataSize int64 = 1 << 30
+
+func arrowBatchFits[T byteArrayArrowOffset](offsets []T, first, count int64) bool {
+	if count <= 0 {
+		return true
+	}
+	start, end := int64(offsets[first]), int64(offsets[first+count])
+	return start >= 0 && end >= start && count <= maxSafeArrowBatchDataSize/4 &&
+		end-start <= maxSafeArrowBatchDataSize-4*count
+}
+
 func writeBatchArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter, values []byte, offsets []T, defLevels, repLevels []int16) (valueOffset int64) {
 	var n int64
 	if defLevels != nil {
@@ -162,7 +173,6 @@ func writeBatchArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter, valu
 		return 0
 	}
 
-	const maxSafeBatchDataSize int64 = 1 << 30
 	batchSize := w.props.WriteBatchSize()
 	maxDefLevel := w.descr.MaxDefinitionLevel()
 	requiresRowAlignment := (w.props.DataPageVersion() != parquet.DataPageV1 ||
@@ -188,18 +198,22 @@ func writeBatchArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter, valu
 		remaining := n - levelOffset
 		batch := min(remaining, batchSize)
 
-		var cumDataSize int64
-		valueScan := valueOffset
-		for li := int64(0); li < batch; li++ {
-			isValue := defLevels == nil || maxDefLevel == 0 || defLevels[levelOffset+li] == maxDefLevel
-			if isValue && valueScan < valueCount {
-				valueSize := int64(offsets[valueScan+1]) - int64(offsets[valueScan]) + 4
-				if cumDataSize+valueSize > maxSafeBatchDataSize && li > 0 {
-					batch = li
-					break
+		// At most batch physical values can be present. Usually their full
+		// range fits, even when definition levels lower the actual count.
+		if !arrowBatchFits(offsets, valueOffset, min(batch, valueCount-valueOffset)) {
+			var cumDataSize int64
+			valueScan := valueOffset
+			for li := int64(0); li < batch; li++ {
+				isValue := defLevels == nil || maxDefLevel == 0 || defLevels[levelOffset+li] == maxDefLevel
+				if isValue && valueScan < valueCount {
+					valueSize := int64(offsets[valueScan+1]) - int64(offsets[valueScan]) + 4
+					if cumDataSize+valueSize > maxSafeArrowBatchDataSize && li > 0 {
+						batch = li
+						break
+					}
+					cumDataSize += valueSize
+					valueScan++
 				}
-				cumDataSize += valueSize
-				valueScan++
 			}
 		}
 
@@ -237,7 +251,6 @@ func writeBatchSpacedArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter
 		return 0
 	}
 
-	const maxSafeBatchDataSize int64 = 1 << 30
 	batchSize := w.props.WriteBatchSize()
 	requiresRowAlignment := (w.props.DataPageVersion() != parquet.DataPageV1 ||
 		w.props.PageIndexEnabledFor(w.descr.Path())) &&
@@ -263,14 +276,16 @@ func writeBatchSpacedArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter
 		remaining := n - levelOffset
 		batch := min(remaining, batchSize)
 
-		var cumDataSize int64
-		for vi := int64(0); vi < batch && valueOffset+vi < valueCount; vi++ {
-			valueSize := int64(offsets[valueOffset+vi+1]) - int64(offsets[valueOffset+vi]) + 4
-			if cumDataSize+valueSize > maxSafeBatchDataSize && vi > 0 {
-				batch = vi
-				break
+		if !arrowBatchFits(offsets, valueOffset, min(batch, valueCount-valueOffset)) {
+			var cumDataSize int64
+			for vi := int64(0); vi < batch && valueOffset+vi < valueCount; vi++ {
+				valueSize := int64(offsets[valueOffset+vi+1]) - int64(offsets[valueOffset+vi]) + 4
+				if cumDataSize+valueSize > maxSafeArrowBatchDataSize && vi > 0 {
+					batch = vi
+					break
+				}
+				cumDataSize += valueSize
 			}
-			cumDataSize += valueSize
 		}
 
 		if requiresRowAlignment {
@@ -303,8 +318,7 @@ func writeBatchSpacedArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter
 }
 
 // WriteBatchArrow writes Arrow binary data using its value buffer and 32-bit offsets.
-// The active encoder must support Arrow offsets; dictionary encoders use the existing
-// parquet.ByteArray path instead.
+// The active encoder must support Arrow offsets.
 func (w *ByteArrayColumnChunkWriter) WriteBatchArrow(values []byte, offsets []int32, defLevels, repLevels []int16) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {

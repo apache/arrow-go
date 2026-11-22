@@ -78,6 +78,41 @@ func (enc *PlainByteArrayEncoder) PutArrowSpaced64(values []byte, offsets []int6
 	putArrowPlainSpaced(enc.sink, values, offsets, validBits, validBitsOffset)
 }
 
+func putArrowDictionary[T arrowByteArrayOffset](enc *DictByteArrayEncoder, values []byte, offsets []T) {
+	for i := 1; i < len(offsets); i++ {
+		enc.PutByteArray(values[offsets[i-1]:offsets[i]])
+	}
+}
+
+func putArrowDictionarySpaced[T arrowByteArrayOffset](enc *DictByteArrayEncoder, values []byte, offsets []T, validBits []byte, validBitsOffset int64) {
+	if len(offsets) < 2 {
+		return
+	}
+	if validBits == nil {
+		putArrowDictionary(enc, values, offsets)
+		return
+	}
+	bitutils.VisitSetBitRunsNoErr(validBits, validBitsOffset, int64(len(offsets)-1), func(pos, length int64) {
+		putArrowDictionary(enc, values, offsets[pos:pos+length+1])
+	})
+}
+
+func (enc *DictByteArrayEncoder) PutArrow(values []byte, offsets []int32) {
+	putArrowDictionary(enc, values, offsets)
+}
+
+func (enc *DictByteArrayEncoder) PutArrow64(values []byte, offsets []int64) {
+	putArrowDictionary(enc, values, offsets)
+}
+
+func (enc *DictByteArrayEncoder) PutArrowSpaced(values []byte, offsets []int32, validBits []byte, validBitsOffset int64) {
+	putArrowDictionarySpaced(enc, values, offsets, validBits, validBitsOffset)
+}
+
+func (enc *DictByteArrayEncoder) PutArrowSpaced64(values []byte, offsets []int64, validBits []byte, validBitsOffset int64) {
+	putArrowDictionarySpaced(enc, values, offsets, validBits, validBitsOffset)
+}
+
 func putArrowDeltaLength[T arrowByteArrayOffset](enc *DeltaLengthByteArrayEncoder, values []byte, offsets []T, validBits []byte, validBitsOffset int64) {
 	if len(offsets) < 2 {
 		return

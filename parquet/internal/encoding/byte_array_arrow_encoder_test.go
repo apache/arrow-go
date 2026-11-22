@@ -129,6 +129,47 @@ func TestPlainByteArrayArrowOffsets(t *testing.T) {
 	t.Run("int64", testPlainByteArrayArrowOffsets[int64])
 }
 
+func TestDictByteArrayArrowOffsets(t *testing.T) {
+	values, data, offsets32, offsets64 := arrowByteArrayInput()
+	values, offsets32, offsets64 = values[1:], offsets32[1:], offsets64[1:]
+	valid := []byte{0b10110100}
+	const bitOffset = 2
+
+	for _, spaced := range []bool{false, true} {
+		newEncoder := func() *DictByteArrayEncoder {
+			return NewEncoder(parquet.Types.ByteArray, parquet.Encodings.PlainDict, true, nil, memory.DefaultAllocator).(*DictByteArrayEncoder)
+		}
+		expected, narrow, wide := newEncoder(), newEncoder(), newEncoder()
+		defer expected.Release()
+		defer narrow.Release()
+		defer wide.Release()
+		if spaced {
+			expected.PutSpaced(values, valid, bitOffset)
+			narrow.PutArrowSpaced(data, offsets32, valid, bitOffset)
+			wide.PutArrowSpaced64(data, offsets64, valid, bitOffset)
+		} else {
+			expected.Put(values)
+			narrow.PutArrow(data, offsets32)
+			wide.PutArrow64(data, offsets64)
+		}
+		expectedDict := make([]byte, expected.DictEncodedSize())
+		expected.WriteDict(expectedDict)
+		expectedIndices, err := expected.FlushValues()
+		require.NoError(t, err)
+		defer expectedIndices.Release()
+
+		for _, enc := range []*DictByteArrayEncoder{narrow, wide} {
+			dict := make([]byte, enc.DictEncodedSize())
+			enc.WriteDict(dict)
+			require.Equal(t, expectedDict, dict)
+			indices, err := enc.FlushValues()
+			require.NoError(t, err)
+			require.Equal(t, expectedIndices.Bytes(), indices.Bytes())
+			indices.Release()
+		}
+	}
+}
+
 func testPlainByteArrayArrowOffsets[T arrowByteArrayOffset](t *testing.T) {
 	t.Helper()
 	values, data, offsets32, _ := arrowByteArrayInput()
