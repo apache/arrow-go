@@ -21,6 +21,7 @@ package hashing
 
 import (
 	"bytes"
+	"encoding/binary"
 	"unsafe"
 )
 
@@ -231,61 +232,57 @@ func (BinaryMemoTable) valAsByteSlice(val interface{}) []byte {
 	}
 }
 
-// helper function to get the hash value regardless of the underlying binary type
-func (BinaryMemoTable) getHash(val interface{}) uint64 {
-	switch v := val.(type) {
-	case string:
-		return hashString(v, 0)
-	case []byte:
-		return Hash(v, 0)
-	case ByteSlice:
-		return Hash(v.Bytes(), 0)
-	default:
-		panic("invalid type for binarymemotable")
+const packedBinaryKey = uint64(1) << 63
+
+func binaryMemoHash(value []byte) uint64 {
+	if len(value) > 7 {
+		return Hash(value, 0) &^ packedBinaryKey
 	}
+	// Up to seven bytes and their length fit in 63 bits. The odd
+	// multiplication and xorshift are bijective in that space.
+	var packed [8]byte
+	copy(packed[:], value)
+	packed[7] = byte(len(value))
+	key := binary.LittleEndian.Uint64(packed[:])
+	key = (key * 0x9e3779b97f4a7c15) &^ packedBinaryKey
+	return (key ^ (key >> 31)) | packedBinaryKey
 }
 
 func (b *BinaryMemoTable) lookup(h uint64, val []byte) (*entry[int32], bool) {
-	return b.tbl.Lookup(h, func(i int32) bool {
-		return bytes.Equal(val, b.builder.Value(int(i)))
-	})
-}
-
-func (b *BinaryMemoTable) Exists(val []byte) bool {
-	_, ok := b.lookup(b.getHash(val), val)
-	return ok
-}
-
-// ExistsDirect checks if val exists in the table by inlining the hash
-// table probe loop directly. This avoids the closure allocation that
-// occurs in the normal Exists -> lookup -> HashTable.Lookup path,
-// where the comparison closure captures val and causes it to escape
-// to the heap.
-func (b *BinaryMemoTable) ExistsDirect(val []byte) bool {
 	const perturbShift uint8 = 5
 
-	h := Hash(val, 0)
 	v := b.tbl.fixHash(h)
 	idx := v & b.tbl.capMask
 	perturb := (v >> uint64(perturbShift)) + 1
 
 	for {
 		e := &b.tbl.entries[idx]
-		if e.h == v && bytes.Equal(val, b.builder.Value(int(e.payload.val))) {
-			return true
+		if e.h == v && (v&packedBinaryKey != 0 || bytes.Equal(val, b.builder.Value(int(e.payload.val)))) {
+			return e, true
 		}
 		if e.h == sentinel {
-			return false
+			return e, false
 		}
 		idx = (idx + perturb) & b.tbl.capMask
 		perturb = (perturb >> uint64(perturbShift)) + 1
 	}
 }
 
+func (b *BinaryMemoTable) Exists(val []byte) bool {
+	_, ok := b.lookup(binaryMemoHash(val), val)
+	return ok
+}
+
+// ExistsDirect checks whether val is present without inserting it.
+func (b *BinaryMemoTable) ExistsDirect(val []byte) bool {
+	return b.Exists(val)
+}
+
 // Get returns the index of the specified value in the table or KeyNotFound,
 // and a boolean indicating whether it was found in the table.
 func (b *BinaryMemoTable) Get(val interface{}) (int, bool) {
-	if p, ok := b.lookup(b.getHash(val), b.valAsByteSlice(val)); ok {
+	value := b.valAsByteSlice(val)
+	if p, ok := b.lookup(binaryMemoHash(value), value); ok {
 		return int(p.payload.val), ok
 	}
 	return KeyNotFound, false
@@ -295,16 +292,7 @@ func (b *BinaryMemoTable) Get(val interface{}) (int, bool) {
 // it is inserted into the table. The return value 'found' indicates whether the value
 // was found in the table (true) or inserted (false) along with any possible error.
 func (b *BinaryMemoTable) GetOrInsertBytes(val []byte) (idx int, found bool, err error) {
-	h := Hash(val, 0)
-	p, found := b.lookup(h, val)
-	if found {
-		idx = int(p.payload.val)
-	} else {
-		idx = b.Size()
-		b.builder.Append(val)
-		b.tbl.Insert(p, h, int32(idx), -1)
-	}
-	return
+	return b.InsertOrGet(val)
 }
 
 func (b *BinaryMemoTable) GetOrInsert(val interface{}) (idx int, found bool, err error) {
@@ -315,7 +303,7 @@ func (b *BinaryMemoTable) GetOrInsert(val interface{}) (idx int, found bool, err
 // it is inserted into the table. The return value 'found' indicates whether the value
 // was found in the table (true) or inserted (false) along with any possible error.
 func (b *BinaryMemoTable) InsertOrGet(val []byte) (idx int, found bool, err error) {
-	h := Hash(val, 0)
+	h := binaryMemoHash(val)
 	p, found := b.lookup(h, val)
 	if found {
 		idx = int(p.payload.val)

@@ -89,6 +89,22 @@ func assertGetMemoValue(t *testing.T, table *hashing.Table[int32], value int32, 
 	assert.Equal(t, want, got)
 }
 
+func TestBinaryMemoTableShortKeys(t *testing.T) {
+	table := hashing.NewBinaryMemoTable(0, 0, array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary))
+	defer table.Release()
+	values := []string{"", "\x00", "a", "a\x00", "\x00a", "abcdefg", "abcdefg\x00", "\x00\x00\x00\x00\x00\x00\xff"}
+	for i, val := range values {
+		insertBinaryMemoValue(t, table, val, i)
+	}
+	for i, val := range values {
+		assertGetBinaryMemoValue(t, table, val, i)
+		assert.True(t, table.ExistsDirect([]byte(val)))
+	}
+	table.Truncate(2)
+	assert.True(t, table.Exists(nil))
+	assert.False(t, table.Exists([]byte("a")))
+}
+
 func TestBinaryMemoTableTruncate(t *testing.T) {
 	t.Run("reinsert discarded values", func(t *testing.T) {
 		mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
