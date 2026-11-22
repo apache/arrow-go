@@ -288,6 +288,11 @@ func (d *dictEncoder) PutIndices(data arrow.Array) error {
 		return fmt.Errorf("%w: passed non-integer array to PutIndices", arrow.ErrInvalid)
 	}
 
+	if data.Len() == 0 {
+		// an empty array may not have a values buffer
+		return nil
+	}
+
 	newValues := data.Len() - data.NullN()
 	curPos := len(d.idxValues)
 	newLen := newValues + curPos
