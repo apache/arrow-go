@@ -106,21 +106,31 @@ func (enc *DictByteArrayEncoder) WriteDict(out []byte) {
 // PutByteArray adds a single byte array to buffer, updating the dictionary
 // and encoded size if it's a new value
 func (enc *DictByteArrayEncoder) PutByteArray(in parquet.ByteArray) {
-	memoIdx, found, err := enc.memo.(BinaryMemoTable).InsertOrGet(in)
+	enc.expandBuffer(len(enc.idxValues) + 1)
+	enc.putByteArray(enc.memo.(BinaryMemoTable), in)
+}
+
+func (enc *DictByteArrayEncoder) putByteArray(memo BinaryMemoTable, in parquet.ByteArray) {
+	memoIdx, found, err := memo.InsertOrGet(in)
 	if err != nil {
 		panic(err)
 	}
+	encodedSize := in.Len() + arrow.Uint32SizeBytes
 	if !found {
-		enc.dictEncodedSize += in.Len() + arrow.Uint32SizeBytes
+		enc.dictEncodedSize += encodedSize
 	}
-	enc.addIndex(memoIdx)
-	enc.AddRawSize(int64(in.Len() + arrow.Uint32SizeBytes))
+	index := int32(memoIdx)
+	enc.idxValues = append(enc.idxValues, index)
+	enc.recordDictionaryReference(index)
+	enc.AddRawSize(int64(encodedSize))
 }
 
 // Put takes a slice of ByteArrays to add and encode.
 func (enc *DictByteArrayEncoder) Put(in []parquet.ByteArray) {
+	enc.expandBuffer(len(enc.idxValues) + len(in))
+	memo := enc.memo.(BinaryMemoTable)
 	for _, val := range in {
-		enc.PutByteArray(val)
+		enc.putByteArray(memo, val)
 	}
 }
 

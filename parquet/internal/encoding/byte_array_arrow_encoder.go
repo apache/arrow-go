@@ -79,8 +79,14 @@ func (enc *PlainByteArrayEncoder) PutArrowSpaced64(values []byte, offsets []int6
 }
 
 func putArrowDictionary[T arrowByteArrayOffset](enc *DictByteArrayEncoder, values []byte, offsets []T) {
+	if len(offsets) < 2 {
+		return
+	}
+
+	enc.expandBuffer(len(enc.idxValues) + len(offsets) - 1)
+	memo := enc.memo.(BinaryMemoTable)
 	for i := 1; i < len(offsets); i++ {
-		enc.PutByteArray(values[offsets[i-1]:offsets[i]])
+		enc.putByteArray(memo, values[offsets[i-1]:offsets[i]])
 	}
 }
 
