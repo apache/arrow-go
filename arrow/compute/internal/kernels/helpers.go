@@ -942,16 +942,9 @@ func checkIndexBoundsImpl[T arrow.IntType | arrow.UintType](values *exec.ArraySp
 	}
 	return bitutils.VisitSetBitRuns(bitmap, values.Offset, values.Len,
 		func(pos, length int64) error {
-			outOfBounds := false
-			for i := int64(0); i < length; i++ {
-				outOfBounds = outOfBounds || isOutOfBounds(valuesData[pos+i])
-			}
-			if outOfBounds {
-				for i := int64(0); i < length; i++ {
-					if isOutOfBounds(valuesData[pos+i]) {
-						return fmt.Errorf("%w: %d out of bounds",
-							arrow.ErrIndex, valuesData[pos+i])
-					}
+			for _, index := range valuesData[pos : pos+length] {
+				if isOutOfBounds(index) {
+					return fmt.Errorf("%w: %d out of bounds", arrow.ErrIndex, index)
 				}
 			}
 			return nil
