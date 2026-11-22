@@ -81,8 +81,18 @@ func (d *dataMessageReader) Message() (*ipc.Message, error) {
 		// a message with neither an IPC header nor a body only carries
 		// app metadata (see Writer.WriteMetadata); there is no IPC message
 		// to decode, so skip it
-		if len(fd.DataHeader) > 0 || len(fd.DataBody) > 0 {
+		if len(fd.DataHeader) > 0 {
 			break
+		}
+		if len(fd.DataBody) > 0 {
+			if d.msg != nil {
+				// clear the previous message in the error case
+				d.msg.Release()
+				d.msg = nil
+			}
+			d.lastAppMetadata = nil
+			d.descr = nil
+			return nil, errors.New("arrow/flight: FlightData has a body but no IPC header")
 		}
 	}
 
@@ -110,6 +120,9 @@ func (d *dataMessageReader) Release() {
 // Reader is an ipc.Reader which also keeps track of the metadata from
 // the FlightData messages as they come in, calling LatestAppMetadata
 // will return the metadata bytes from the most recently read message.
+//
+// Messages that carry only app metadata, without an IPC header or body (see
+// Writer.WriteMetadata), are skipped and their metadata is not exposed.
 type Reader struct {
 	*ipc.Reader
 	dmr *dataMessageReader

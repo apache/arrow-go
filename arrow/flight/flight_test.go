@@ -545,6 +545,25 @@ func TestReaderSkipsMetadataOnlyMessages(t *testing.T) {
 	require.NoError(t, r.Err())
 }
 
+func TestReaderRejectsBodyWithoutHeader(t *testing.T) {
+	recs, ok := arrdata.Records["primitives"]
+	require.True(t, ok)
+
+	fs := collectingFlightStreamWriter{}
+	w := flight.NewRecordWriter(&fs, ipc.WithSchema(recs[0].Schema()))
+	require.NoError(t, w.Write(recs[0]))
+	require.NoError(t, fs.Send(&flight.FlightData{DataBody: []byte("body")}))
+	require.NoError(t, w.Close())
+
+	r, err := flight.NewRecordReader(&fs)
+	require.NoError(t, err)
+	defer r.Release()
+
+	require.True(t, r.Next(), "%v", r.Err())
+	require.False(t, r.Next())
+	require.ErrorContains(t, r.Err(), "FlightData has a body but no IPC header")
+}
+
 type collectingFlightStreamWriter struct {
 	hasDescriptor []bool
 	payloads      []*flight.FlightData
