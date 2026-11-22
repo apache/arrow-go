@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"strconv"
 	"testing"
 	"testing/iotest"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/endian"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	flatbuffers "github.com/google/flatbuffers/go"
@@ -156,6 +158,97 @@ func TestReaderReportsTruncatedMessage(t *testing.T) {
 
 	require.False(t, r.Next())
 	require.ErrorIs(t, r.Err(), io.ErrUnexpectedEOF)
+}
+
+func TestReaderFromBufferRetainsBorrowedData(t *testing.T) {
+	input := writeRecordsIntoBuffer(t, 2)
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	t.Cleanup(func() { mem.AssertSize(t, 0) })
+	source := memory.NewResizableBuffer(mem)
+	source.Resize(input.Len())
+	copy(source.Bytes(), input.Bytes())
+
+	var first arrow.RecordBatch
+	func() {
+		reader, err := NewReaderFromBuffer(source, WithAllocator(rejectingAllocator{}))
+		source.Release()
+		require.NoError(t, err)
+		defer reader.Release()
+		require.True(t, reader.Next(), reader.Err())
+		first = reader.RecordBatch()
+		first.Retain()
+		t.Cleanup(first.Release)
+		data := first.Column(0).Data().Buffers()[1]
+		require.NotNil(t, data.Parent())
+		require.Same(t, source, data.Parent().Parent())
+		require.True(t, reader.Next(), reader.Err())
+		require.False(t, reader.Next())
+		require.NoError(t, reader.Err())
+	}()
+	require.Equal(t, int64(9), first.Column(0).(*array.Int64).Value(9))
+}
+
+func TestReaderFromBufferHonorsLimitsAndTruncation(t *testing.T) {
+	data := writeRecordsIntoBuffer(t, 1).Bytes()
+	t.Run("body size", func(t *testing.T) {
+		reader, err := NewReaderFromBuffer(memory.NewBufferBytes(data), WithBodySizeLimit(16))
+		require.NoError(t, err)
+		defer reader.Release()
+		require.False(t, reader.Next())
+		require.ErrorContains(t, reader.Err(), "exceeds limit")
+	})
+	t.Run("truncated body", func(t *testing.T) {
+		reader, err := NewReaderFromBuffer(memory.NewBufferBytes(data[:len(data)-9]))
+		require.NoError(t, err)
+		defer reader.Release()
+		require.False(t, reader.Next())
+		require.ErrorIs(t, reader.Err(), io.ErrUnexpectedEOF)
+	})
+}
+
+func TestReaderFromBufferCopiesUnalignedBody(t *testing.T) {
+	input := writeRecordsIntoBuffer(t, 1).Bytes()
+	source := memory.NewResizableBuffer(memory.DefaultAllocator)
+	defer source.Release()
+	source.Resize(len(input) + 1)
+	copy(source.Bytes()[1:], input)
+	unaligned := memory.SliceBuffer(source, 1, len(input))
+	defer unaligned.Release()
+
+	reader, err := NewReaderFromBuffer(unaligned)
+	require.NoError(t, err)
+	defer reader.Release()
+	require.True(t, reader.Next(), reader.Err())
+	data := reader.RecordBatch().Column(0).Data().Buffers()[1]
+	require.NotNil(t, data.Parent())
+	require.Nil(t, data.Parent().Parent())
+}
+
+func TestReaderFromBufferDoesNotMutateForeignEndianInput(t *testing.T) {
+	order := endian.BigEndian
+	if endian.NativeEndian == order {
+		order = endian.LittleEndian
+	}
+	schema := arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int64}}, nil).WithEndianness(order)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	const value = uint64(0x0102030405060708)
+	builder.Field(0).(*array.Int64Builder).Append(int64(bits.ReverseBytes64(value)))
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	var input bytes.Buffer
+	writer := NewWriter(&input, WithSchema(schema))
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	original := bytes.Clone(input.Bytes())
+
+	reader, err := NewReaderFromBuffer(memory.NewBufferBytes(input.Bytes()), WithEnsureNativeEndian(true))
+	require.NoError(t, err)
+	defer reader.Release()
+	require.True(t, reader.Next(), reader.Err())
+	require.Equal(t, int64(value), reader.RecordBatch().Column(0).(*array.Int64).Value(0))
+	require.Equal(t, original, input.Bytes())
 }
 
 func TestBodySizeLimitConfig(t *testing.T) {

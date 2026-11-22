@@ -28,10 +28,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/dictutils"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 )
 
-// Reader reads records from an io.Reader.
+// Reader reads record batches from an IPC stream.
 // Reader expects a schema (plus any dictionaries) as the first messages
 // in the stream, followed by records.
 type Reader struct {
@@ -125,6 +126,26 @@ func NewReader(r io.Reader, opts ...Option) (rr *Reader, err error) {
 	return rr, nil
 }
 
+// NewReaderFromBuffer reads an IPC stream from data. Uncompressed buffers
+// may be shared with returned record batches. The reader retains data, and
+// the caller must keep its bytes unchanged while the reader or any returned
+// batch is in use. Endian conversion and decompression can allocate.
+func NewReaderFromBuffer(data *memory.Buffer, opts ...Option) (*Reader, error) {
+	if data == nil {
+		return nil, fmt.Errorf("arrow/ipc: nil stream buffer")
+	}
+	cfg := newConfig(opts...)
+	data.Retain()
+	mr := &messageReader{
+		source:          data,
+		mem:             cfg.alloc,
+		maxMetadataSize: cfg.maxMetadataSize,
+		maxBodySize:     cfg.maxBodySize,
+	}
+	mr.refCount.Add(1)
+	return NewReaderFromMessageReader(mr, opts...)
+}
+
 // Err returns the last error encountered during the iteration over the
 // underlying stream.
 func (r *Reader) Err() error { return r.err }
@@ -165,6 +186,10 @@ func (r *Reader) readSchema(schema *arrow.Schema) error {
 
 	if r.ensureNativeEndian && !r.schema.IsNativeEndian() {
 		r.swapEndianness = true
+		if mr, ok := r.r.(*messageReader); ok && mr.source != nil {
+			// The decoder swaps array buffers in place.
+			mr.copyBody = true
+		}
 		r.schema = r.schema.WithEndianness(endian.NativeEndian)
 	}
 
