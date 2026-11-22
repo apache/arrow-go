@@ -240,10 +240,15 @@ func binaryMemoHash(value []byte) uint64 {
 	}
 	// Up to seven bytes and their length fit in 63 bits. The odd
 	// multiplication and xorshift are bijective in that space.
-	var packed [8]byte
-	copy(packed[:], value)
-	packed[7] = byte(len(value))
-	key := binary.LittleEndian.Uint64(packed[:])
+	var key uint64
+	if len(value) == 4 {
+		key = uint64(binary.LittleEndian.Uint32(value)) | (4 << 56)
+	} else {
+		var packed [8]byte
+		copy(packed[:], value)
+		packed[7] = byte(len(value))
+		key = binary.LittleEndian.Uint64(packed[:])
+	}
 	key = (key * 0x9e3779b97f4a7c15) &^ packedBinaryKey
 	return (key ^ (key >> 31)) | packedBinaryKey
 }
