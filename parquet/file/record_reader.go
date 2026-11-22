@@ -977,13 +977,23 @@ func (br *byteArrayRecordReader) Release() {
 }
 
 func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
+	dec := br.ColumnChunkReader.(*ByteArrayColumnChunkReader).curDecoder.(encoding.ByteArrayDecoder)
+	if dict, ok := dec.(*encoding.DictByteArrayDecoder); ok {
+		if bldr, ok := br.bldr.(*array.BinaryBuilder); ok {
+			n, err := dict.DecodeToBinaryBuilder(bldr, int(toRead))
+			if err := checkDecoded(n, err, toRead); err != nil {
+				return err
+			}
+			br.ResetValues()
+			return nil
+		}
+	}
+
 	if int64(cap(br.valueBuf)) < toRead {
 		br.valueBuf = make([]parquet.ByteArray, 0, toRead)
 	}
 
 	values := br.valueBuf[:toRead]
-	dec := br.ColumnChunkReader.(*ByteArrayColumnChunkReader).curDecoder.(encoding.ByteArrayDecoder)
-
 	n, err := dec.Decode(values)
 	if err = checkDecoded(n, err, toRead); err != nil {
 		return err
