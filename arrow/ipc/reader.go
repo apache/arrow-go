@@ -57,7 +57,11 @@ type Reader struct {
 // NewReaderFromMessageReader allows constructing a new reader object with the
 // provided MessageReader allowing injection of reading messages other than
 // by simple streaming bytes such as Arrow Flight which receives a protobuf message
-func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader, err error) {
+func NewReaderFromMessageReader(r MessageReader, opts ...Option) (*Reader, error) {
+	return newReaderFromMessageReader(r, nil, opts...)
+}
+
+func newReaderFromMessageReader(r MessageReader, cfg *config, opts ...Option) (reader *Reader, err error) {
 	defer func() {
 		if pErr := recover(); pErr != nil {
 			if reader != nil {
@@ -67,9 +71,8 @@ func NewReaderFromMessageReader(r MessageReader, opts ...Option) (reader *Reader
 			err = utils.FormatRecoveredError("arrow/ipc: unknown error while reading", pErr)
 		}
 	}()
-	cfg := newConfig()
-	for _, opt := range opts {
-		opt(cfg)
+	if cfg == nil {
+		cfg = newConfig(opts...)
 	}
 
 	reader = &Reader{
@@ -143,7 +146,7 @@ func NewReaderFromBuffer(data *memory.Buffer, opts ...Option) (*Reader, error) {
 		maxBodySize:     cfg.maxBodySize,
 	}
 	mr.refCount.Add(1)
-	return NewReaderFromMessageReader(mr, opts...)
+	return newReaderFromMessageReader(mr, cfg)
 }
 
 // Err returns the last error encountered during the iteration over the

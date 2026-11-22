@@ -188,6 +188,16 @@ func TestReaderFromBufferRetainsBorrowedData(t *testing.T) {
 	require.Equal(t, int64(9), first.Column(0).(*array.Int64).Value(9))
 }
 
+func TestReaderFromBufferAppliesOptionsOnce(t *testing.T) {
+	input := memory.NewBufferBytes(writeRecordsIntoBuffer(t, 1).Bytes())
+	calls := 0
+	reader, err := NewReaderFromBuffer(input, func(*config) { calls++ })
+	require.NoError(t, err)
+	defer reader.Release()
+	require.Equal(t, 1, calls)
+	require.True(t, reader.Next(), reader.Err())
+}
+
 func TestReaderFromBufferHonorsLimitsAndTruncation(t *testing.T) {
 	data := writeRecordsIntoBuffer(t, 1).Bytes()
 	t.Run("body size", func(t *testing.T) {
