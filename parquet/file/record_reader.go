@@ -990,8 +990,22 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 
 	switch bldr := br.bldr.(type) {
 	case *array.BinaryBuilder:
-		for _, val := range values {
-			bldr.Append(val)
+		// ByteArray has a named element type. Adapt a bounded batch of slice
+		// headers to the builder's bulk path while the decoded page is live.
+		var batch [256][]byte
+		dataSize := 0
+		for _, value := range values {
+			dataSize += len(value)
+		}
+		if dataSize > bldr.DataCap()-bldr.DataLen() {
+			bldr.ReserveData(bitutil.NextPowerOf2(bldr.DataLen()+dataSize) - bldr.DataLen())
+		}
+		for start := 0; start < len(values); start += len(batch) {
+			n := min(len(batch), len(values)-start)
+			for i, value := range values[start : start+n] {
+				batch[i] = value
+			}
+			bldr.AppendValues(batch[:n], nil)
 		}
 	case *array.BinaryDictionaryBuilder:
 		for _, val := range values {
