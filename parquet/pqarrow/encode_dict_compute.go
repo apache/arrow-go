@@ -29,16 +29,37 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/internal/debug"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
 func isDictEncoding(enc parquet.Encoding) bool {
 	return enc == parquet.Encodings.PlainDict
 }
 
-func dictionaryDirectWriteSupported(arr arrow.Array) bool {
+// dictionaryDirectWriteSupported returns true if the values of arr's dictionary can be
+// passed to the encoder of cw as they are. Values which Parquet stores in a different
+// representation have to be decoded and written with writeDenseArrow, which converts them.
+func dictionaryDirectWriteSupported(cw file.ColumnChunkWriter, arr arrow.Array) bool {
 	debug.Assert(arr.DataType().ID() == arrow.DICTIONARY, "should only be called with dictionary type")
-	dt := arr.DataType().(*arrow.DictionaryType)
-	return arrow.IsPrimitive(dt.ValueType.ID()) || arrow.IsBaseBinary(dt.ValueType.ID())
+	switch dt := arr.DataType().(*arrow.DictionaryType).ValueType.(type) {
+	case *arrow.TimestampType:
+		// the column may use a different unit because Parquet has no seconds, because
+		// of the Parquet version, or because the user asked for coercion
+		stored, ok := cw.Descr().LogicalType().(schema.TimestampLogicalType)
+		if !ok {
+			return false
+		}
+		values, ok := arrowTimestampToLogical(dt, dt.Unit).(schema.TimestampLogicalType)
+		return ok && values.TimeUnit() == stored.TimeUnit()
+	case *arrow.Time32Type:
+		// Parquet has no seconds, they are stored as milliseconds
+		return dt.Unit != arrow.Second
+	case *arrow.Date64Type, *arrow.Float16Type:
+		// stored as int32 days and as a 2 byte fixed len byte array
+		return false
+	default:
+		return arrow.IsPrimitive(dt.ID()) || arrow.IsBaseBinary(dt.ID())
+	}
 }
 
 func convertDictionaryToDense(mem memory.Allocator, arr arrow.Array) (arrow.Array, error) {
@@ -71,7 +92,7 @@ func writeDictionaryArrow(ctx *arrowWriteContext, cw file.ColumnChunkWriter, lea
 		return writeDenseArrow(ctx, cw, denseArr, defLevels, repLevels, maybeParentNulls)
 	}
 
-	if !isDictEncoding(cw.CurrentEncoder().Encoding()) || !dictionaryDirectWriteSupported(leafArr) {
+	if !isDictEncoding(cw.CurrentEncoder().Encoding()) || !dictionaryDirectWriteSupported(cw, leafArr) {
 		// no longer dictionary-encoding for whatever reason, maybe we never were
 		// or we decided to stop. Note that writeArrowToColumn can be invoked multiple
 		// times with both dense and dictionary-encoded versions of the same data
