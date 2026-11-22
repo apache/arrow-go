@@ -617,7 +617,12 @@ func (a *DenseUnion) ValueOffsets() *memory.Buffer { return a.data.buffers[2] }
 
 func (a *DenseUnion) ValueOffset(i int) int32 { return a.offsets[i+a.data.offset] }
 
-func (a *DenseUnion) RawValueOffsets() []int32 { return a.offsets[a.data.offset:] }
+func (a *DenseUnion) RawValueOffsets() []int32 {
+	if a.data.length > 0 {
+		return a.offsets[a.data.offset:]
+	}
+	return []int32{}
+}
 
 func (a *DenseUnion) setData(data *Data) {
 	a.union.setData(data)

@@ -554,6 +554,36 @@ func TestSparseUnionValidate(t *testing.T) {
 	})
 }
 
+func TestDenseUnionEmptySlice(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	dt := arrow.DenseUnionOf([]arrow.Field{
+		{Name: "i", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+	}, []arrow.UnionTypeCode{0})
+	bldr := array.NewDenseUnionBuilder(mem, dt)
+	defer bldr.Release()
+	for i := range int32(3) {
+		bldr.Append(0)
+		bldr.Child(0).(*array.Int32Builder).Append(i)
+	}
+	arr := bldr.NewDenseUnionArray()
+	defer arr.Release()
+
+	for offset := range int64(4) {
+		slice := array.NewSlice(arr, offset, offset).(*array.DenseUnion)
+		assert.Empty(t, slice.RawValueOffsets())
+		assert.Equal(t, "[]", slice.String())
+		assert.NoError(t, slice.ValidateFull())
+		assert.True(t, array.Equal(slice, slice))
+
+		out, err := slice.MarshalJSON()
+		assert.NoError(t, err)
+		assert.JSONEq(t, "[]", string(out))
+		slice.Release()
+	}
+}
+
 func TestDenseUnionValidateEmpty(t *testing.T) {
 	child := array.NewNull(0)
 	defer child.Release()
