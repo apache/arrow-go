@@ -19,6 +19,7 @@ package file
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -993,12 +994,20 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 		// ByteArray has a named element type. Adapt a bounded batch of slice
 		// headers to the builder's bulk path while the decoded page is live.
 		var batch [256][]byte
-		dataSize := 0
+		requiredBytes := uint64(bldr.DataLen())
 		for _, value := range values {
-			dataSize += len(value)
+			requiredBytes += uint64(len(value))
 		}
-		if dataSize > bldr.DataCap()-bldr.DataLen() {
-			bldr.ReserveData(bitutil.NextPowerOf2(bldr.DataLen()+dataSize) - bldr.DataLen())
+		if requiredBytes > math.MaxInt {
+			return fmt.Errorf("%w: binary payload exceeds the addressable size", arrow.ErrInvalid)
+		}
+		required := int(requiredBytes)
+		if required > bldr.DataCap() {
+			capacity := required
+			if required <= math.MaxInt/2+1 {
+				capacity = bitutil.NextPowerOf2(required)
+			}
+			bldr.ReserveData(capacity - bldr.DataLen())
 		}
 		for start := 0; start < len(values); start += len(batch) {
 			n := min(len(batch), len(values)-start)
