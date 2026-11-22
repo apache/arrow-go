@@ -683,7 +683,6 @@ func TestRecordReaderSeekToRowRepeatedV1WithoutPageIndex(t *testing.T) {
 							}
 							totalRows++
 						}
-						rec.Release()
 					}
 
 					// Row seekRow holds [3*seekRow, 3*seekRow+1, 3*seekRow+2]

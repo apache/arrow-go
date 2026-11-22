@@ -92,6 +92,33 @@ func TestReadLevelDataBitPacked(t *testing.T) {
 	out.Release()
 }
 
+func TestCountRowsV1ReusesDecoderAcrossEncodings(t *testing.T) {
+	p := &serializedPageReader{maxRepLevel: 1}
+
+	// maxRep 1 -> bitWidth 1. The same reader counts records from RLE and
+	// bit-packed level regions in turn; each SetData has to reset the
+	// decoder the previous page left behind.
+	tests := []struct {
+		name string
+		enc  format.Encoding
+		data []byte
+		rows int64
+	}{
+		// RLE runs carry a 4-byte length prefix; the run header is
+		// len<<1: [0,0,0,0,1,1,1,1]
+		{"rle", format.Encoding_RLE, []byte{4, 0, 0, 0, 8, 0, 8, 1}, 4},
+		// bit-packed has no prefix; all-zero levels are 8 record starts
+		{"bit-packed", format.Encoding_BIT_PACKED, []byte{0b00000000}, 8},
+		// [1,1,1,1,1,1,1,0]: one record, the tail of the previous one
+		{"rle again", format.Encoding_RLE, []byte{4, 0, 0, 0, 14, 1, 2, 0}, 1},
+	}
+	for _, tt := range tests {
+		rows, err := p.countRowsV1(tt.data, tt.enc, 8)
+		require.NoError(t, err, tt.name)
+		require.Equal(t, tt.rows, rows, tt.name)
+	}
+}
+
 // parquet-mr zero-pads every encrypted thrift module out to its buffer size, so a
 // decrypted page header is the thrift struct followed by zero bytes. The reader has
 // to move past the whole encrypted module, not just the thrift it parsed.

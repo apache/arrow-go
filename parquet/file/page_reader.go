@@ -444,6 +444,11 @@ type serializedPageReader struct {
 	dataPageBuffer   *memory.Buffer
 	dictPageBuffer   *memory.Buffer
 	err              error
+
+	// repetitionDecoder counts the records of each V1 page of a repeated
+	// column. Like columnChunkReader's level decoders it is reused across
+	// pages, so SetData allocates its RLE decoder once instead of per page.
+	repetitionDecoder encoding.LevelDecoder
 }
 
 func (p *serializedPageReader) Close() error {
@@ -955,16 +960,15 @@ func (p *serializedPageReader) SeekToPageWithRow(rowIdx int64) error {
 // decodes just the repetition run and leaves the buffer untouched.
 func (p *serializedPageReader) countRowsV1(levels []byte, repEnc format.Encoding, numValues int32) (int64, error) {
 	var (
-		dec   encoding.LevelDecoder
 		batch [4096]int16
 		rows  int64
 	)
-	if _, err := dec.SetData(parquet.Encoding(repEnc), p.maxRepLevel, int(numValues), levels); err != nil {
+	if _, err := p.repetitionDecoder.SetData(parquet.Encoding(repEnc), p.maxRepLevel, int(numValues), levels); err != nil {
 		return 0, err
 	}
 
 	for remaining := int(numValues); remaining > 0; {
-		decoded, _, err := dec.Decode(batch[:min(len(batch), remaining)])
+		decoded, _, err := p.repetitionDecoder.Decode(batch[:min(len(batch), remaining)])
 		if err != nil {
 			return 0, err
 		}
