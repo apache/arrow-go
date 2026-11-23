@@ -38,7 +38,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.2
 	github.com/pierrec/lz4/v4 v4.1.33
 	github.com/pterm/pterm v0.12.84
-	github.com/stoewer/go-strcase v1.3.1
+	github.com/stoewer/go-strcase v1.4.0
 	github.com/stretchr/testify v1.12.1
 	github.com/substrait-io/substrait-go/v8 v8.1.1
 	github.com/substrait-io/substrait-protobuf/go v0.85.0
