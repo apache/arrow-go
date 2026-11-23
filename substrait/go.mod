@@ -22,8 +22,6 @@ require (
 	github.com/apache/arrow-go/v18 v18.9.0
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.12.1
-	github.com/substrait-io/substrait-go/v8 v8.1.1
-	github.com/substrait-io/substrait-protobuf/go v0.85.0
 )
 
 require (
@@ -40,6 +38,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.2 // indirect
 	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/substrait-io/substrait v0.87.0 // indirect
+	github.com/substrait-io/substrait-go/v9 v9.0.0
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect

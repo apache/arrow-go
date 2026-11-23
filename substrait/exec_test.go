@@ -34,10 +34,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/substrait-io/substrait-go/v8/expr"
-	substraitext "github.com/substrait-io/substrait-go/v8/extensions"
-	"github.com/substrait-io/substrait-go/v8/types"
-	proto "github.com/substrait-io/substrait-protobuf/go/substraitpb"
+	"github.com/substrait-io/substrait-go/v9/expr"
+	substraitext "github.com/substrait-io/substrait-go/v9/extensions"
+	"github.com/substrait-io/substrait-go/v9/types"
 )
 
 var (
@@ -537,7 +536,7 @@ func Test_Types(t *testing.T) {
 				rq.NoError(err, "Failed to create Time64 value")
 
 				pt := &types.PrecisionTime{
-					Precision: int32(arrow.Nanosecond) * 3,
+					Precision: types.TimePrecision(int32(arrow.Nanosecond) * 3),
 					Value:     int64(v),
 				}
 
@@ -574,7 +573,7 @@ func Test_Types(t *testing.T) {
 				rq.NoError(err, "Failed to create Time64 value")
 
 				pt := &types.PrecisionTime{
-					Precision: int32(arrow.Nanosecond) * 3,
+					Precision: types.TimePrecision(int32(arrow.Nanosecond) * 3),
 					Value:     int64(v),
 				}
 
@@ -611,10 +610,8 @@ func Test_Types(t *testing.T) {
 				rq.NoError(err, "Failed to create Timestamp value")
 
 				pts := &types.PrecisionTimestamp{
-					PrecisionTimestamp: &proto.Expression_Literal_PrecisionTimestamp{
-						Precision: int32(arrow.Nanosecond) * 3,
-						Value:     int64(v),
-					},
+					Precision: types.TimePrecision(int32(arrow.Nanosecond) * 3),
+					Value:     int64(v),
 				}
 
 				lit, err := expr.NewLiteral(pts, true)
@@ -844,7 +841,7 @@ func TestDictionaryTypes(t *testing.T) {
 				// Bypass signature validation to exercise kernel dispatch for
 				// is_nan on string and binary dictionaries.
 				ex, err = expr.NewCustomScalarFunc(extSet.GetSubstraitRegistry(),
-					substraitext.NewScalarFuncVariant(substraitext.ID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
+					substraitext.NewScalarFuncVariant(exprs.FunctionID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
 					&types.BooleanType{Nullability: types.NullabilityNullable}, nil, ex)
 				require.NoError(t, err)
 			}
