@@ -2031,6 +2031,128 @@ func TestTakeChecksDenseSlicedIndices(t *testing.T) {
 	}
 }
 
+func TestSelectionMonthDayNanoInterval(t *testing.T) {
+	dt := arrow.FixedWidthTypes.MonthDayNanoInterval
+	values := `[{"months": 1, "days": 2, "nanoseconds": 3}, null,
+		{"months": -4, "days": 5, "nanoseconds": -6}, {"months": 7, "days": -8, "nanoseconds": 9}]`
+
+	fromJSON := func(t *testing.T, mem memory.Allocator, dt arrow.DataType, str string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(str))
+		require.NoError(t, err)
+		return arr
+	}
+
+	t.Run("take", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+		ctx := compute.WithAllocator(context.Background(), mem)
+
+		vals := fromJSON(t, mem, dt, values)
+		defer vals.Release()
+		indices := fromJSON(t, mem, arrow.PrimitiveTypes.Int32, `[3, null, 1, 0, 0]`)
+		defer indices.Release()
+		expected := fromJSON(t, mem, dt, `[{"months": 7, "days": -8, "nanoseconds": 9}, null, null,
+			{"months": 1, "days": 2, "nanoseconds": 3}, {"months": 1, "days": 2, "nanoseconds": 3}]`)
+		defer expected.Release()
+
+		out, err := compute.TakeArray(ctx, vals, indices)
+		require.NoError(t, err)
+		defer out.Release()
+		assertArraysEqual(t, expected, out)
+
+		// sliced values
+		sliced := array.NewSlice(vals, 2, 4)
+		defer sliced.Release()
+		indices2 := fromJSON(t, mem, arrow.PrimitiveTypes.Int8, `[1, 0]`)
+		defer indices2.Release()
+		expected2 := fromJSON(t, mem, dt, `[{"months": 7, "days": -8, "nanoseconds": 9},
+			{"months": -4, "days": 5, "nanoseconds": -6}]`)
+		defer expected2.Release()
+		out2, err := compute.TakeArray(ctx, sliced, indices2)
+		require.NoError(t, err)
+		defer out2.Release()
+		assertArraysEqual(t, expected2, out2)
+
+		badIndices := fromJSON(t, mem, arrow.PrimitiveTypes.Int32, `[0, 4]`)
+		defer badIndices.Release()
+		_, err = compute.TakeArray(ctx, vals, badIndices)
+		assert.ErrorIs(t, err, arrow.ErrIndex)
+	})
+
+	t.Run("filter", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+		ctx := compute.WithAllocator(context.Background(), mem)
+
+		vals := fromJSON(t, mem, dt, values)
+		defer vals.Release()
+		filter := fromJSON(t, mem, arrow.FixedWidthTypes.Boolean, `[true, true, null, false]`)
+		defer filter.Release()
+
+		out, err := compute.FilterArray(ctx, vals, filter, *compute.DefaultFilterOptions())
+		require.NoError(t, err)
+		defer out.Release()
+		expected := fromJSON(t, mem, dt, `[{"months": 1, "days": 2, "nanoseconds": 3}, null]`)
+		defer expected.Release()
+		assertArraysEqual(t, expected, out)
+
+		out2, err := compute.FilterArray(ctx, vals, filter, compute.FilterOptions{NullSelection: compute.SelectionEmitNulls})
+		require.NoError(t, err)
+		defer out2.Release()
+		expected2 := fromJSON(t, mem, dt, `[{"months": 1, "days": 2, "nanoseconds": 3}, null, null]`)
+		defer expected2.Release()
+		assertArraysEqual(t, expected2, out2)
+	})
+
+	t.Run("chunked", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+		ctx := compute.WithAllocator(context.Background(), mem)
+
+		chunked, err := array.ChunkedFromJSON(mem, dt, []string{
+			`[{"months": 1, "days": 2, "nanoseconds": 3}, null]`,
+			`[{"months": 7, "days": -8, "nanoseconds": 9}]`})
+		require.NoError(t, err)
+		defer chunked.Release()
+		indices, err := array.ChunkedFromJSON(mem, arrow.PrimitiveTypes.Int8, []string{`[2, 0]`, `[1]`})
+		require.NoError(t, err)
+		defer indices.Release()
+
+		result, err := compute.Take(ctx, *compute.DefaultTakeOptions(),
+			&compute.ChunkedDatum{Value: chunked}, &compute.ChunkedDatum{Value: indices})
+		require.NoError(t, err)
+		defer result.Release()
+
+		out := result.(*compute.ChunkedDatum).Value
+		expected, err := array.ChunkedFromJSON(mem, dt, []string{
+			`[{"months": 7, "days": -8, "nanoseconds": 9}, {"months": 1, "days": 2, "nanoseconds": 3}]`, `[null]`})
+		require.NoError(t, err)
+		defer expected.Release()
+		assert.Truef(t, array.ChunkedEqual(expected, out), "expected %s, got %s", expected, out)
+	})
+
+	t.Run("struct", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+		ctx := compute.WithAllocator(context.Background(), mem)
+
+		st := arrow.StructOf(arrow.Field{Name: "a", Type: dt, Nullable: true})
+		vals := fromJSON(t, mem, st, `[{"a": {"months": 1, "days": 2, "nanoseconds": 3}}, null,
+			{"a": null}, {"a": {"months": 7, "days": -8, "nanoseconds": 9}}]`)
+		defer vals.Release()
+		indices := fromJSON(t, mem, arrow.PrimitiveTypes.Int32, `[3, 2, 1, 0]`)
+		defer indices.Release()
+		expected := fromJSON(t, mem, st, `[{"a": {"months": 7, "days": -8, "nanoseconds": 9}}, {"a": null},
+			null, {"a": {"months": 1, "days": 2, "nanoseconds": 3}}]`)
+		defer expected.Release()
+
+		out, err := compute.TakeArray(ctx, vals, indices)
+		require.NoError(t, err)
+		defer out.Release()
+		assertArraysEqual(t, expected, out)
+	})
+}
+
 func TestTakeKernels(t *testing.T) {
 	suite.Run(t, new(TakeKernelTest))
 	for _, dt := range numericTypes {

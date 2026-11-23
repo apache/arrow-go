@@ -2389,11 +2389,19 @@ type SelectionKernelData struct {
 }
 
 func ChunkedTakeSupported(dt arrow.DataType) bool {
+	// month_day_nano uses the fixed size kernel, which has no chunked variant
+	if dt.ID() == arrow.INTERVAL_MONTH_DAY_NANO {
+		return false
+	}
 	return arrow.IsPrimitive(dt.ID()) || arrow.IsBaseBinary(dt.ID())
 }
 
 func GetVectorSelectionKernels() (filterkernels, takeKernels []SelectionKernelData) {
+	// the primitive kernels only handle bit widths up to 64, so the 128-bit
+	// month_day_nano interval is copied as fixed size values instead. These
+	// must come before the primitive kernels, which also match it.
 	filterkernels = []SelectionKernelData{
+		{In: exec.NewIDInput(arrow.INTERVAL_MONTH_DAY_NANO), Exec: FilterExec(FSBImpl)},
 		{In: exec.NewMatchedInput(exec.Primitive()), Exec: PrimitiveFilter},
 		{In: exec.NewExactInput(arrow.Null), Exec: NullFilter},
 		{In: exec.NewIDInput(arrow.DECIMAL128), Exec: FilterExec(FSBImpl)},
@@ -2405,6 +2413,7 @@ func GetVectorSelectionKernels() (filterkernels, takeKernels []SelectionKernelDa
 
 	takeKernels = []SelectionKernelData{
 		{In: exec.NewExactInput(arrow.Null), Exec: NullTake},
+		{In: exec.NewIDInput(arrow.INTERVAL_MONTH_DAY_NANO), Exec: TakeExec(FSBImpl)},
 		{In: exec.NewMatchedInput(exec.Primitive()), Exec: PrimitiveTake, Chunked: ChunkedPrimitiveTake},
 		{In: exec.NewIDInput(arrow.DECIMAL128), Exec: TakeExec(FSBImpl)},
 		{In: exec.NewIDInput(arrow.DECIMAL256), Exec: TakeExec(FSBImpl)},
