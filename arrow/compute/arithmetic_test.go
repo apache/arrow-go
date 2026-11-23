@@ -814,6 +814,53 @@ type DecimalBinaryArithmeticSuite struct {
 	DecimalArithmeticSuite
 }
 
+func (ds *DecimalBinaryArithmeticSuite) TestDictionaryPromotion() {
+	for _, id := range []arrow.Type{arrow.DECIMAL128, arrow.DECIMAL256} {
+		ds.Run(id.String(), func() {
+			leftType, _ := arrow.NewDecimalType(id, 3, 0)
+			rightType, _ := arrow.NewDecimalType(id, 3, 1)
+			addType, _ := arrow.NewDecimalType(id, 5, 1)
+			divideType, _ := arrow.NewDecimalType(id, 8, 4)
+			leftDict := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: leftType}
+			rightDict := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: rightType}
+
+			for _, inputs := range []struct {
+				name        string
+				left, right arrow.DataType
+			}{
+				{"dictionary_dictionary", leftDict, rightDict},
+				{"dictionary_plain", leftDict, rightType},
+				{"plain_dictionary", leftType, rightDict},
+			} {
+				ds.Run(inputs.name, func() {
+					left := ds.getArr(inputs.left, `["1", null, "2"]`)
+					defer left.Release()
+					right := ds.getArr(inputs.right, `["1.0", null, "0.5"]`)
+					defer right.Release()
+
+					for _, tc := range []struct {
+						fn       string
+						typ      arrow.DataType
+						expected string
+					}{
+						{"equal", arrow.FixedWidthTypes.Boolean, `[true, null, false]`},
+						{"less", arrow.FixedWidthTypes.Boolean, `[false, null, false]`},
+						{"add", addType, `["2.0", null, "2.5"]`},
+						{"divide", divideType, `["1.0000", null, "4.0000"]`},
+					} {
+						ds.Run(tc.fn, func() {
+							expected := ds.getArr(tc.typ, tc.expected)
+							defer expected.Release()
+							checkScalarBinary(ds.T(), tc.fn, compute.NewDatumWithoutOwning(left),
+								compute.NewDatumWithoutOwning(right), compute.NewDatumWithoutOwning(expected), nil)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func (ds *DecimalBinaryArithmeticSuite) TestDispatchBest() {
 	// decimal, floating point
 	ds.Run("dec/floatingpoint", func() {
