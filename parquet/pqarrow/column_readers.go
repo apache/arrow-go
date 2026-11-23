@@ -705,7 +705,13 @@ func newFixedSizeListReader(rctx *readerCtx, field *arrow.Field, info file.Level
 func chunksToSingle(chunked *arrow.Chunked, mem memory.Allocator) (arrow.ArrayData, error) {
 	switch len(chunked.Chunks()) {
 	case 0:
-		return array.NewData(chunked.DataType(), 0, []*memory.Buffer{nil, nil}, nil, 0, 0), nil
+		// not just empty buffers: a dictionary array also needs a dictionary
+		empty := array.MakeArrayOfNull(mem, chunked.DataType(), 0)
+		defer empty.Release()
+
+		data := empty.Data()
+		data.Retain()
+		return data, nil
 	case 1:
 		data := chunked.Chunk(0).Data()
 		data.Retain() // we pass control to the caller

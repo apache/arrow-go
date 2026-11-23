@@ -1006,6 +1006,52 @@ func TestArrowWriteNestedSubfieldDictionary(t *testing.T) {
 	assert.Truef(t, array.TableEqual(tbl, actual), "expected: %s\ngot: %s", tbl, actual)
 }
 
+func TestArrowWriteNestedDictionaryWithoutValues(t *testing.T) {
+	dictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int32, ValueType: arrow.BinaryTypes.String}
+	smallDictType := &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}
+
+	for _, dt := range []arrow.DataType{
+		arrow.ListOf(dictType),
+		arrow.ListOf(smallDictType),
+		arrow.LargeListOf(dictType),
+		arrow.MapOf(arrow.BinaryTypes.String, dictType),
+	} {
+		for _, json := range []string{`[null]`, `[[]]`, `[null, [], null]`} {
+			t.Run(dt.String()+" "+json, func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+
+				arr, _, err := array.FromJSON(mem, dt, strings.NewReader(json))
+				require.NoError(t, err)
+				defer arr.Release()
+
+				schema := arrow.NewSchema([]arrow.Field{{Name: "a", Type: dt, Nullable: true}}, nil)
+				rec := array.NewRecordBatch(schema, []arrow.Array{arr}, int64(arr.Len()))
+				defer rec.Release()
+
+				var buf bytes.Buffer
+				wr, err := pqarrow.NewFileWriter(schema, &buf, parquet.NewWriterProperties(parquet.WithAllocator(mem)),
+					pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema(), pqarrow.WithAllocator(mem)))
+				require.NoError(t, err)
+				require.NoError(t, wr.Write(rec))
+				require.NoError(t, wr.Close())
+
+				tbl, err := pqarrow.ReadTable(context.Background(), bytes.NewReader(buf.Bytes()),
+					parquet.NewReaderProperties(mem), pqarrow.ArrowReadProperties{}, mem)
+				require.NoError(t, err)
+				defer tbl.Release()
+
+				require.EqualValues(t, arr.Len(), tbl.NumRows())
+				require.Len(t, tbl.Column(0).Data().Chunks(), 1)
+				got := tbl.Column(0).Data().Chunk(0)
+				require.NoError(t, array.ValidateFull(got))
+				// the values have a dictionary, so they can be printed
+				assert.Equal(t, arr.String(), got.String())
+			})
+		}
+	}
+}
+
 func TestDictOfEmptyStringsRoundtrip(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
