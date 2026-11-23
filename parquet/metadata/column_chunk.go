@@ -457,18 +457,18 @@ func (c *ColumnChunkMetaDataBuilder) Finish(info ChunkMetaInfo, hasDict, dictFal
 	c.chunk.MetaData.Encodings = thriftEncodings
 
 	thriftEncodingStats := make([]*format.PageEncodingStats, 0, len(encStats.DictEncodingStats)+len(encStats.DataEncodingStats))
-	for k, v := range encStats.DictEncodingStats {
+	for _, k := range slices.Sorted(maps.Keys(encStats.DictEncodingStats)) {
 		thriftEncodingStats = append(thriftEncodingStats, &format.PageEncodingStats{
 			PageType: format.PageType_DICTIONARY_PAGE,
 			Encoding: format.Encoding(k),
-			Count:    v,
+			Count:    encStats.DictEncodingStats[k],
 		})
 	}
-	for k, v := range encStats.DataEncodingStats {
+	for _, k := range slices.Sorted(maps.Keys(encStats.DataEncodingStats)) {
 		thriftEncodingStats = append(thriftEncodingStats, &format.PageEncodingStats{
 			PageType: format.PageType_DATA_PAGE,
 			Encoding: format.Encoding(k),
-			Count:    v,
+			Count:    encStats.DataEncodingStats[k],
 		})
 	}
 	c.chunk.MetaData.EncodingStats = thriftEncodingStats

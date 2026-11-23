@@ -199,6 +199,15 @@ func TestBuildAccess(t *testing.T) {
 		assert.EqualValues(t, 30, rg1Col2.DataPageOffset())
 		assert.Len(t, rg1Col1.EncodingStats(), 3)
 		assert.Len(t, rg1Col2.EncodingStats(), 3)
+		for _, column := range []*metadata.ColumnChunkMetaData{rg1Col1, rg1Col2} {
+			stats := column.EncodingStats()
+			assert.Equal(t, "DICTIONARY_PAGE", stats[0].PageType.String())
+			assert.Equal(t, parquet.Encodings.RLEDict, stats[0].Encoding)
+			assert.Equal(t, "DATA_PAGE", stats[1].PageType.String())
+			assert.Equal(t, parquet.Encodings.Plain, stats[1].Encoding)
+			assert.Equal(t, "DATA_PAGE", stats[2].PageType.String())
+			assert.Equal(t, parquet.Encodings.RLE, stats[2].Encoding)
+		}
 
 		// row group 2 metadata
 		rg2Access := accessor.RowGroup(1)
