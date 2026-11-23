@@ -146,8 +146,9 @@ type PrimitiveNode struct {
 	physicalType    parquet.Type
 	typeLen         int
 	decimalMetaData DecimalMetadata
-	// the thrift schema element carried a logical type this version does not know, so
-	// readers must ignore the column order too (LogicalTypes.md, "Unsupported Logical Types")
+	// the thrift schema element carried a logical type this version does not know, or one
+	// its physical type does not support, so readers must ignore the column order too
+	// (LogicalTypes.md, "Unsupported Logical Types")
 	unknownLogical bool
 }
 
@@ -273,9 +274,15 @@ func PrimitiveNodeFromThrift(elem *format.SchemaElement) (*PrimitiveNode, error)
 
 	if elem.IsSetLogicalType() {
 		logical := getLogicalType(elem.GetLogicalType())
+		physical := parquet.Type(elem.GetType())
+		// a known logical type on a physical type it does not apply to is ignored the same way
+		unknown := logical.IsNone() || !logical.IsApplicable(physical, elem.GetTypeLength())
+		if unknown {
+			logical = NoLogicalType{}
+		}
 		n, err := NewPrimitiveNodeLogical(elem.GetName(), parquet.Repetition(elem.GetRepetitionType()),
-			logical, parquet.Type(elem.GetType()), int(elem.GetTypeLength()), fieldID)
-		if err == nil && logical.IsNone() {
+			logical, physical, int(elem.GetTypeLength()), fieldID)
+		if err == nil && unknown {
 			n.unknownLogical = true
 		}
 		return n, err

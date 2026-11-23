@@ -70,3 +70,32 @@ func TestUnknownThriftLogicalType(t *testing.T) {
 		}
 	})
 }
+
+// The same section of the format covers a known logical type on a physical type it does not
+// apply to, such as TIMESTAMP on FIXED_LEN_BYTE_ARRAY(12), which newer writers may produce.
+func TestInapplicableThriftLogicalType(t *testing.T) {
+	elems := []*format.SchemaElement{
+		{
+			Name:           "schema",
+			NumChildren:    thrift.Int32Ptr(1),
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_REQUIRED),
+		},
+		{
+			Name:           "ts",
+			Type:           format.TypePtr(format.Type_FIXED_LEN_BYTE_ARRAY),
+			TypeLength:     thrift.Int32Ptr(12),
+			RepetitionType: format.FieldRepetitionTypePtr(format.FieldRepetitionType_OPTIONAL),
+			LogicalType:    NewTimestampLogicalType(true, TimeUnitNanos).toThrift(),
+		},
+	}
+
+	root, err := FromParquet(elems)
+	require.NoError(t, err)
+
+	col := NewSchema(root.(*GroupNode)).Column(0)
+	assert.Equal(t, parquet.Types.FixedLenByteArray, col.PhysicalType())
+	assert.Equal(t, 12, col.TypeLength())
+	assert.True(t, col.LogicalType().IsNone())
+	assert.Equal(t, ConvertedTypes.None, col.ConvertedType())
+	assert.Equal(t, SortUNKNOWN, col.SortOrder())
+}
