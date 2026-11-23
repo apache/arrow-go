@@ -56,28 +56,47 @@ func (d *dataMessageReader) Message() (*ipc.Message, error) {
 		err error
 	)
 
-	if d.peeked != nil {
-		fd = d.peeked
-		d.peeked = nil
-	} else {
-		fd, err = d.rdr.Recv()
-	}
-
-	if err != nil {
-		if d.msg != nil {
-			// clear the previous message in the error case
-			d.msg.Release()
-			d.msg = nil
+	for {
+		if d.peeked != nil {
+			fd = d.peeked
+			d.peeked = nil
+		} else {
+			fd, err = d.rdr.Recv()
 		}
-		d.lastAppMetadata = nil
-		d.descr = nil
-		return nil, err
+
+		if err != nil {
+			if d.msg != nil {
+				// clear the previous message in the error case
+				d.msg.Release()
+				d.msg = nil
+			}
+			d.lastAppMetadata = nil
+			d.descr = nil
+			return nil, err
+		}
+
+		if fd.FlightDescriptor != nil {
+			d.descr = fd.FlightDescriptor
+		}
+		// a message with neither an IPC header nor a body only carries
+		// app metadata (see Writer.WriteMetadata); there is no IPC message
+		// to decode, so skip it
+		if len(fd.DataHeader) > 0 {
+			break
+		}
+		if len(fd.DataBody) > 0 {
+			if d.msg != nil {
+				// clear the previous message in the error case
+				d.msg.Release()
+				d.msg = nil
+			}
+			d.lastAppMetadata = nil
+			d.descr = nil
+			return nil, errors.New("arrow/flight: FlightData has a body but no IPC header")
+		}
 	}
 
 	d.lastAppMetadata = fd.AppMetadata
-	if fd.FlightDescriptor != nil {
-		d.descr = fd.FlightDescriptor
-	}
 	d.msg = ipc.NewMessage(memory.NewBufferBytes(fd.DataHeader), memory.NewBufferBytes(fd.DataBody))
 	return d.msg, nil
 }
@@ -101,6 +120,9 @@ func (d *dataMessageReader) Release() {
 // Reader is an ipc.Reader which also keeps track of the metadata from
 // the FlightData messages as they come in, calling LatestAppMetadata
 // will return the metadata bytes from the most recently read message.
+//
+// Messages that carry only app metadata, without an IPC header or body (see
+// Writer.WriteMetadata), are skipped and their metadata is not exposed.
 type Reader struct {
 	*ipc.Reader
 	dmr *dataMessageReader
