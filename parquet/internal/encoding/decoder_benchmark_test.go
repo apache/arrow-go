@@ -18,6 +18,7 @@ package encoding_test
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -127,10 +128,28 @@ func TestDictByteArrayDecoderDecodeToBinaryBuilder(t *testing.T) {
 		require.Equal(t, []string{"one", ""}[index], result.ValueString(i+1))
 	}
 
-	require.NoError(t, decoder.SetData(1, encodeDictionaryIndexPage(t, []uint64{2}, 2)))
-	_, err := decoder.DecodeToBinaryBuilder(builder, 1)
+	builder.Append([]byte("keep"))
+	builder.AppendNull()
+	indices[1400] = 2
+	require.NoError(t, decoder.SetData(len(indices), encodeDictionaryIndexPage(t, indices, 2)))
+	n, err := decoder.DecodeToBinaryBuilder(builder, len(indices))
 	require.ErrorContains(t, err, "out of range")
-	require.Zero(t, builder.Len())
+	require.Zero(t, n)
+	require.Equal(t, 2, builder.Len())
+	require.Equal(t, len("keep"), builder.DataLen())
+	builder.Append([]byte("next"))
+	restored := builder.NewBinaryArray()
+	defer restored.Release()
+	require.Equal(t, "keep", restored.ValueString(0))
+	require.True(t, restored.IsNull(1))
+	require.Equal(t, "next", restored.ValueString(2))
+}
+
+func TestReserveBinaryDataRejectsOffsetOverflow(t *testing.T) {
+	builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
+	defer builder.Release()
+	require.ErrorIs(t, encoding.ReserveBinaryData(builder, uint64(math.MaxInt32)+1), arrow.ErrInvalid)
+	require.Zero(t, builder.DataCap())
 }
 
 func TestDictByteArrayDecoderDecodeIndicesSpaced(t *testing.T) {

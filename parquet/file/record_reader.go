@@ -19,9 +19,9 @@ package file
 import (
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -1001,31 +1001,16 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 
 	switch bldr := br.bldr.(type) {
 	case *array.BinaryBuilder:
-		// ByteArray has a named element type. Adapt a bounded batch of slice
-		// headers to the builder's bulk path while the decoded page is live.
-		var batch [256][]byte
 		requiredBytes := uint64(bldr.DataLen())
 		for _, value := range values {
 			requiredBytes += uint64(len(value))
 		}
-		if requiredBytes > math.MaxInt {
-			return fmt.Errorf("%w: binary payload exceeds the addressable size", arrow.ErrInvalid)
+		if err := encoding.ReserveBinaryData(bldr, requiredBytes); err != nil {
+			return err
 		}
-		required := int(requiredBytes)
-		if required > bldr.DataCap() {
-			capacity := required
-			if required <= math.MaxInt/2+1 {
-				capacity = bitutil.NextPowerOf2(required)
-			}
-			bldr.ReserveData(capacity - bldr.DataLen())
-		}
-		for start := 0; start < len(values); start += len(batch) {
-			n := min(len(batch), len(values)-start)
-			for i, value := range values[start : start+n] {
-				batch[i] = value
-			}
-			bldr.AppendValues(batch[:n], nil)
-		}
+		// ByteArray and []byte have the same representation. AppendValues
+		// copies the payloads while the decoded page is still live.
+		bldr.AppendValues(unsafe.Slice((*[]byte)(unsafe.SliceData(values)), len(values)), nil)
 	case *array.BinaryDictionaryBuilder:
 		for _, val := range values {
 			if err := bldr.Append(val); err != nil {
