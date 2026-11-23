@@ -27,9 +27,9 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
-	"github.com/substrait-io/substrait-go/v8/expr"
-	"github.com/substrait-io/substrait-go/v8/extensions"
-	"github.com/substrait-io/substrait-go/v8/types"
+	"github.com/substrait-io/substrait-go/v9/expr"
+	"github.com/substrait-io/substrait-go/v9/extensions"
+	"github.com/substrait-io/substrait-go/v9/types"
 )
 
 // NewDefaultExtensionSet constructs an empty extension set using the default
@@ -415,7 +415,7 @@ func (e *ExprBuilder) Cast(from Builder, to arrow.DataType) (Builder, error) {
 		return nil, err
 	}
 
-	return e.b.Cast(from, t).FailBehavior(types.BehaviorThrowException), nil
+	return e.b.Cast(from, t).FailBehavior(types.CastFailBehaviorThrowException), nil
 }
 
 type refBuilder struct {

@@ -28,9 +28,9 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
-	"github.com/substrait-io/substrait-go/v8/expr"
-	"github.com/substrait-io/substrait-go/v8/extensions"
-	"github.com/substrait-io/substrait-go/v8/types"
+	"github.com/substrait-io/substrait-go/v9/expr"
+	"github.com/substrait-io/substrait-go/v9/extensions"
+	"github.com/substrait-io/substrait-go/v9/types"
 )
 
 const (
@@ -46,6 +46,17 @@ const (
 
 	SubstraitIcebergSetFuncURN = "extension:apache.iceberg:functions_set"
 	TimestampTzTimezone        = "UTC"
+)
+
+type (
+	// ExtensionID identifies a Substrait extension by its URN and name.
+	ExtensionID = extensions.ExtensionID
+	// FunctionID identifies a Substrait function extension.
+	FunctionID = extensions.FunctionID
+	// TypeID identifies a Substrait type extension.
+	TypeID = extensions.TypeID
+	// TypeVariationID identifies a Substrait type variation extension.
+	TypeVariationID = extensions.TypeVariationID
 )
 
 var hashSeed maphash.Seed
@@ -73,7 +84,7 @@ func init() {
 	}
 
 	for _, t := range types {
-		err := DefaultExtensionIDRegistry.RegisterType(extensions.ID{
+		err := DefaultExtensionIDRegistry.RegisterType(ExtensionID{
 			URN: ArrowExtTypesUrn, Name: t.name}, t.dt)
 		if err != nil {
 			panic(err)
@@ -82,7 +93,7 @@ func init() {
 
 	for _, fn := range []string{"add", "subtract", "multiply", "divide", "power", "sqrt", "abs"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URN: SubstraitArithmeticFuncsURI, Name: fn},
+			FunctionID{URN: SubstraitArithmeticFuncsURI, Name: fn},
 			decodeOptionlessOverflowableArithmetic(fn))
 		if err != nil {
 			panic(err)
@@ -91,7 +102,7 @@ func init() {
 
 	for _, fn := range []string{"add", "subtract", "multiply", "divide"} {
 		err := DefaultExtensionIDRegistry.AddArrowToSubstrait(fn,
-			encodeOptionlessOverflowableArithmetic(extensions.ID{
+			encodeOptionlessOverflowableArithmetic(FunctionID{
 				URN: SubstraitArithmeticFuncsURI, Name: fn}))
 		if err != nil {
 			panic(err)
@@ -100,7 +111,7 @@ func init() {
 
 	for _, fn := range []string{"equal", "not_equal", "lt", "lte", "gt", "gte", "is_null", "is_not_null", "is_nan"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URN: SubstraitComparisonFuncsURI, Name: fn},
+			FunctionID{URN: SubstraitComparisonFuncsURI, Name: fn},
 			simpleMapSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
@@ -117,7 +128,7 @@ func init() {
 
 	for _, fn := range []string{"and", "or", "not"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URN: SubstraitBooleanFuncsURI, Name: fn},
+			FunctionID{URN: SubstraitBooleanFuncsURI, Name: fn},
 			simpleMapSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
@@ -134,7 +145,7 @@ func init() {
 
 	for _, fn := range []string{"is_in"} {
 		err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-			extensions.ID{URN: SubstraitIcebergSetFuncURN, Name: fn},
+			FunctionID{URN: SubstraitIcebergSetFuncURN, Name: fn},
 			setLookupFuncSubstraitToArrowFunc)
 		if err != nil {
 			panic(err)
@@ -142,7 +153,7 @@ func init() {
 	}
 
 	err := DefaultExtensionIDRegistry.AddSubstraitScalarToArrow(
-		extensions.ID{URN: SubstraitStringFuncsURI, Name: "starts_with"},
+		FunctionID{URN: SubstraitStringFuncsURI, Name: "starts_with"},
 		startsWithSubstraitToArrowFunc)
 	if err != nil {
 		panic(err)
@@ -221,7 +232,7 @@ func parseOption[typ ~string](sf *expr.ScalarFunction, optionName string, parser
 }
 
 type substraitToArrow = func(*expr.ScalarFunction, []compute.Datum) (fname string, args []compute.Datum, opts compute.FunctionOptions, err error)
-type arrowToSubstrait = func(fname string) (extensions.ID, []*types.FunctionOption, error)
+type arrowToSubstrait = func(fname string) (FunctionID, []*types.FunctionOption, error)
 
 var substraitToArrowFuncMap = map[string]string{
 	"lt":  "less",
@@ -313,12 +324,12 @@ func simpleMapSubstraitToArrowFunc(sf *expr.ScalarFunction, input []compute.Datu
 }
 
 func simpleMapArrowToSubstraitFunc(urn string) arrowToSubstrait {
-	return func(fname string) (extensions.ID, []*types.FunctionOption, error) {
+	return func(fname string) (FunctionID, []*types.FunctionOption, error) {
 		f, ok := arrowToSubstraitFuncMap[fname]
 		if ok {
 			fname = f
 		}
-		return extensions.ID{URN: urn, Name: fname}, nil, nil
+		return FunctionID{URN: urn, Name: fname}, nil, nil
 	}
 }
 
@@ -340,8 +351,8 @@ func decodeOptionlessOverflowableArithmetic(n string) substraitToArrow {
 	}
 }
 
-func encodeOptionlessOverflowableArithmetic(id extensions.ID) arrowToSubstrait {
-	return func(fname string) (extensions.ID, []*types.FunctionOption, error) {
+func encodeOptionlessOverflowableArithmetic(id FunctionID) arrowToSubstrait {
+	return func(fname string) (FunctionID, []*types.FunctionOption, error) {
 		fn, _, ok := strings.Cut(fname, ":")
 		if ok {
 			id.Name = fname
@@ -387,19 +398,22 @@ type extensionSet struct {
 func (e *extensionSet) GetArrowRegistry() *ExtensionIDRegistry       { return e.reg }
 func (e *extensionSet) GetSubstraitRegistry() expr.ExtensionRegistry { return e.ExtensionRegistry }
 
-func (e *extensionSet) DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool) {
-	id, ok := e.DecodeType(anchor)
+func (e *extensionSet) DecodeTypeArrow(anchor uint32) (ExtensionID, arrow.DataType, bool) {
+	typeID, ok := e.DecodeType(anchor)
+	id := ExtensionID(typeID)
 	if !ok {
-		if id, ok = e.DecodeTypeVariation(anchor); !ok {
-			return id, nil, false
+		variationID, ok := e.DecodeTypeVariation(anchor)
+		if !ok {
+			return ExtensionID(variationID), nil, false
 		}
+		id = ExtensionID(variationID)
 	}
 
 	dt, ok := e.reg.GetTypeByID(id)
 	return id, dt, ok
 }
 
-func (e *extensionSet) DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool) {
+func (e *extensionSet) DecodeFunction(ref uint32) (FunctionID, substraitToArrow, bool) {
 	id, ok := e.DecodeFunc(ref)
 	if !ok {
 		return id, nil, false
@@ -415,25 +429,27 @@ func (e *extensionSet) DecodeFunction(ref uint32) (extensions.ID, substraitToArr
 	return id, conv, ok
 }
 
-func (e *extensionSet) EncodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool) {
+func (e *extensionSet) EncodeTypeVariation(dt arrow.DataType) (TypeVariationID, uint32, bool) {
 	id, ok := e.reg.GetIDByType(dt)
 	if !ok {
-		return extensions.ID{}, 0, false
+		return TypeVariationID{}, 0, false
 	}
 
-	return id, e.GetTypeVariationAnchor(id), true
+	variationID := TypeVariationID(id)
+	return variationID, e.GetTypeVariationAnchor(variationID), true
 }
 
-func (e *extensionSet) EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool) {
+func (e *extensionSet) EncodeType(dt arrow.DataType) (TypeID, uint32, bool) {
 	id, ok := e.reg.GetIDByType(dt)
 	if !ok {
-		return extensions.ID{}, 0, false
+		return TypeID{}, 0, false
 	}
 
-	return id, e.GetTypeAnchor(id), true
+	typeID := TypeID(id)
+	return typeID, e.GetTypeAnchor(typeID), true
 }
 
-func (e *extensionSet) EncodeFunction(id extensions.ID) uint32 {
+func (e *extensionSet) EncodeFunction(id FunctionID) uint32 {
 	return e.GetFuncAnchor(id)
 }
 
@@ -441,12 +457,12 @@ func (e *extensionSet) EncodeFunction(id extensions.ID) uint32 {
 // and functions and their substrait equivalents.
 type ExtensionIDRegistry struct {
 	typeList []arrow.DataType
-	ids      []extensions.ID
+	ids      []ExtensionID
 
-	substraitToIdx map[extensions.ID]int
+	substraitToIdx map[ExtensionID]int
 	arrowToIdx     map[uint64]int
 
-	substraitToArrowFn map[extensions.ID]substraitToArrow
+	substraitToArrowFn map[FunctionID]substraitToArrow
 	arrowToSubstrait   map[string]arrowToSubstrait
 }
 
@@ -454,10 +470,10 @@ type ExtensionIDRegistry struct {
 func NewExtensionIDRegistry() *ExtensionIDRegistry {
 	return &ExtensionIDRegistry{
 		typeList:           make([]arrow.DataType, 0),
-		ids:                make([]extensions.ID, 0),
-		substraitToIdx:     make(map[extensions.ID]int),
+		ids:                make([]ExtensionID, 0),
+		substraitToIdx:     make(map[ExtensionID]int),
 		arrowToIdx:         make(map[uint64]int),
-		substraitToArrowFn: make(map[extensions.ID]substraitToArrow),
+		substraitToArrowFn: make(map[FunctionID]substraitToArrow),
 		arrowToSubstrait:   make(map[string]arrowToSubstrait),
 	}
 }
@@ -465,7 +481,7 @@ func NewExtensionIDRegistry() *ExtensionIDRegistry {
 // RegisterType creates a mapping between the given extension ID and the
 // provided Arrow data type. If this extension ID or arrow type are already
 // registered, an arrow.ErrInvalid error will be returned.
-func (e *ExtensionIDRegistry) RegisterType(id extensions.ID, dt arrow.DataType) error {
+func (e *ExtensionIDRegistry) RegisterType(id ExtensionID, dt arrow.DataType) error {
 	if _, ok := e.substraitToIdx[id]; ok {
 		return fmt.Errorf("%w: type id already registered", arrow.ErrInvalid)
 	}
@@ -491,7 +507,7 @@ func (e *ExtensionIDRegistry) RegisterType(id extensions.ID, dt arrow.DataType) 
 // Any relevant options should be parsed from the ScalarFunction's options
 // and used to ensure the correct arrow compute function is used and necessary
 // options are passed.
-func (e *ExtensionIDRegistry) AddSubstraitScalarToArrow(id extensions.ID, toArrow substraitToArrow) error {
+func (e *ExtensionIDRegistry) AddSubstraitScalarToArrow(id FunctionID, toArrow substraitToArrow) error {
 	if _, ok := e.substraitToArrowFn[id]; ok {
 		return fmt.Errorf("%w: extension id already registered as function", arrow.ErrInvalid)
 	}
@@ -501,7 +517,7 @@ func (e *ExtensionIDRegistry) AddSubstraitScalarToArrow(id extensions.ID, toArro
 }
 
 // AddArrowToSubstrait creates a mapping between the provided arrow compute function
-// and a function which should provide the correct substrait ExtensionID and function
+// and a function which should provide the correct substrait FunctionID and function
 // options from that name.
 func (e *ExtensionIDRegistry) AddArrowToSubstrait(name string, fn arrowToSubstrait) error {
 	if _, ok := e.arrowToSubstrait[name]; ok {
@@ -515,7 +531,7 @@ func (e *ExtensionIDRegistry) AddArrowToSubstrait(name string, fn arrowToSubstra
 // GetTypeByID returns the mapped arrow data type from the provided substrait
 // extension id. If no mapping exists for this substrait extension id,
 // the second return value will be false.
-func (e *ExtensionIDRegistry) GetTypeByID(id extensions.ID) (arrow.DataType, bool) {
+func (e *ExtensionIDRegistry) GetTypeByID(id ExtensionID) (arrow.DataType, bool) {
 	idx, ok := e.substraitToIdx[id]
 	if !ok {
 		return nil, false
@@ -527,11 +543,11 @@ func (e *ExtensionIDRegistry) GetTypeByID(id extensions.ID) (arrow.DataType, boo
 // GetIDByType is the inverse of GetTypeByID, returning the mapped substrait
 // extension ID corresponding to the provided arrow data type. The second
 // return is false if there is no mapping found.
-func (e *ExtensionIDRegistry) GetIDByType(typ arrow.DataType) (extensions.ID, bool) {
+func (e *ExtensionIDRegistry) GetIDByType(typ arrow.DataType) (ExtensionID, bool) {
 	dthash := arrow.HashType(hashSeed, typ)
 	idx, ok := e.arrowToIdx[dthash]
 	if !ok {
-		return extensions.ID{}, false
+		return ExtensionID{}, false
 	}
 
 	return e.ids[idx], true
@@ -541,7 +557,7 @@ func (e *ExtensionIDRegistry) GetIDByType(typ arrow.DataType) (extensions.ID, bo
 // given substrait extension ID to convert a substrait ScalarFunction to
 // the corresponding Arrow compute function call. False is returned as
 // the second value if there is no mapping available.
-func (e *ExtensionIDRegistry) GetSubstraitScalarToArrow(id extensions.ID) (substraitToArrow, bool) {
+func (e *ExtensionIDRegistry) GetSubstraitScalarToArrow(id FunctionID) (substraitToArrow, bool) {
 	conv, ok := e.substraitToArrowFn[id]
 	if !ok {
 		return nil, ok
@@ -570,11 +586,11 @@ type ExtensionIDSet interface {
 	GetArrowRegistry() *ExtensionIDRegistry
 	GetSubstraitRegistry() expr.ExtensionRegistry
 
-	DecodeTypeArrow(anchor uint32) (extensions.ID, arrow.DataType, bool)
-	DecodeFunction(ref uint32) (extensions.ID, substraitToArrow, bool)
+	DecodeTypeArrow(anchor uint32) (ExtensionID, arrow.DataType, bool)
+	DecodeFunction(ref uint32) (FunctionID, substraitToArrow, bool)
 
-	EncodeType(dt arrow.DataType) (extensions.ID, uint32, bool)
-	EncodeTypeVariation(dt arrow.DataType) (extensions.ID, uint32, bool)
+	EncodeType(dt arrow.DataType) (TypeID, uint32, bool)
+	EncodeTypeVariation(dt arrow.DataType) (TypeVariationID, uint32, bool)
 }
 
 // IsNullable is a convenience method to return whether or not
