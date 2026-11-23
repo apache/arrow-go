@@ -537,7 +537,7 @@ func TestWriteSlicedUnion(t *testing.T) {
 
 	for _, arr := range []arrow.Array{sparse, dense} {
 		t.Run(arr.DataType().Name(), func(t *testing.T) {
-			for _, sl := range []struct{ beg, end int64 }{{0, 4}, {3, 7}, {5, n}, {9, n}} {
+			for _, sl := range []struct{ beg, end int64 }{{0, 4}, {3, 7}, {5, n}, {9, n}, {0, 0}, {3, 3}, {n, n}} {
 				t.Run(fmt.Sprintf("%d-%d", sl.beg, sl.end), func(t *testing.T) {
 					slice := array.NewSlice(arr, sl.beg, sl.end)
 					defer slice.Release()
