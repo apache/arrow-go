@@ -29,6 +29,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
+	sharedutils "github.com/apache/arrow-go/v18/internal/utils"
 	"golang.org/x/exp/constraints"
 )
 
@@ -941,16 +942,9 @@ func checkIndexBoundsImpl[T arrow.IntType | arrow.UintType](values *exec.ArraySp
 	}
 	return bitutils.VisitSetBitRuns(bitmap, values.Offset, values.Len,
 		func(pos, length int64) error {
-			outOfBounds := false
-			for i := int64(0); i < length; i++ {
-				outOfBounds = outOfBounds || isOutOfBounds(valuesData[pos+i])
-			}
-			if outOfBounds {
-				for i := int64(0); i < length; i++ {
-					if isOutOfBounds(valuesData[pos+i]) {
-						return fmt.Errorf("%w: %d out of bounds",
-							arrow.ErrIndex, valuesData[pos+i])
-					}
+			for _, index := range valuesData[pos : pos+length] {
+				if isOutOfBounds(index) {
+					return fmt.Errorf("%w: %d out of bounds", arrow.ErrIndex, index)
 				}
 			}
 			return nil
@@ -958,6 +952,9 @@ func checkIndexBoundsImpl[T arrow.IntType | arrow.UintType](values *exec.ArraySp
 }
 
 func checkIndexBounds(values *exec.ArraySpan, upperLimit uint64) error {
+	if values.Nulls == 0 && values.Len >= 64 && denseIndexBoundsOK(values, upperLimit) {
+		return nil
+	}
 	switch values.Type.ID() {
 	case arrow.INT8:
 		return checkIndexBoundsImpl[int8](values, upperLimit)
@@ -977,6 +974,27 @@ func checkIndexBounds(values *exec.ArraySpan, upperLimit uint64) error {
 		return checkIndexBoundsImpl[uint64](values, upperLimit)
 	default:
 		return fmt.Errorf("%w: invalid index type for bounds checking", arrow.ErrInvalid)
+	}
+}
+
+// Use the existing vectorized reductions for dense 32- and 64-bit indices.
+// On failure, the regular path identifies the first offending index.
+func denseIndexBoundsOK(values *exec.ArraySpan, upperLimit uint64) bool {
+	switch values.Type.ID() {
+	case arrow.INT32:
+		minimum, maximum := sharedutils.GetMinMaxInt32(exec.GetSpanValues[int32](values, 1))
+		return minimum >= 0 && uint64(maximum) < upperLimit
+	case arrow.UINT32:
+		_, maximum := sharedutils.GetMinMaxUint32(exec.GetSpanValues[uint32](values, 1))
+		return uint64(maximum) < upperLimit
+	case arrow.INT64:
+		minimum, maximum := sharedutils.GetMinMaxInt64(exec.GetSpanValues[int64](values, 1))
+		return minimum >= 0 && uint64(maximum) < upperLimit
+	case arrow.UINT64:
+		_, maximum := sharedutils.GetMinMaxUint64(exec.GetSpanValues[uint64](values, 1))
+		return maximum < upperLimit
+	default:
+		return false
 	}
 }
 

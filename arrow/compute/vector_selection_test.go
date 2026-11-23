@@ -1992,6 +1992,45 @@ func TestDictionarySelectionLengthAndBounds(t *testing.T) {
 	})
 }
 
+func TestTakeChecksDenseSlicedIndices(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+	builder := array.NewInt32Builder(mem)
+	defer builder.Release()
+
+	const count = 128
+	values := make([]int32, count)
+	for i := range values {
+		values[i] = int32(i)
+	}
+	builder.AppendValues(values, nil)
+	input := builder.NewInt32Array()
+	defer input.Release()
+
+	indices := append([]int32{-1}, values...)
+	builder.AppendValues(indices, nil)
+	whole := builder.NewInt32Array()
+	defer whole.Release()
+	sliced := array.NewSlice(whole, 1, count+1)
+	defer sliced.Release()
+	out, err := compute.TakeArray(context.Background(), input, sliced)
+	require.NoError(t, err)
+	defer out.Release()
+	require.True(t, array.Equal(input, out))
+
+	for _, invalid := range []int32{-2, count} {
+		indices[65] = invalid
+		builder.AppendValues(indices, nil)
+		whole := builder.NewInt32Array()
+		sliced := array.NewSlice(whole, 1, count+1)
+		_, err := compute.TakeArray(context.Background(), input, sliced)
+		sliced.Release()
+		whole.Release()
+		require.ErrorIs(t, err, arrow.ErrIndex)
+		require.ErrorContains(t, err, fmt.Sprintf("%d out of bounds", invalid))
+	}
+}
+
 func TestTakeKernels(t *testing.T) {
 	suite.Run(t, new(TakeKernelTest))
 	for _, dt := range numericTypes {
