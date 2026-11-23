@@ -120,9 +120,9 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		return nil, err
 	}
 
+	descr := r.fileMetadata.Schema.Column(i)
 	cryptoMetadata := col.CryptoMetadata()
 	if cryptoMetadata == nil {
-		descr := r.fileMetadata.Schema.Column(i)
 		pr := &serializedPageReader{
 			r:                       stream,
 			chunk:                   col,
@@ -171,6 +171,8 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 			mem:                     r.props.Allocator(),
 			maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
 			maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
+			maxRepLevel:             descr.MaxRepetitionLevel(),
+			maxDefLevel:             descr.MaxDefinitionLevel(),
 			cryptoCtx:               ctx,
 		}
 		return pr, pr.init(col.Compression(), &ctx)
@@ -206,6 +208,8 @@ func (r *RowGroupReader) GetColumnPageReader(i int) (PageReader, error) {
 		mem:                     r.props.Allocator(),
 		maxCompressedPageSize:   r.props.GetMaxCompressedPageSize(),
 		maxUncompressedPageSize: r.props.GetMaxUncompressedPageSize(),
+		maxRepLevel:             descr.MaxRepetitionLevel(),
+		maxDefLevel:             descr.MaxDefinitionLevel(),
 		cryptoCtx:               ctx,
 	}
 	return pr, pr.init(col.Compression(), &ctx)
