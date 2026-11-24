@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/stretchr/testify/require"
 )
@@ -135,6 +136,77 @@ func TestWriteArrowBinaryOffsets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteArrowStringDictionaryFallbackWithBloomFilter(t *testing.T) {
+	builder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer builder.Release()
+	for _, value := range []string{
+		"first", "", "first", "first",
+		"bravo", "charlie", "", "delta",
+		"after", "", "fallback", "after",
+	} {
+		if value == "" {
+			builder.AppendNull()
+		} else {
+			builder.Append(value)
+		}
+	}
+	values := builder.NewStringArray()
+	defer values.Release()
+	field := arrow.Field{Name: "value", Type: arrow.BinaryTypes.String, Nullable: true}
+	column := arrow.NewColumnFromArr(field, values)
+	defer column.Release()
+	schema := arrow.NewSchema([]arrow.Field{field}, nil)
+	table := array.NewTable(schema, []arrow.Column{column}, int64(values.Len()))
+	defer table.Release()
+
+	props := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithDictionaryCostFallbackFor("value", false),
+		parquet.WithDictionaryPageSizeLimit(24),
+		parquet.WithBatchSize(4),
+		parquet.WithDataPageSize(1),
+		parquet.WithBloomFilterEnabledFor("value", true),
+		parquet.WithBloomFilterNDVFor("value", 6),
+	)
+	data := writeParquetTable(t, table, table.NumRows(), props)
+	got := readParquetTable(t, data, pqarrow.ArrowReadProperties{})
+	defer got.Release()
+	assertTableColumnsEqual(t, table, got)
+
+	reader, err := file.NewParquetReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer reader.Close()
+	require.Equal(t, 1, reader.NumRowGroups())
+	pages, err := reader.RowGroup(0).GetColumnPageReader(0)
+	require.NoError(t, err)
+	defer pages.Close()
+	var dataEncodings []parquet.Encoding
+	for pages.Next() {
+		if page, ok := pages.Page().(file.DataPage); ok {
+			dataEncodings = append(dataEncodings, parquet.Encoding(page.Encoding()))
+		}
+	}
+	require.NoError(t, pages.Err())
+	require.GreaterOrEqual(t, len(dataEncodings), 2)
+	require.Contains(t, []parquet.Encoding{parquet.Encodings.PlainDict, parquet.Encodings.RLEDict}, dataEncodings[0])
+	require.Equal(t, parquet.Encodings.Plain, dataEncodings[len(dataEncodings)-1])
+
+	rowGroup, err := reader.GetBloomFilterReader().RowGroup(0)
+	require.NoError(t, err)
+	checked := false
+	require.NoError(t, rowGroup.VisitColumnBloomFilter(0, func(filter metadata.BloomFilter) error {
+		checked = true
+		typedFilter := metadata.TypedBloomFilter[parquet.ByteArray]{BloomFilter: filter}
+		for i := range values.Len() {
+			if !values.IsNull(i) {
+				require.True(t, typedFilter.Check(parquet.ByteArray(values.Value(i))), "missing value %q", values.Value(i))
+			}
+		}
+		return nil
+	}))
+	require.True(t, checked, "missing column bloom filter")
 }
 
 func binaryOffsetValue(arr arrow.Array, index int) []byte {

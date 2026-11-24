@@ -29,12 +29,12 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 )
 
-func benchmarkBinaryTable(mem memory.Allocator, n int) (arrow.Table, int64) {
+func benchmarkBinaryTable(mem memory.Allocator, n, distinct int) (arrow.Table, int64) {
 	builder := array.NewStringBuilder(mem)
 	builder.Reserve(n)
 	var inputBytes int64
 	for i := 0; i < n; i++ {
-		value := append([]byte("partition/"), strconv.AppendInt(nil, int64(i), 10)...)
+		value := append([]byte("partition/"), strconv.AppendInt(nil, int64(i%distinct), 10)...)
 		builder.Append(string(value))
 		inputBytes += int64(len(value))
 	}
@@ -52,7 +52,7 @@ func benchmarkBinaryTable(mem memory.Allocator, n int) (arrow.Table, int64) {
 func BenchmarkWriteArrowBinaryOffsets(b *testing.B) {
 	const n = 64 * 1024
 	mem := memory.DefaultAllocator
-	tbl, inputBytes := benchmarkBinaryTable(mem, n)
+	tbl, inputBytes := benchmarkBinaryTable(mem, n, n)
 	defer tbl.Release()
 
 	for _, stats := range []bool{false, true} {
@@ -67,6 +67,25 @@ func BenchmarkWriteArrowBinaryOffsets(b *testing.B) {
 			for b.Loop() {
 				var buf bytes.Buffer
 				if err := pqarrow.WriteTable(tbl, &buf, int64(n), props, pqarrow.DefaultWriterProps()); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkWriteArrowDictionaryOffsets(b *testing.B) {
+	const rows = 1 << 18
+	for _, distinct := range []int{256, rows} {
+		b.Run("distinct="+strconv.Itoa(distinct), func(b *testing.B) {
+			tbl, inputBytes := benchmarkBinaryTable(memory.DefaultAllocator, rows, distinct)
+			defer tbl.Release()
+			props := parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Zstd))
+			b.SetBytes(inputBytes)
+			b.ReportAllocs()
+			for b.Loop() {
+				var buf bytes.Buffer
+				if err := pqarrow.WriteTable(tbl, &buf, rows, props, pqarrow.DefaultWriterProps()); err != nil {
 					b.Fatal(err)
 				}
 			}
