@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -976,13 +977,23 @@ func (br *byteArrayRecordReader) Release() {
 }
 
 func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
+	dec := br.ColumnChunkReader.(*ByteArrayColumnChunkReader).curDecoder.(encoding.ByteArrayDecoder)
+	if dict, ok := dec.(*encoding.DictByteArrayDecoder); ok {
+		if bldr, ok := br.bldr.(*array.BinaryBuilder); ok {
+			n, err := dict.DecodeToBinaryBuilder(bldr, int(toRead))
+			if err := checkDecoded(n, err, toRead); err != nil {
+				return err
+			}
+			br.ResetValues()
+			return nil
+		}
+	}
+
 	if int64(cap(br.valueBuf)) < toRead {
 		br.valueBuf = make([]parquet.ByteArray, 0, toRead)
 	}
 
 	values := br.valueBuf[:toRead]
-	dec := br.ColumnChunkReader.(*ByteArrayColumnChunkReader).curDecoder.(encoding.ByteArrayDecoder)
-
 	n, err := dec.Decode(values)
 	if err = checkDecoded(n, err, toRead); err != nil {
 		return err
@@ -990,9 +1001,16 @@ func (br *byteArrayRecordReader) ReadValuesDense(toRead int64) error {
 
 	switch bldr := br.bldr.(type) {
 	case *array.BinaryBuilder:
-		for _, val := range values {
-			bldr.Append(val)
+		requiredBytes := uint64(bldr.DataLen())
+		for _, value := range values {
+			requiredBytes += uint64(len(value))
 		}
+		if err := encoding.ReserveBinaryData(bldr, requiredBytes); err != nil {
+			return err
+		}
+		// ByteArray and []byte have the same representation. AppendValues
+		// copies the payloads while the decoded page is still live.
+		bldr.AppendValues(unsafe.Slice((*[]byte)(unsafe.SliceData(values)), len(values)), nil)
 	case *array.BinaryDictionaryBuilder:
 		for _, val := range values {
 			if err := bldr.Append(val); err != nil {

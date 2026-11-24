@@ -20,9 +20,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/utils"
 	"github.com/apache/arrow-go/v18/parquet"
@@ -186,6 +189,86 @@ func (pbad *PlainByteArrayDecoder) DecodeSpaced(out []parquet.ByteArray, nullCou
 	}
 
 	return spacedExpand(out, nullCount, validBits, validBitsOffset), nil
+}
+
+// ReserveBinaryData checks the Arrow offset limit before growing the data
+// buffer for a payload of required bytes, including bytes already appended.
+func ReserveBinaryData(bldr *array.BinaryBuilder, required uint64) error {
+	limit := uint64(math.MaxInt)
+	if bldr.Type().Layout().Buffers[1].ByteWidth == arrow.Int32SizeBytes {
+		limit = min(limit, math.MaxInt32)
+	}
+	if required > limit {
+		return fmt.Errorf("%w: binary payload exceeds Arrow offset capacity", arrow.ErrInvalid)
+	}
+	if size := int(required); size > bldr.DataCap() {
+		capacity := size
+		if required <= limit/2 {
+			capacity = bitutil.NextPowerOf2(size)
+		}
+		bldr.ReserveData(capacity - bldr.DataLen())
+	}
+
+	return nil
+}
+
+// DecodeToBinaryBuilder appends count dictionary values in bounded batches.
+// On error it restores the builder to its starting length.
+func (d *DictByteArrayDecoder) DecodeToBinaryBuilder(bldr *array.BinaryBuilder, count int) (_ int, err error) {
+	if count == 0 {
+		return 0, nil
+	}
+	if count > d.nvals {
+		return 0, io.ErrUnexpectedEOF
+	}
+
+	dict := d.dictValueDecoder.(*dictConverter[parquet.ByteArray])
+	var indices [1024]uint64
+	var values [len(indices)][]byte
+
+	start := bldr.Len()
+	defer func() {
+		if err != nil && bldr.Len() > start {
+			bldr.Resize(start)
+		}
+	}()
+	bldr.Reserve(count)
+	written := 0
+	for written < count {
+		batch := min(count-written, len(indices))
+		n, err := d.idxDecoder.GetBatch(indices[:batch])
+		d.nvals -= n
+		if err != nil {
+			return 0, err
+		}
+		if n != batch {
+			return 0, io.ErrUnexpectedEOF
+		}
+
+		var maxIndex uint64
+		for _, index := range indices[:n] {
+			maxIndex = max(maxIndex, index)
+		}
+		if maxIndex > math.MaxInt32 {
+			return 0, fmt.Errorf("parquet: dictionary index %d is out of range", maxIndex)
+		}
+		if err := dict.ensure(pqutils.IndexType(maxIndex)); err != nil {
+			return 0, err
+		}
+
+		size := uint64(bldr.DataLen())
+		for i, index := range indices[:n] {
+			value := dict.dict[index]
+			values[i] = value
+			size += uint64(len(value))
+		}
+		if err := ReserveBinaryData(bldr, size); err != nil {
+			return 0, err
+		}
+		bldr.AppendValues(values[:n], nil)
+		written += n
+	}
+	return written, nil
 }
 
 func (d *DictByteArrayDecoder) InsertDictionary(bldr array.Builder) error {

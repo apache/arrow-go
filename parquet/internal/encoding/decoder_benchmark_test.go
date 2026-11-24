@@ -18,6 +18,7 @@ package encoding_test
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -26,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/internal/encoding"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,6 +93,63 @@ func TestDictByteArrayDecoderDecodeIndices(t *testing.T) {
 	n, err = decoder.DecodeIndices(len(values), bldr)
 	require.NoError(t, err)
 	require.Equal(t, len(values), n)
+}
+
+func TestDictByteArrayDecoderDecodeToBinaryBuilder(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	column := schema.NewColumn(schema.NewByteArrayNode("value", parquet.Repetitions.Required, -1), 0, 0)
+	dictionary := encoding.NewDecoder(parquet.Types.ByteArray, parquet.Encodings.Plain, column, mem)
+	require.NoError(t, dictionary.SetData(2, []byte{3, 0, 0, 0, 'o', 'n', 'e', 0, 0, 0, 0}))
+	decoder := encoding.NewDictDecoder(parquet.Types.ByteArray, column, mem).(*encoding.DictByteArrayDecoder)
+	decoder.SetDict(dictionary)
+
+	builder := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+	defer builder.Release()
+	builder.Append([]byte("prefix"))
+
+	indices := make([]uint64, 2051)
+	for i := range indices {
+		indices[i] = uint64(i % 2)
+	}
+	require.NoError(t, decoder.SetData(len(indices), encodeDictionaryIndexPage(t, indices, 1)))
+	for _, batch := range []int{2049, 2} {
+		n, err := decoder.DecodeToBinaryBuilder(builder, batch)
+		require.NoError(t, err)
+		require.Equal(t, batch, n)
+	}
+	result := builder.NewBinaryArray()
+	defer result.Release()
+	require.Equal(t, len(indices)+1, result.Len())
+	require.Equal(t, "prefix", result.ValueString(0))
+	for i, index := range indices {
+		require.False(t, result.IsNull(i+1))
+		require.Equal(t, []string{"one", ""}[index], result.ValueString(i+1))
+	}
+
+	builder.Append([]byte("keep"))
+	builder.AppendNull()
+	indices[1400] = 2
+	require.NoError(t, decoder.SetData(len(indices), encodeDictionaryIndexPage(t, indices, 2)))
+	n, err := decoder.DecodeToBinaryBuilder(builder, len(indices))
+	require.ErrorContains(t, err, "out of range")
+	require.Zero(t, n)
+	require.Equal(t, 2, builder.Len())
+	require.Equal(t, len("keep"), builder.DataLen())
+	builder.Append([]byte("next"))
+	restored := builder.NewBinaryArray()
+	defer restored.Release()
+	require.Equal(t, "keep", restored.ValueString(0))
+	require.True(t, restored.IsNull(1))
+	require.Equal(t, "next", restored.ValueString(2))
+}
+
+func TestReserveBinaryDataRejectsOffsetOverflow(t *testing.T) {
+	builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
+	defer builder.Release()
+	require.ErrorIs(t, encoding.ReserveBinaryData(builder, uint64(math.MaxInt32)+1), arrow.ErrInvalid)
+	require.Zero(t, builder.DataCap())
 }
 
 func TestDictByteArrayDecoderDecodeIndicesSpaced(t *testing.T) {
