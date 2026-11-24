@@ -104,6 +104,34 @@ package cdata
 // 	return rc;
 // }
 //
+// static volatile int g_async_cancelled;
+//
+// static void test_async_cancel_flag(struct ArrowAsyncProducer* p) { __atomic_store_n(&g_async_cancelled, 1, __ATOMIC_SEQ_CST); }
+//
+// // counts only extracts whose out is NULL
+// static int test_async_extract_null(struct ArrowAsyncTask* task, struct ArrowDeviceArray* out) {
+// 	if (out == NULL) __atomic_fetch_add(&g_async_extracts, 1, __ATOMIC_SEQ_CST);
+// 	return 0;
+// }
+//
+// // run_async_cancel_producer waits for cancel, then, as the spec allows,
+// // still sends n tasks and releases.
+// static int run_async_cancel_producer(struct ArrowAsyncDeviceStreamHandler* handler, struct ArrowSchema* schema, int n) {
+// 	g_async_cancelled = g_async_extracts = 0;
+// 	g_async_producer = get_test_async_producer(ARROW_DEVICE_CPU);
+// 	g_async_producer->request = test_async_request;
+// 	g_async_producer->cancel = test_async_cancel_flag;
+// 	handler->producer = g_async_producer;
+// 	int rc = handler->on_schema(handler, schema);
+// 	while (rc == 0 && !__atomic_load_n(&g_async_cancelled, __ATOMIC_SEQ_CST)) {}
+// 	for (int i = 0; rc == 0 && i < n; i++) {
+// 		struct ArrowAsyncTask task = {test_async_extract_null, NULL};
+// 		rc = handler->on_next_task(handler, &task, NULL);
+// 	}
+// 	handler->release(handler);
+// 	return rc;
+// }
+//
 // void release_test_arr(struct ArrowArray* arr);
 //
 // static int32_t* get_data() {
@@ -148,6 +176,7 @@ import (
 )
 
 const (
+	cEINVAL           = int(C.EINVAL)
 	flagIsNullable    = C.ARROW_FLAG_NULLABLE
 	flagMapKeysSorted = C.ARROW_FLAG_MAP_KEYS_SORTED
 )
@@ -266,6 +295,13 @@ func asyncOnSchemaThenRelease(handler *CArrowAsyncDeviceStreamHandler, schema *C
 // consumer is done.
 func asyncProduceThenRelease(handler *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema, n int) {
 	C.run_async_producer(handler, schema, C.int(n))
+}
+
+// asyncCancelThenProduce runs a producer that waits for cancel, sends n
+// tasks and releases handler. Call freeAsyncProducer once the consumer is
+// done. asyncProducerCounts then returns the tasks extracted with NULL.
+func asyncCancelThenProduce(handler *CArrowAsyncDeviceStreamHandler, schema *CArrowSchema, n int) {
+	C.run_async_cancel_producer(handler, schema, C.int(n))
 }
 
 // asyncProducerCounts returns the request calls made after release and
