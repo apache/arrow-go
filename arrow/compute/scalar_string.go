@@ -18,6 +18,7 @@ package compute
 
 import (
 	"context"
+	"unicode"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
@@ -44,11 +45,15 @@ var startsWithDoc = FunctionDoc{
 	OptionsRequired: true,
 }
 
-type matchSubstringFunc struct {
+// unaryStringFunc is a scalar function over a single string-like argument.
+// View inputs that carry more than one data buffer are coalesced before
+// execution, so kernel implementations can read out-of-line values from
+// Buffers[2].
+type unaryStringFunc struct {
 	ScalarFunction
 }
 
-func (fn *matchSubstringFunc) Execute(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
+func (fn *unaryStringFunc) Execute(ctx context.Context, opts FunctionOptions, args ...Datum) (Datum, error) {
 	if len(args) == 1 {
 		coalesced, err := coalesceMultiBufferViewDatum(ctx, args[0])
 		if err != nil {
@@ -62,21 +67,60 @@ func (fn *matchSubstringFunc) Execute(ctx context.Context, opts FunctionOptions,
 	return execInternal(ctx, fn, opts, -1, args...)
 }
 
-func (fn *matchSubstringFunc) DispatchBest(vals ...arrow.DataType) (exec.Kernel, error) {
+func (fn *unaryStringFunc) DispatchBest(vals ...arrow.DataType) (exec.Kernel, error) {
 	ensureDictionaryDecoded(vals...)
 	ensureNoExtensionType(vals...)
 	return fn.DispatchExact(vals...)
 }
 
-// RegisterScalarString registers the starts_with function.
+var (
+	utf8LengthDoc = FunctionDoc{
+		Summary:     "Compute UTF8 string lengths",
+		Description: "For each string in \"strings\", emit its length in UTF8 characters.\nNull values emit null.",
+		ArgNames:    []string{"strings"},
+	}
+	utf8UpperDoc = FunctionDoc{
+		Summary:     "Transform input to uppercase",
+		Description: "For each string in \"strings\", return an uppercase version.",
+		ArgNames:    []string{"strings"},
+	}
+	utf8LowerDoc = FunctionDoc{
+		Summary:     "Transform input to lowercase",
+		Description: "For each string in \"strings\", return a lowercase version.",
+		ArgNames:    []string{"strings"},
+	}
+)
+
+// RegisterScalarString registers the starts_with, utf8_length, utf8_upper
+// and utf8_lower functions.
 func RegisterScalarString(reg FunctionRegistry) {
-	fn := &matchSubstringFunc{*NewScalarFunction("starts_with", Unary(), startsWithDoc)}
+	fn := &unaryStringFunc{*NewScalarFunction("starts_with", Unary(), startsWithDoc)}
 	for _, k := range kernels.GetStartsWithKernels() {
 		if err := fn.AddKernel(k); err != nil {
 			panic(err)
 		}
 	}
 	reg.AddFunction(fn, false)
+
+	fns := []struct {
+		fn      *unaryStringFunc
+		kernels []exec.ScalarKernel
+	}{
+		{&unaryStringFunc{*NewScalarFunction("utf8_length", Unary(), utf8LengthDoc)},
+			kernels.GetUtf8LengthKernels()},
+		{&unaryStringFunc{*NewScalarFunction("utf8_upper", Unary(), utf8UpperDoc)},
+			kernels.GetUtf8CaseKernels(unicode.ToUpper)},
+		{&unaryStringFunc{*NewScalarFunction("utf8_lower", Unary(), utf8LowerDoc)},
+			kernels.GetUtf8CaseKernels(unicode.ToLower)},
+	}
+	for _, f := range fns {
+		for _, k := range f.kernels {
+			if err := f.fn.AddKernel(k); err != nil {
+				panic(err)
+			}
+		}
+		reg.AddFunction(f.fn, false)
+	}
 }
 
 // StartsWith returns, for each value in input, whether it starts with
@@ -84,4 +128,29 @@ func RegisterScalarString(reg FunctionRegistry) {
 // to their value type, and extension inputs use their storage type.
 func StartsWith(ctx context.Context, opts MatchSubstringOptions, input Datum) (Datum, error) {
 	return CallFunction(ctx, "starts_with", &opts, input)
+}
+
+// Utf8Length returns, for each value in input, its length in Unicode code
+// points. Null values produce null. Dictionary inputs are decoded to
+// their value type, and extension inputs use their storage type.
+func Utf8Length(ctx context.Context, input Datum) (Datum, error) {
+	return CallFunction(ctx, "utf8_length", nil, input)
+}
+
+// Utf8Upper returns an uppercase version of each value in input, mapping
+// each Unicode code point with the Go toolchain's unicode tables, so
+// results can differ between Go versions. Null values produce null.
+// Invalid UTF-8 input returns an error. Dictionary inputs are decoded
+// to their value type, and extension inputs use their storage type.
+func Utf8Upper(ctx context.Context, input Datum) (Datum, error) {
+	return CallFunction(ctx, "utf8_upper", nil, input)
+}
+
+// Utf8Lower returns a lowercase version of each value in input, mapping
+// each Unicode code point with the Go toolchain's unicode tables, so
+// results can differ between Go versions. Null values produce null.
+// Invalid UTF-8 input returns an error. Dictionary inputs are decoded
+// to their value type, and extension inputs use their storage type.
+func Utf8Lower(ctx context.Context, input Datum) (Datum, error) {
+	return CallFunction(ctx, "utf8_lower", nil, input)
 }

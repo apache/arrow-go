@@ -271,3 +271,268 @@ func TestStartsWith(t *testing.T) {
 		assert.ErrorIs(t, err, arrow.ErrInvalid)
 	})
 }
+
+func TestUtf8Length(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	t.Cleanup(func() { mem.AssertSize(t, 0) })
+	ctx := compute.WithAllocator(context.Background(), mem)
+	fromJSON := func(dt arrow.DataType, json string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(json))
+		require.NoError(t, err)
+		t.Cleanup(arr.Release)
+		return arr
+	}
+
+	tests := []struct {
+		name, input, expected string
+	}{
+		{"ascii", `["", "a", "abc"]`, `[0, 1, 3]`},
+		{"multibyte", `["", "ábc", "日本語", "🦄", "aá日🦄", null]`, `[0, 3, 3, 1, 4, null]`},
+		{"all null", `[null, null]`, `[null, null]`},
+		{"empty array", `[]`, `[]`},
+	}
+
+	for _, dt := range []arrow.DataType{
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView,
+	} {
+		for _, tt := range tests {
+			t.Run(dt.String()+"/"+tt.name, func(t *testing.T) {
+				strs := fromJSON(arrow.BinaryTypes.String, tt.input)
+				input, err := compute.CastArray(ctx, strs, compute.SafeCastOptions(dt))
+				require.NoError(t, err)
+				defer input.Release()
+
+				outType := arrow.PrimitiveTypes.Int32
+				if dt.ID() == arrow.LARGE_STRING {
+					outType = arrow.PrimitiveTypes.Int64
+				}
+				expected := fromJSON(outType, tt.expected)
+
+				in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+				defer in.Release()
+				defer exp.Release()
+				checkScalarUnary(t, "utf8_length", in, exp, nil)
+			})
+		}
+	}
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.StringView} {
+		t.Run("sliced/"+dt.String(), func(t *testing.T) {
+			full := fromJSON(dt, `["ab", null, "x", "abc", null, "ab", "b", "abd", "a", "ab"]`)
+			input := array.NewSlice(full, 3, 9)
+			defer input.Release()
+			expected := fromJSON(arrow.PrimitiveTypes.Int32, `[3, null, 2, 1, 3, 1]`)
+
+			in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+			defer in.Release()
+			defer exp.Release()
+			checkScalarUnary(t, "utf8_length", in, exp, nil)
+		})
+	}
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.StringView} {
+		t.Run("dictionary/"+dt.String(), func(t *testing.T) {
+			dict := fromJSON(dt, `["ab", null, "xab"]`)
+			indices := fromJSON(arrow.PrimitiveTypes.Int8, `[0, 1, 2, null, 0]`)
+			input := array.NewDictionaryArray(&arrow.DictionaryType{
+				IndexType: arrow.PrimitiveTypes.Int8, ValueType: dt}, indices, dict)
+			defer input.Release()
+			expected := fromJSON(arrow.PrimitiveTypes.Int32, `[2, null, 3, null, 2]`)
+
+			in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+			defer in.Release()
+			defer exp.Release()
+			checkScalarUnary(t, "utf8_length", in, exp, nil)
+		})
+	}
+
+	t.Run("invalid utf8 counted by code point headers", func(t *testing.T) {
+		bldr := array.NewStringBuilder(mem)
+		defer bldr.Release()
+		for _, v := range []string{"\xff\x80", "\xff", "\xc3\x28"} {
+			bldr.Append(v)
+		}
+		input := bldr.NewArray()
+		defer input.Release()
+		expected := fromJSON(arrow.PrimitiveTypes.Int32, `[1, 1, 2]`)
+
+		in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+		defer in.Release()
+		defer exp.Release()
+		checkScalarUnary(t, "utf8_length", in, exp, nil)
+	})
+}
+
+func TestUtf8CaseConversion(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	t.Cleanup(func() { mem.AssertSize(t, 0) })
+	ctx := compute.WithAllocator(context.Background(), mem)
+	fromJSON := func(dt arrow.DataType, json string) arrow.Array {
+		arr, _, err := array.FromJSON(mem, dt, strings.NewReader(json))
+		require.NoError(t, err)
+		t.Cleanup(arr.Release)
+		return arr
+	}
+
+	tests := []struct {
+		name, input, upper, lower string
+	}{
+		{"ascii", `["", "abc", "ABC", "aBc"]`, `["", "ABC", "ABC", "ABC"]`, `["", "abc", "abc", "abc"]`},
+		{"latin1", `["ábc", "ÁBC"]`, `["ÁBC", "ÁBC"]`, `["ábc", "ábc"]`},
+		{"greek", `["ω", "Ω", "ς"]`, `["Ω", "Ω", "Σ"]`, `["ω", "ω", "ς"]`},
+		{"cyrillic", `["д", "Д"]`, `["Д", "Д"]`, `["д", "д"]`},
+		{"turkish dotted i and eszett", `["ß", "ı", "İ"]`, `["ß", "I", "İ"]`, `["ß", "ı", "i"]`},
+		{"unchanged", `["日本語", "🦄", "42"]`, `["日本語", "🦄", "42"]`, `["日本語", "🦄", "42"]`},
+		{"nulls", `["ab", null, "AB"]`, `["AB", null, "AB"]`, `["ab", null, "ab"]`},
+		{"all null", `[null, null]`, `[null, null]`, `[null, null]`},
+		{"empty array", `[]`, `[]`, `[]`},
+	}
+
+	for _, dt := range []arrow.DataType{
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView,
+	} {
+		for _, tt := range tests {
+			for _, fn := range []struct{ name, expected string }{
+				{"utf8_upper", tt.upper}, {"utf8_lower", tt.lower},
+			} {
+				t.Run(dt.String()+"/"+fn.name+"/"+tt.name, func(t *testing.T) {
+					strs := fromJSON(arrow.BinaryTypes.String, tt.input)
+					input, err := compute.CastArray(ctx, strs, compute.SafeCastOptions(dt))
+					require.NoError(t, err)
+					defer input.Release()
+
+					expected := fromJSON(arrow.BinaryTypes.String, fn.expected)
+					want, err := compute.CastArray(ctx, expected, compute.SafeCastOptions(dt))
+					require.NoError(t, err)
+					defer want.Release()
+
+					in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(want)
+					defer in.Release()
+					defer exp.Release()
+					checkScalarUnary(t, fn.name, in, exp, nil)
+				})
+			}
+		}
+	}
+
+	for _, dt := range []arrow.DataType{
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView,
+	} {
+		t.Run("sliced/"+dt.String(), func(t *testing.T) {
+			full := fromJSON(dt, `["ab", null, "x", "AbC", null, "aB", "b", "abD", "a", "ab"]`)
+			input := array.NewSlice(full, 3, 9)
+			defer input.Release()
+			expected := fromJSON(dt, `["ABC", null, "AB", "B", "ABD", "A"]`)
+
+			in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+			defer in.Release()
+			defer exp.Release()
+			checkScalarUnary(t, "utf8_upper", in, exp, nil)
+		})
+	}
+
+	for _, dt := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.StringView} {
+		t.Run("dictionary/"+dt.String(), func(t *testing.T) {
+			dict := fromJSON(dt, `["ab", null, "xAB"]`)
+			indices := fromJSON(arrow.PrimitiveTypes.Int8, `[0, 1, 2, null, 0]`)
+			input := array.NewDictionaryArray(&arrow.DictionaryType{
+				IndexType: arrow.PrimitiveTypes.Int8, ValueType: dt}, indices, dict)
+			defer input.Release()
+			expected := fromJSON(dt, `["AB", null, "XAB", null, "AB"]`)
+
+			in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+			defer in.Release()
+			defer exp.Release()
+			checkScalarUnary(t, "utf8_upper", in, exp, nil)
+		})
+	}
+
+	t.Run("multi-buffer view", func(t *testing.T) {
+		long := strings.Repeat("x", 20000)
+		upperLong := strings.Repeat("X", 20000)
+		bldr := array.NewStringViewBuilder(mem)
+		defer bldr.Release()
+		for _, v := range []string{"abcdef" + long, "abcdef" + long, "abcdXf" + long, "abcdef", "abcdef" + long} {
+			bldr.Append(v)
+		}
+		bldr.AppendNull()
+		full := bldr.NewArray()
+		defer full.Release()
+		require.Greater(t, len(full.Data().Buffers()), 3)
+		input := array.NewSlice(full, 1, 6)
+		defer input.Release()
+
+		expBldr := array.NewStringViewBuilder(mem)
+		defer expBldr.Release()
+		expBldr.Append("ABCDEF" + upperLong)
+		expBldr.Append("ABCDXF" + upperLong)
+		expBldr.Append("ABCDEF")
+		expBldr.Append("ABCDEF" + upperLong)
+		expBldr.AppendNull()
+		expected := expBldr.NewArray()
+		defer expected.Release()
+
+		in, exp := compute.NewDatumWithoutOwning(input), compute.NewDatumWithoutOwning(expected)
+		defer in.Release()
+		defer exp.Release()
+		checkScalarUnary(t, "utf8_upper", in, exp, nil)
+	})
+
+	for _, dt := range []arrow.DataType{
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView,
+	} {
+		t.Run("invalid utf8/"+dt.String(), func(t *testing.T) {
+			bldr := array.NewBuilder(mem, dt)
+			defer bldr.Release()
+			type appender interface{ AppendString(string) }
+			ap := bldr.(appender)
+			ap.AppendString("\xffbcdefghijklm")
+			ap.AppendString("ab\xff")
+			input := bldr.NewArray()
+			defer input.Release()
+
+			d := compute.NewDatumWithoutOwning(input)
+			defer d.Release()
+			_, err := compute.CallFunction(ctx, "utf8_upper", nil, d)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+			_, err = compute.CallFunction(ctx, "utf8_lower", nil, d)
+			assert.ErrorIs(t, err, arrow.ErrInvalid)
+		})
+	}
+}
+
+func TestUtf8StringFuncs(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	t.Cleanup(func() { mem.AssertSize(t, 0) })
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	input, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["aBá", null]`))
+	require.NoError(t, err)
+	defer input.Release()
+	in := compute.NewDatumWithoutOwning(input)
+	defer in.Release()
+
+	lengths, err := compute.Utf8Length(ctx, in)
+	require.NoError(t, err)
+	defer lengths.Release()
+	expLen, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[3, null]`))
+	require.NoError(t, err)
+	defer expLen.Release()
+	assertDatumsEqual(t, compute.NewDatumWithoutOwning(expLen), lengths, nil, nil)
+
+	upper, err := compute.Utf8Upper(ctx, in)
+	require.NoError(t, err)
+	defer upper.Release()
+	expUpper, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["ABÁ", null]`))
+	require.NoError(t, err)
+	defer expUpper.Release()
+	assertDatumsEqual(t, compute.NewDatumWithoutOwning(expUpper), upper, nil, nil)
+
+	lower, err := compute.Utf8Lower(ctx, in)
+	require.NoError(t, err)
+	defer lower.Release()
+	expLower, _, err := array.FromJSON(mem, arrow.BinaryTypes.String, strings.NewReader(`["abá", null]`))
+	require.NoError(t, err)
+	defer expLower.Release()
+	assertDatumsEqual(t, compute.NewDatumWithoutOwning(expLower), lower, nil, nil)
+}
