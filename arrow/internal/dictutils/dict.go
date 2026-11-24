@@ -277,7 +277,6 @@ func (memo *Memo) reify(id int64, mem memory.Allocator) (arrow.ArrayData, error)
 		defer arr.Release()
 
 		toCombine = append(toCombine, arr)
-		defer data.Release()
 	}
 
 	combined, err := array.Concatenate(toCombine, mem)
@@ -288,6 +287,9 @@ func (memo *Memo) reify(id int64, mem memory.Allocator) (arrow.ArrayData, error)
 	combined.Data().Retain()
 
 	memo.id2dict[id] = []arrow.ArrayData{combined.Data()}
+	for _, data := range v {
+		data.Release()
+	}
 	return combined.Data(), nil
 }
 
