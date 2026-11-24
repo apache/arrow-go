@@ -540,6 +540,7 @@ func (b *BinaryViewBuilder) Release() {
 		return
 	}
 
+	b.blockBuilder.Release()
 	if b.nullBitmap != nil {
 		b.nullBitmap.Release()
 		b.nullBitmap = nil

@@ -762,3 +762,30 @@ func TestBinaryViewStringRoundTrip(t *testing.T) {
 
 	assert.True(t, Equal(arr, arr1))
 }
+
+func TestViewBuilderReleasesOwnedBlocks(t *testing.T) {
+	t.Run("reserved but unused", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		b := NewStringViewBuilder(mem)
+		b.ReserveData(64)
+		b.Release()
+		mem.AssertSize(t, 0)
+	})
+
+	t.Run("appended after transferring blocks to an array", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer mem.AssertSize(t, 0)
+		b := NewBinaryViewBuilder(mem)
+		value := []byte("a value stored outside the view header")
+		b.Append(value)
+		arr := b.NewBinaryViewArray()
+		defer arr.Release()
+
+		b.Retain()
+		b.Append(value)
+		b.Release()
+		b.Append(value)
+		b.Release()
+		assert.Equal(t, value, arr.Value(0))
+	})
+}
