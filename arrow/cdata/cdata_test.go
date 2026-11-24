@@ -34,7 +34,6 @@ import (
 	"runtime/cgo"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -1766,7 +1765,7 @@ func TestAsyncTaskExtractTwice(t *testing.T) {
 
 	task := CArrowAsyncTask{private_data: createHandle(cgo.NewHandle(rec))}
 	assert.Zero(t, int(asyncTaskExtract(&task, nil)))
-	assert.Equal(t, int(syscall.EINVAL), int(asyncTaskExtract(&task, nil)))
+	assert.Equal(t, cEINVAL, int(asyncTaskExtract(&task, nil)))
 }
 
 // A producer may send tasks after cancel; the consumer must still pass each

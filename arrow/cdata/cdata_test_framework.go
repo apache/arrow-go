@@ -176,6 +176,7 @@ import (
 )
 
 const (
+	cEINVAL           = int(C.EINVAL)
 	flagIsNullable    = C.ARROW_FLAG_NULLABLE
 	flagMapKeysSorted = C.ARROW_FLAG_MAP_KEYS_SORTED
 )
