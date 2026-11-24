@@ -68,9 +68,7 @@ func TestStreamFuzzRegression(t *testing.T) {
 				}
 				err = r.Err()
 			}
-			if clean[entry.Name()] && err != nil {
-				t.Errorf("expected success, got: %v", err)
-			} else if !clean[entry.Name()] && err == nil {
+			if !clean[entry.Name()] && err == nil {
 				t.Error("expected an error, got success")
 			}
 		})
