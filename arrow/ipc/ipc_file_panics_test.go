@@ -18,12 +18,16 @@ package ipc_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	flatbuffers "github.com/google/flatbuffers/go"
 )
 
 // Fuzz inputs that used to panic in NewFileReader (apache/arrow-go#1568).
@@ -53,5 +57,58 @@ func TestFileReaderFuzzPanics(t *testing.T) {
 				t.Fatal("expected an error, got success")
 			}
 		})
+	}
+}
+
+// unknownTypeSchema builds a one-field schema whose type id is unknown.
+func unknownTypeSchema(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+	flatbuf.NullStart(b)
+	typ := flatbuf.NullEnd(b)
+	name := b.CreateString("f")
+	flatbuf.FieldStart(b)
+	flatbuf.FieldAddName(b, name)
+	flatbuf.FieldAddTypeType(b, flatbuf.Type(200))
+	flatbuf.FieldAddType(b, typ)
+	field := flatbuf.FieldEnd(b)
+	flatbuf.SchemaStartFieldsVector(b, 1)
+	b.PrependUOffsetT(field)
+	fields := b.EndVector(1)
+	flatbuf.SchemaStart(b)
+	flatbuf.SchemaAddFields(b, fields)
+	return flatbuf.SchemaEnd(b)
+}
+
+// A field with an unknown flatbuf type id must yield an error, not a panic.
+func TestReadersUnknownTypeID(t *testing.T) {
+	// stream: continuation marker, padded length, then a Message wrapping the schema.
+	b := flatbuffers.NewBuilder(0)
+	schema := unknownTypeSchema(b)
+	flatbuf.MessageStart(b)
+	flatbuf.MessageAddVersion(b, flatbuf.MetadataVersionV5)
+	flatbuf.MessageAddHeaderType(b, flatbuf.MessageHeaderSchema)
+	flatbuf.MessageAddHeader(b, schema)
+	b.Finish(flatbuf.MessageEnd(b))
+	msg := b.FinishedBytes()
+	msg = append(msg, make([]byte, -len(msg)&7)...)
+	stream := binary.LittleEndian.AppendUint32(nil, 0xFFFFFFFF)
+	stream = binary.LittleEndian.AppendUint32(stream, uint32(len(msg)))
+	stream = append(stream, msg...)
+	if _, err := ipc.NewReader(bytes.NewReader(stream)); err == nil || !strings.Contains(err.Error(), "200") {
+		t.Errorf("NewReader: expected an error mentioning 200, got %v", err)
+	}
+
+	// file: magic, footer holding the same schema, footer size, magic.
+	b = flatbuffers.NewBuilder(0)
+	schema = unknownTypeSchema(b)
+	flatbuf.FooterStart(b)
+	flatbuf.FooterAddVersion(b, flatbuf.MetadataVersionV5)
+	flatbuf.FooterAddSchema(b, schema)
+	b.Finish(flatbuf.FooterEnd(b))
+	footer := b.FinishedBytes()
+	file := append([]byte("ARROW1\x00\x00"), footer...)
+	file = binary.LittleEndian.AppendUint32(file, uint32(len(footer)))
+	file = append(file, "ARROW1"...)
+	if _, err := ipc.NewFileReader(bytes.NewReader(file)); err == nil || !strings.Contains(err.Error(), "200") {
+		t.Errorf("NewFileReader: expected an error mentioning 200, got %v", err)
 	}
 }

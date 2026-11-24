@@ -896,7 +896,7 @@ func concreteTypeFromFB(typ flatbuf.Type, data flatbuffers.Table, children []arr
 		return ret, nil
 
 	default:
-		panic(fmt.Errorf("arrow/ipc: type %v not implemented", flatbuf.EnumNamesType[typ]))
+		return nil, fmt.Errorf("arrow/ipc: type %v not implemented", typ)
 	}
 }
 
