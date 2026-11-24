@@ -18,6 +18,7 @@
 *.s
 *.tmpldata
 go.sum
+substrait/go.sum
 
 .github/pull_request_template.md
 

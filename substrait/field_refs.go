@@ -27,7 +27,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute"
-	"github.com/apache/arrow-go/v18/arrow/internal"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/substrait-io/substrait-go/v8/expr"
@@ -331,7 +330,7 @@ func structField(mem memory.Allocator, parent arrow.ArrayData, i int) (arrow.Arr
 	if storage.ID() == arrow.NULL {
 		return child, nil
 	}
-	if !internal.DefaultHasValidityBitmap(storage.ID()) {
+	if !hasValidityBitmap(storage.ID()) {
 		err := fmt.Errorf("%w: cannot propagate struct nulls to field type %s", arrow.ErrNotImplemented, child.DataType())
 		child.Release()
 		return nil, err
@@ -357,4 +356,14 @@ func structField(mem memory.Allocator, parent arrow.ArrayData, i int) (arrow.Arr
 		out.SetDictionary(dict)
 	}
 	return out, nil
+}
+
+// hasValidityBitmap reports whether arrays of the given type carry a
+// validity bitmap under the current IPC metadata version.
+func hasValidityBitmap(id arrow.Type) bool {
+	switch id {
+	case arrow.NULL, arrow.DENSE_UNION, arrow.SPARSE_UNION, arrow.RUN_END_ENCODED:
+		return false
+	}
+	return true
 }

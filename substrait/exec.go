@@ -29,7 +29,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/endian"
-	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
 	"github.com/substrait-io/substrait-go/v8/expr"
@@ -704,7 +703,7 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 
 		result := executor.WrapResults(ctx, ch, false)
 		if err == nil {
-			debug.Assert(executor.CheckResultType(result) == nil, "invalid result type")
+			debugAssert(executor.CheckResultType(result) == nil, "invalid result type")
 		}
 
 		if ctx.Err() == context.Canceled && result != nil {

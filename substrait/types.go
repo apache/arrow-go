@@ -20,10 +20,9 @@ package exprs
 
 import (
 	"fmt"
+	"hash/maphash"
 	"strconv"
 	"strings"
-
-	"github.com/apache/arrow-go/v18/internal/utils/maphash"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/compute"

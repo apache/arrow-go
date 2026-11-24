@@ -21,8 +21,8 @@ package exprs_test
 import (
 	"testing"
 
+	exprs "github.com/apache/arrow-go/substrait"
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/compute/exprs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/substrait-io/substrait-go/v8/expr"

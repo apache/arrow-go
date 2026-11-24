@@ -45,6 +45,12 @@ go install "${go_install_arrow_options[@]}" ./...
 
 popd
 
+pushd "${source_dir}/substrait"
+
+go build -v ./...
+
+popd
+
 pushd "${source_dir}/parquet"
 
 go install -v ./...

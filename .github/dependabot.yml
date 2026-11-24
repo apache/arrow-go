@@ -25,3 +25,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  - package-ecosystem: "gomod"
+    directory: "/substrait"
+    schedule:
+      interval: "weekly"
