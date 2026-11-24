@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/internal/flatbuf"
@@ -145,7 +146,10 @@ type MessageReader interface {
 
 // MessageReader reads messages from an io.Reader.
 type messageReader struct {
-	r io.Reader
+	r        io.Reader
+	source   *memory.Buffer
+	offset   int
+	copyBody bool
 
 	refCount atomic.Int64
 	msg      *Message
@@ -198,7 +202,75 @@ func (r *messageReader) Release() {
 			r.msg.Release()
 			r.msg = nil
 		}
+		if r.source != nil {
+			r.source.Release()
+			r.source = nil
+		}
 	}
+}
+
+func (r *messageReader) takeBuffered(n int) ([]byte, error) {
+	if n > r.source.Len()-r.offset {
+		return nil, io.ErrUnexpectedEOF
+	}
+	part := r.source.Bytes()[r.offset : r.offset+n]
+	r.offset += n
+	return part, nil
+}
+
+func (r *messageReader) readHeader(first bool) (uint32, error) {
+	var err error
+	part := r.header[:]
+	switch {
+	case r.source != nil:
+		if first && r.offset == r.source.Len() {
+			return 0, io.EOF
+		}
+		part, err = r.takeBuffered(len(part))
+	case first:
+		_, err = io.ReadFull(r.r, part)
+	default:
+		err = readFullMessagePart(r.r, part)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(part), nil
+}
+
+func (r *messageReader) readMetadata(n int) ([]byte, error) {
+	if r.source != nil {
+		return r.takeBuffered(n)
+	}
+	buf := make([]byte, n)
+	return buf, readFullMessagePart(r.r, buf)
+}
+
+func (r *messageReader) readBody(n int) (ret *memory.Buffer, err error) {
+	var data []byte
+	if r.source != nil {
+		offset := r.offset
+		data, err = r.takeBuffered(n)
+		if err != nil {
+			return nil, err
+		}
+		if !r.copyBody && (n == 0 || uintptr(unsafe.Pointer(unsafe.SliceData(data)))%8 == 0) {
+			return memory.SliceBuffer(r.source, offset, n), nil
+		}
+	}
+	body := memory.NewResizableBuffer(r.mem)
+	defer func() {
+		if ret == nil {
+			body.Release()
+		}
+	}()
+	body.Resize(n)
+	if r.source != nil {
+		copy(body.Bytes(), data)
+	} else if err := readFullMessagePart(r.r, body.Bytes()); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // Message returns the current message that has been extracted from the
@@ -212,25 +284,21 @@ func (r *messageReader) Message() (msg *Message, err error) {
 		}
 	}()
 
-	buf := r.header[:]
-	_, err = io.ReadFull(r.r, buf)
+	cid, err := r.readHeader(true)
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read continuation indicator: %w", err)
 	}
-	var (
-		cid    = binary.LittleEndian.Uint32(buf)
-		msgLen int32
-	)
+	var msgLen int32
 	switch cid {
 	case 0:
 		// EOS message.
 		return nil, io.EOF // FIXME(sbinet): send nil instead? or a special EOS error?
 	case kIPCContToken:
-		err = readFullMessagePart(r.r, buf)
+		length, err := r.readHeader(false)
 		if err != nil {
 			return nil, fmt.Errorf("arrow/ipc: could not read message length: %w", err)
 		}
-		msgLen = int32(binary.LittleEndian.Uint32(buf))
+		msgLen = int32(length)
 		if msgLen == 0 {
 			// optional 0 EOS control message
 			return nil, io.EOF // FIXME(sbinet): send nil instead? or a special EOS error?
@@ -248,8 +316,7 @@ func (r *messageReader) Message() (msg *Message, err error) {
 		return nil, fmt.Errorf("arrow/ipc: message metadata length %d exceeds limit %d", msgLen, r.maxMetadataSize)
 	}
 
-	buf = make([]byte, msgLen)
-	err = readFullMessagePart(r.r, buf)
+	buf, err := r.readMetadata(int(msgLen))
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read message metadata: %w", err)
 	}
@@ -264,14 +331,11 @@ func (r *messageReader) Message() (msg *Message, err error) {
 		return nil, fmt.Errorf("arrow/ipc: message body length %d exceeds limit %d", bodyLen, r.maxBodySize)
 	}
 
-	body := memory.NewResizableBuffer(r.mem)
-	defer body.Release()
-	body.Resize(int(bodyLen))
-
-	err = readFullMessagePart(r.r, body.Bytes())
+	body, err := r.readBody(int(bodyLen))
 	if err != nil {
 		return nil, fmt.Errorf("arrow/ipc: could not read message body: %w", err)
 	}
+	defer body.Release()
 
 	if r.msg != nil {
 		r.msg.Release()
