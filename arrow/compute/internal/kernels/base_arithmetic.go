@@ -285,9 +285,16 @@ func getGoArithmeticOpIntegral[InT, OutT arrow.UintType | arrow.IntType](op Arit
 			return OutT(o)
 		}))
 	case OpDivChecked:
+		// for signed types, ^InT(0) is -1 and min / -1 overflows
+		minusOne, min := ^InT(0), MinOf[InT]()
+		signed := minusOne < 0
 		return ScalarBinaryNotNull(func(_ *exec.KernelCtx, a, b InT, e *error) (out OutT) {
 			if b == 0 {
 				*e = errDivByZero
+				return
+			}
+			if signed && a == min && b == minusOne {
+				*e = errOverflow
 				return
 			}
 			return OutT(a / b)

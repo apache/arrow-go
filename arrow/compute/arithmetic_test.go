@@ -568,6 +568,18 @@ type BinaryIntegralArithmeticSuite[T arrow.IntType | arrow.UintType] struct {
 	BinaryArithmeticSuite[T]
 }
 
+func (b *BinaryIntegralArithmeticSuite[T]) TestDivideOverflow() {
+	if !arrow.IsSignedInteger(b.DataType().ID()) {
+		b.T().SkipNow()
+	}
+
+	b.setOverflowCheck(true)
+	b.assertBinopErr(compute.Divide, fmt.Sprintf("[%v]", b.min), `[-1]`, "overflow")
+
+	b.setOverflowCheck(false)
+	b.assertBinop(compute.Divide, fmt.Sprintf("[%v]", b.min), `[-1]`, fmt.Sprintf("[%v]", b.min))
+}
+
 func (b *BinaryIntegralArithmeticSuite[T]) TestShiftLeft() {
 	b.Run(b.DataType().String(), func() {
 		for _, overflow := range []bool{false, true} {
