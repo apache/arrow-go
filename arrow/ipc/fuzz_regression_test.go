@@ -37,11 +37,9 @@ func TestStreamFuzzRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Go reads these to the end without error or batches; Arrow C++ rejects both
-	// (invalid flatbuffer, decimal precision 0), so tightening validation may flip them.
+	// Go accepts this invalid flatbuffer, which Arrow C++ rejects.
 	clean := map[string]bool{
 		"clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4757582821064704": true,
-		"crash-5e88bae6ac5250714e8c8bc73b9d67b949fadbb4":                        true,
 	}
 	count := 0
 	for _, entry := range entries {
