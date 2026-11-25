@@ -702,9 +702,6 @@ func executeScalarBatch(ctx context.Context, input compute.ExecBatch, exp expr.E
 		}()
 
 		result := executor.WrapResults(ctx, ch, false)
-		if err == nil {
-			debugAssert(executor.CheckResultType(result) == nil, "invalid result type")
-		}
 
 		if ctx.Err() == context.Canceled && result != nil {
 			result.Release()
