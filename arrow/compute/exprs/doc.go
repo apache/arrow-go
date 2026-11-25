@@ -16,7 +16,8 @@
 
 // Package exprs executes Substrait expressions with Arrow compute.
 //
-// Deprecated: use github.com/apache/arrow-go/substrait instead, which has
-// the same API and is versioned separately from Arrow Go. This package will
-// be removed in the next major release of Arrow Go.
+// Deprecated: use github.com/apache/arrow-go/substrait instead, which is
+// versioned separately from Arrow Go and uses substrait-go v9. Callers need
+// to move their own substrait-go imports to v9 as well. This package will be
+// removed in the next major release of Arrow Go.
 package exprs
