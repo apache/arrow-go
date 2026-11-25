@@ -204,6 +204,11 @@ jobs:
           cache-dependency-path: go.sum
       - name: Brew Install Arrow
         run: brew install apache-arrow
+      # Go does not rebuild cgo packages when pkg-config output changes, and
+      # Homebrew's flags contain a versioned Cellar path. A build cache restored
+      # from before a formula update would link against a path that is gone.
+      - name: Drop restored Go build cache
+        run: go clean -cache
       - name: Setup PKG_CONFIG_PATH
         run: |
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
