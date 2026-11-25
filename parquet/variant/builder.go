@@ -32,6 +32,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/internal/json"
 	"github.com/google/uuid"
 	"golang.org/x/exp/constraints"
@@ -1045,6 +1046,9 @@ func (b *Builder) buildJSON(dec *json.Decoder) error {
 func (b *Builder) tryParseDecimal(input string) bool {
 	prec, scale, err := decimal.PrecScaleFromString(input)
 	if err != nil {
+		return false
+	}
+	if prec < 1 || prec > decimal128.MaxPrecision || scale < 0 || scale > prec {
 		return false
 	}
 

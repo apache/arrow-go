@@ -856,3 +856,54 @@ func TestBuilderJSONErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseJSONDecimalPrecisionBounds(t *testing.T) {
+	t.Run("max_decimal16_precision_preserved", func(t *testing.T) {
+		for _, input := range []string{
+			"99999999999999999999999999999999999999",
+			"-99999999999999999999999999999999999999",
+			"0.00000000000000000000000000000000000001",
+			"0.99999999999999999999999999999999999999",
+		} {
+			t.Run(input, func(t *testing.T) {
+				v, err := variant.ParseJSON(input, false)
+				require.NoError(t, err)
+				assert.Equal(t, variant.Decimal16, v.Type())
+				_, err = variant.NewWithMetadata(v.Metadata(), v.Bytes())
+				require.NoError(t, err)
+			})
+		}
+	})
+
+	t.Run("over_decimal16_precision_falls_back_to_double", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			input string
+			want  float64
+		}{
+			{"10_to_38", "100000000000000000000000000000000000000", 1e38},
+			{"max_int128", "170141183460469231731687303715884105727", 170141183460469231731687303715884105727.0},
+			{"min_neg_int128_plus_1", "-170141183460469231731687303715884105727", -170141183460469231731687303715884105727.0},
+			{"one_with_38_frac_zeros", "1.00000000000000000000000000000000000000", 1.0},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				v, err := variant.ParseJSON(tt.input, false)
+				require.NoError(t, err)
+				assert.Equal(t, variant.Double, v.Type())
+				assert.Equal(t, tt.want, v.Value())
+
+				_, err = variant.NewWithMetadata(v.Metadata(), v.Bytes())
+				require.NoError(t, err)
+			})
+		}
+
+		obj, err := variant.ParseJSONBytes([]byte(`{"n": 100000000000000000000000000000000000000}`), false)
+		require.NoError(t, err)
+		field, err := obj.Value().(variant.ObjectValue).ValueByKey("n")
+		require.NoError(t, err)
+		assert.Equal(t, variant.Double, field.Value.Type())
+		assert.Equal(t, 1e38, field.Value.Value())
+	})
+}
