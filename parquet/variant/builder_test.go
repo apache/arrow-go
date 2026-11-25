@@ -18,6 +18,7 @@ package variant_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -782,6 +783,51 @@ func TestAppendReset(t *testing.T) {
 	out3, err := json.Marshal(v1Clone)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"key": "value"}`, string(out3))
+}
+
+func TestBuilderResetClearsTotalDictSize(t *testing.T) {
+	var b variant.Builder
+
+	longKey := strings.Repeat("k", 300)
+	require.NoError(t, b.Append(map[string]any{longKey: 1}))
+	v1, err := b.Build()
+	require.NoError(t, err)
+	require.Greater(t, v1.Metadata().OffsetSize(), uint8(1))
+	v1Len := len(v1.Metadata().Bytes())
+
+	// After Reset, building a primitive must produce compact empty metadata
+	// with no trailing padding or inflated offset width from prior builds.
+	b.Reset()
+	require.NoError(t, b.AppendInt(42))
+	v2, err := b.Build()
+	require.NoError(t, err)
+
+	m2 := v2.Metadata()
+	assert.Equal(t, uint8(1), m2.OffsetSize())
+	assert.Equal(t, variant.EmptyMetadataBytes[:], m2.Bytes())
+	assert.Equal(t, len(m2.Bytes()), m2.SizeBytes())
+
+	// Building an object with a short key after Reset must also use 1-byte offsets
+	// and exact-length metadata bytes.
+	b.Reset()
+	require.NoError(t, b.Append(map[string]any{"a": 7}))
+	v3, err := b.Build()
+	require.NoError(t, err)
+
+	m3 := v3.Metadata()
+	assert.Equal(t, uint8(1), m3.OffsetSize())
+	assert.Equal(t, len(m3.Bytes()), m3.SizeBytes())
+
+	// Repeated resets with the same key must keep metadata length constant
+	// instead of accumulating totalDictSize across builds.
+	for range 5 {
+		b.Reset()
+		require.NoError(t, b.Append(map[string]any{longKey: 1}))
+		v, err := b.Build()
+		require.NoError(t, err)
+		assert.Equal(t, v1Len, len(v.Metadata().Bytes()))
+		assert.Equal(t, len(v.Metadata().Bytes()), v.Metadata().SizeBytes())
+	}
 }
 
 func TestBuilderFromJSON(t *testing.T) {

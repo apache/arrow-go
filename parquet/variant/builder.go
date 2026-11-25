@@ -821,6 +821,7 @@ func (b *Builder) Reset() {
 		b.dictKeys[i] = nil
 	}
 	b.dictKeys = b.dictKeys[:0]
+	b.totalDictSize = 0
 }
 
 // BuildWithoutMeta returns just the raw variant bytes that were built without
