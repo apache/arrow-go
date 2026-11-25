@@ -372,6 +372,151 @@ func BenchmarkRecordFromJSON(b *testing.B) {
 	}
 }
 
+func benchmarkFieldType(i int) arrow.DataType {
+	switch i % 4 {
+	case 0:
+		return arrow.PrimitiveTypes.Int64
+	case 1:
+		return arrow.BinaryTypes.String
+	case 2:
+		return arrow.PrimitiveTypes.Float64
+	default:
+		return arrow.FixedWidthTypes.Boolean
+	}
+}
+
+func benchmarkSchema(numFields int, nullable bool) *arrow.Schema {
+	fields := make([]arrow.Field, numFields)
+	for i := range fields {
+		fields[i] = arrow.Field{
+			Name:     fmt.Sprintf("f%d", i),
+			Type:     benchmarkFieldType(i),
+			Nullable: nullable,
+		}
+	}
+	return arrow.NewSchema(fields, nil)
+}
+
+func benchmarkNDJSON(rows, numFields int) []byte {
+	var buf bytes.Buffer
+	for row := range rows {
+		buf.WriteByte('{')
+		for i := range numFields {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			fmt.Fprintf(&buf, `"f%d":`, i)
+			switch i % 4 {
+			case 0:
+				fmt.Fprintf(&buf, "%d", row*numFields+i)
+			case 1:
+				fmt.Fprintf(&buf, `"s_%d_%d"`, row, i)
+			case 2:
+				fmt.Fprintf(&buf, "%d.5", row+i)
+			default:
+				fmt.Fprintf(&buf, "%t", (row+i)%2 == 0)
+			}
+		}
+		buf.WriteString("}\n")
+	}
+	return buf.Bytes()
+}
+
+func BenchmarkJSONReaderRowShape(b *testing.B) {
+	shapes := []struct {
+		name   string
+		fields int
+	}{
+		{"Small_3Fields", 3},
+		{"Medium_10Fields", 10},
+		{"Large_100Fields", 100},
+	}
+
+	for _, shape := range shapes {
+		data := benchmarkNDJSON(10000, shape.fields)
+
+		for _, nullable := range []bool{false, true} {
+			schema := benchmarkSchema(shape.fields, nullable)
+
+			b.Run(fmt.Sprintf("%s/Nullable_%t", shape.name, nullable), func(b *testing.B) {
+				pool := memory.NewGoAllocator()
+
+				var rdr bytes.Reader
+				b.SetBytes(int64(len(data)))
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					rdr.Reset(data)
+
+					jsonRdr := array.NewJSONReader(&rdr, schema, array.WithAllocator(pool),
+						array.WithChunk(-1))
+
+					var totalRows int64
+					for jsonRdr.Next() {
+						totalRows += jsonRdr.RecordBatch().NumRows()
+					}
+
+					if err := jsonRdr.Err(); err != nil {
+						b.Errorf("error reading JSON: %v", err)
+					}
+					jsonRdr.Release()
+
+					if totalRows != 10000 {
+						b.Errorf("expected 10000 rows, got %d", totalRows)
+					}
+				}
+			})
+		}
+	}
+}
+
+func benchmarkEscapedNDJSON(rows int) []byte {
+	var buf bytes.Buffer
+	for row := range rows {
+		fmt.Fprintf(&buf, `{"f0":"s_%d\nx"}`+"\n", row)
+	}
+	return buf.Bytes()
+}
+
+func BenchmarkJSONReaderEscapedString(b *testing.B) {
+	data := benchmarkEscapedNDJSON(10000)
+
+	for _, nullable := range []bool{false, true} {
+		schema := arrow.NewSchema([]arrow.Field{
+			{Name: "f0", Type: arrow.BinaryTypes.String, Nullable: nullable},
+		}, nil)
+
+		b.Run(fmt.Sprintf("Nullable_%t", nullable), func(b *testing.B) {
+			pool := memory.NewGoAllocator()
+
+			var rdr bytes.Reader
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				rdr.Reset(data)
+
+				jsonRdr := array.NewJSONReader(&rdr, schema, array.WithAllocator(pool),
+					array.WithChunk(-1))
+
+				var totalRows int64
+				for jsonRdr.Next() {
+					totalRows += jsonRdr.RecordBatch().NumRows()
+				}
+
+				if err := jsonRdr.Err(); err != nil {
+					b.Errorf("error reading JSON: %v", err)
+				}
+				jsonRdr.Release()
+
+				if totalRows != 10000 {
+					b.Errorf("expected 10000 rows, got %d", totalRows)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkJSONReader(b *testing.B) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64},

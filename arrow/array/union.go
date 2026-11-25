@@ -810,6 +810,8 @@ type unionBuilder struct {
 	// for all typeID < denseTypeID, typeIDtoBuilder[typeID] != nil
 	denseTypeID  int
 	typesBuilder *int8BufferBuilder
+
+	checkpoint *builderCheckpoint
 }
 
 func unionTypeCodeFromJSON(dec *json.Decoder, typeID json.RawMessage, typ arrow.DataType) (arrow.UnionTypeCode, error) {
@@ -1169,6 +1171,19 @@ func (b *SparseUnionBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *SparseUnionBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1209,7 +1224,7 @@ func (b *SparseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 		}
 
 		b.Append(typeCode)
-		if err := b.children[childNum].UnmarshalOne(dec); err != nil {
+		if err := unmarshalChild(dec, b.children[childNum], b.childFields[childNum], b.rowBuffered); err != nil {
 			return err
 		}
 
@@ -1430,6 +1445,19 @@ func (d *DenseUnionBuilder) AppendValueFromString(s string) error {
 }
 
 func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
+	if b.checkpoint == nil {
+		b.checkpoint = newBuilderCheckpoint(b)
+	}
+	b.checkpoint.capture()
+
+	if err := b.unmarshalOne(dec); err != nil {
+		b.checkpoint.restore()
+		return err
+	}
+	return nil
+}
+
+func (b *DenseUnionBuilder) unmarshalOne(dec *json.Decoder) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -1464,7 +1492,7 @@ func (b *DenseUnionBuilder) UnmarshalOne(dec *json.Decoder) error {
 		}
 
 		b.Append(typeCode)
-		if err := b.children[childNum].UnmarshalOne(dec); err != nil {
+		if err := unmarshalChild(dec, b.children[childNum], b.childFields[childNum], b.rowBuffered); err != nil {
 			return err
 		}
 

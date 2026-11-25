@@ -17,12 +17,15 @@
 package array
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"math/bits"
 	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
+	"github.com/apache/arrow-go/v18/arrow/internal/debug"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/internal/json"
 )
@@ -82,6 +85,11 @@ type Builder interface {
 	// truncate removes elements from the end of the builder without changing its capacity.
 	truncate(n int)
 
+	// setRowBuffered tells the builder whether the JSON decoder it is handed
+	// reads from a row an ancestor builder already buffered, so that it does
+	// not buffer that row a second time.
+	setRowBuffered(bool)
+
 	// NewArray creates a new array from the memory buffers used
 	// by the builder and resets the Builder so it can be used to build
 	// a new array.
@@ -106,13 +114,16 @@ type Builder interface {
 
 // builder provides common functionality for managing the validity bitmap (nulls) when building arrays.
 type builder struct {
-	refCount   atomic.Int64
-	mem        memory.Allocator
-	nullBitmap *memory.Buffer
-	nulls      int
-	length     int
-	capacity   int
+	refCount    atomic.Int64
+	mem         memory.Allocator
+	nullBitmap  *memory.Buffer
+	nulls       int
+	length      int
+	capacity    int
+	rowBuffered bool
 }
+
+func (b *builder) setRowBuffered(v bool) { b.rowBuffered = v }
 
 // Retain increases the reference count by 1.
 // Retain may be called simultaneously from multiple goroutines.
@@ -398,6 +409,174 @@ func (b *builder) UnsafeAppendBoolToBitmap(isValid bool) {
 		b.nulls++
 	}
 	b.length++
+}
+
+// unmarshalledNullTracker is implemented by builders whose NullN is not exact,
+// so that unmarshalChild can still tell whether UnmarshalOne appended a null.
+type unmarshalledNullTracker interface {
+	// lastUnmarshalledNull reports whether the value appended by the most
+	// recent UnmarshalOne call was null. It is only meaningful immediately
+	// after that call.
+	lastUnmarshalledNull() bool
+}
+
+func unmarshalChild(dec *json.Decoder, child Builder, field arrow.Field, rowBuffered bool) error {
+	child.setRowBuffered(rowBuffered)
+
+	if field.Nullable {
+		return child.UnmarshalOne(dec)
+	}
+
+	nulls := child.NullN()
+	length := child.Len()
+	if err := child.UnmarshalOne(dec); err != nil {
+		return err
+	}
+	if child.Len() != length+1 {
+		return nil
+	}
+
+	appendedNull := false
+	if nulls == UnknownNullCount {
+		tracker, ok := child.(unmarshalledNullTracker)
+		debug.Assert(ok, "builder with an unknown null count must implement unmarshalledNullTracker")
+		appendedNull = ok && tracker.lastUnmarshalledNull()
+	} else {
+		// Every builder appends a null for a JSON null and for nothing else, so
+		// the child's null count going up by one over the call means the input
+		// had a null.
+		appendedNull = child.NullN() == nulls+1
+	}
+
+	if appendedNull {
+		return fmt.Errorf("field '%s' is non-nullable but got null", field.Name)
+	}
+	return nil
+}
+
+// rowDecoder decodes a value out of a reused copy of that value, so that
+// unescaping a string costs O(value) instead of O(remaining document).
+//
+// NOTE: goccy/go-json unescapes in place and shifts every byte after the escape,
+// which is a big performance cost for large JSON documents:
+// https://github.com/goccy/go-json/blob/v0.10.6/internal/decoder/string.go#L190
+type rowDecoder struct {
+	buf     json.RawMessage
+	reader  bytes.Reader
+	scratch json.RawMessage
+}
+
+func (r *rowDecoder) next(dec *json.Decoder) (*json.Decoder, error) {
+	if err := dec.Decode(&r.buf); err != nil {
+		return nil, err
+	}
+
+	r.reader.Reset(r.buf)
+	rowDec := json.NewDecoder(&r.reader)
+	rowDec.UseNumber()
+	return rowDec, nil
+}
+
+func (r *rowDecoder) skip(dec *json.Decoder) error {
+	return dec.Decode(&r.scratch)
+}
+
+// fieldContainer is what nestedJSONDecoder needs out of *arrow.Schema and
+// *arrow.StructType.
+type fieldContainer interface {
+	NumFields() int
+	Field(i int) arrow.Field
+}
+
+// nestedJSONDecoder decodes JSON objects into one builder per field.
+type nestedJSONDecoder struct {
+	rowDecoder
+
+	fields   fieldContainer
+	seen     []bool
+	fieldIdx map[string]int
+}
+
+func newNestedJSONDecoder(fields fieldContainer) nestedJSONDecoder {
+	return nestedJSONDecoder{fields: fields}
+}
+
+func (d *nestedJSONDecoder) fieldIndexByName(name string) (int, bool) {
+	if d.fieldIdx == nil {
+		d.fieldIdx = make(map[string]int, d.fields.NumFields())
+		for i := 0; i < d.fields.NumFields(); i++ {
+			d.fieldIdx[d.fields.Field(i).Name] = i
+		}
+	}
+	idx, ok := d.fieldIdx[name]
+	return idx, ok
+}
+
+// unmarshalFields consumes one object from the decoder and appends its fields to
+// each nested field builder. It consumes the opening and closing '{' and '}'.
+//
+// Nullable fields that are not present in the JSON-object are assumed to be null.
+func (d *nestedJSONDecoder) unmarshalFields(dec *json.Decoder, builders []Builder, rowBuffered bool) error {
+	// grow the "seen" buffer if needed
+	if cap(d.seen) < d.fields.NumFields() {
+		d.seen = make([]bool, d.fields.NumFields())
+	} else {
+		d.seen = d.seen[:d.fields.NumFields()]
+		clear(d.seen)
+	}
+
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+
+		key, ok := keyTok.(string)
+		if !ok {
+			return errors.New("JSON row must be an object with keys and values, but key is missing")
+		}
+
+		idx, ok := d.fieldIndexByName(key)
+		if !ok {
+			// TODO(serramatutu): this is equivalent to ParseOptions::Ignore in Arrow C++, i.e silently drop extra keys.
+			// We should eventually support ParseOptions::InferType and ParseOptions::Error
+			if err := d.skip(dec); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if d.seen[idx] {
+			return fmt.Errorf("key '%s' is specified twice", key)
+		}
+		d.seen[idx] = true
+
+		if err := unmarshalChild(dec, builders[idx], d.fields.Field(idx), rowBuffered); err != nil {
+			return err
+		}
+	}
+
+	// consume the closing '}'
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+
+	// check that all non-nullable fields were specified
+	for i := 0; i < d.fields.NumFields(); i++ {
+		field := d.fields.Field(i)
+		if !d.seen[i] && !field.Nullable {
+			return fmt.Errorf("field '%s' is required but no value was given", field.Name)
+		}
+	}
+
+	// missing fields are nullable at this point, so they get a null
+	for i := 0; i < d.fields.NumFields(); i++ {
+		if !d.seen[i] {
+			builders[i].AppendNull()
+		}
+	}
+
+	return nil
 }
 
 func NewBuilder(mem memory.Allocator, dtype arrow.DataType) Builder {
