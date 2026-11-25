@@ -16,7 +16,7 @@
 
 //go:build go1.18
 
-package exprs
+package substrait
 
 import (
 	"fmt"

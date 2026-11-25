@@ -14,9 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package exprs executes Substrait expressions with Arrow compute.
+// Package substrait executes Substrait expressions with Arrow compute.
 //
 // It is versioned separately from the rest of Arrow Go so that
 // substrait-go major version upgrades don't require an Arrow Go major
 // release.
-package exprs
+package substrait

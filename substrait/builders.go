@@ -17,7 +17,7 @@
 
 //go:build go1.18
 
-package exprs
+package substrait
 
 import (
 	"fmt"
@@ -287,7 +287,7 @@ type Builder interface {
 //	            int32(0), false)))
 //	ex, err := call.BuildExpr()
 //	...
-//	result, err := exprs.ExecuteScalarExpression(ctx, arrowschema,
+//	result, err := substrait.ExecuteScalarExpression(ctx, arrowschema,
 //	       ex, input)
 type ExprBuilder struct {
 	b           expr.ExprBuilder

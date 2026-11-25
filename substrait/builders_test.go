@@ -16,12 +16,12 @@
 
 //go:build go1.18
 
-package exprs_test
+package substrait_test
 
 import (
 	"testing"
 
-	exprs "github.com/apache/arrow-go/substrait"
+	"github.com/apache/arrow-go/substrait"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,9 +29,9 @@ import (
 )
 
 func TestNewScalarFunc(t *testing.T) {
-	reg := exprs.NewDefaultExtensionSet()
+	reg := substrait.NewDefaultExtensionSet()
 
-	fn, err := exprs.NewScalarCall(reg, "add", nil,
+	fn, err := substrait.NewScalarCall(reg, "add", nil,
 		expr.NewPrimitiveLiteral(int32(1), false),
 		expr.NewPrimitiveLiteral(int32(10), false))
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestFieldRefDotPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.dotpath, func(t *testing.T) {
-			ref, err := exprs.NewFieldRefFromDotPath(tt.dotpath, s)
+			ref, err := substrait.NewFieldRefFromDotPath(tt.dotpath, s)
 			if tt.shouldErr {
 				assert.Error(t, err)
 			} else {

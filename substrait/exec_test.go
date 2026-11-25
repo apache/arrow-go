@@ -16,14 +16,14 @@
 
 //go:build go1.18
 
-package exprs_test
+package substrait_test
 
 import (
 	"context"
 	"strings"
 	"testing"
 
-	exprs "github.com/apache/arrow-go/substrait"
+	"github.com/apache/arrow-go/substrait"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/compute"
@@ -40,8 +40,8 @@ import (
 )
 
 var (
-	extSet     = exprs.NewDefaultExtensionSet()
-	u32Type, _ = exprs.ToSubstraitType(arrow.PrimitiveTypes.Uint32, true, extSet)
+	extSet     = substrait.NewDefaultExtensionSet()
+	u32Type, _ = substrait.ToSubstraitType(arrow.PrimitiveTypes.Uint32, true, extSet)
 
 	boringSchema = types.NamedStruct{
 		Names: []string{
@@ -97,7 +97,7 @@ func TestToArrowSchema(t *testing.T) {
 		{Name: "bin", Type: arrow.BinaryTypes.Binary, Nullable: true},
 	}, nil)
 
-	sc, err := exprs.ToArrowSchema(boringSchema, extSet)
+	sc, err := substrait.ToArrowSchema(boringSchema, extSet)
 	assert.NoError(t, err)
 
 	assert.Truef(t, expectedSchema.Equal(sc), "expected: %s\ngot: %s", expectedSchema, sc)
@@ -169,7 +169,7 @@ func TestComparisons(t *testing.T) {
 			},
 		}
 
-		ex, err := exprs.NewScalarCall(extSet, fn, nil,
+		ex, err := substrait.NewScalarCall(extSet, fn, nil,
 			expr.MustExpr(expr.NewRootFieldRef(expr.NewStructFieldRef(0), types.NewRecordTypeFromStruct(baseStruct.Struct))),
 			expr.MustExpr(expr.NewRootFieldRef(expr.NewStructFieldRef(1), types.NewRecordTypeFromStruct(baseStruct.Struct))))
 		require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestComparisons(t *testing.T) {
 		}
 
 		input, _ := scalar.NewStructScalarWithNames([]scalar.Scalar{arg1, arg2}, []string{"arg1", "arg2"})
-		out, err := exprs.ExecuteScalarSubstrait(ctx, expression, compute.NewDatum(input))
+		out, err := substrait.ExecuteScalarSubstrait(ctx, expression, compute.NewDatum(input))
 		require.NoError(t, err)
 		require.Equal(t, compute.KindScalar, out.Kind())
 
@@ -322,14 +322,14 @@ func TestExecuteFieldRef(t *testing.T) {
 			scoped := memory.NewCheckedAllocatorScope(mem)
 			defer scoped.CheckSize(t)
 
-			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
 			dt := tt.input.(compute.ArrayLikeDatum).Type().(arrow.NestedType)
 			schema := arrow.NewSchema(dt.Fields(), nil)
-			ref, err := exprs.NewFieldRef(tt.ref, schema, extSet)
+			ref, err := substrait.NewFieldRef(tt.ref, schema, extSet)
 			require.NoError(t, err)
 			assert.NotNil(t, ref)
 
-			actual, err := exprs.ExecuteScalarExpression(ctx, schema, ref, tt.input)
+			actual, err := substrait.ExecuteScalarExpression(ctx, schema, ref, tt.input)
 			require.NoError(t, err)
 			defer actual.Release()
 
@@ -339,7 +339,7 @@ func TestExecuteFieldRef(t *testing.T) {
 }
 
 func TestGetRefFieldEmptySchema(t *testing.T) {
-	_, err := exprs.GetRefField(expr.NewStructFieldRef(0), nil)
+	_, err := substrait.GetRefField(expr.NewStructFieldRef(0), nil)
 	assert.ErrorIs(t, err, compute.ErrNoChildren)
 }
 
@@ -350,7 +350,7 @@ func TestGetRefFieldNestedNoChildren(t *testing.T) {
 	}
 	fields := []arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int32}}
 
-	_, err := exprs.GetRefField(ref, fields)
+	_, err := substrait.GetRefField(ref, fields)
 	assert.ErrorIs(t, err, compute.ErrNoChildren)
 	assert.EqualError(t, err, compute.ErrNoChildren.Error()+": int32")
 }
@@ -372,11 +372,11 @@ func TestExecuteScalarFuncCall(t *testing.T) {
 		{Name: "a", Type: arrow.StructOf(basicSchema.Fields()...), Nullable: false},
 	}, nil)
 
-	bldr := exprs.NewExprBuilder(extSet)
+	bldr := substrait.NewExprBuilder(extSet)
 
 	tests := []struct {
 		name     string
-		ex       exprs.Builder
+		ex       substrait.Builder
 		sc       *arrow.Schema
 		input    compute.Datum
 		expected compute.Datum
@@ -423,11 +423,11 @@ func TestExecuteScalarFuncCall(t *testing.T) {
 			ex, err := tt.ex.BuildExpr()
 			require.NoError(t, err)
 
-			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
 			dt := tt.input.(compute.ArrayLikeDatum).Type().(arrow.NestedType)
 			schema := arrow.NewSchema(dt.Fields(), nil)
 
-			actual, err := exprs.ExecuteScalarExpression(ctx, schema, ex, tt.input)
+			actual, err := substrait.ExecuteScalarExpression(ctx, schema, ex, tt.input)
 			require.NoError(t, err)
 			defer actual.Release()
 
@@ -441,13 +441,13 @@ func TestGenerateMask(t *testing.T) {
 		Name: "in", Type: arrow.FixedWidthTypes.Boolean, Nullable: true})
 	require.NoError(t, err)
 
-	bldr := exprs.NewExprBuilder(extSet)
+	bldr := substrait.NewExprBuilder(extSet)
 	require.NoError(t, bldr.SetInputSchema(sc))
 
 	tests := []struct {
 		name   string
 		json   string
-		filter exprs.Builder
+		filter substrait.Builder
 	}{
 		{"simple", `[
 			{"i32": 0, "f32": -0.1, "in": true},
@@ -479,7 +479,7 @@ func TestGenerateMask(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 			defer mem.AssertSize(t, 0)
 
-			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
 
 			rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(tt.json))
 			require.NoError(t, err)
@@ -488,7 +488,7 @@ func TestGenerateMask(t *testing.T) {
 			input := compute.NewDatumWithoutOwning(rec)
 			expectedMask := rec.Column(0)
 
-			mask, err := exprs.ExecuteScalarExpression(ctx, sc,
+			mask, err := substrait.ExecuteScalarExpression(ctx, sc,
 				expr.MustExpr(tt.filter.BuildExpr()), input)
 			require.NoError(t, err)
 			defer mask.Release()
@@ -666,8 +666,8 @@ func Test_Types(t *testing.T) {
 			schema := tc.schema()
 			record := tc.record(rq, schema)
 
-			extSet := exprs.GetExtensionIDSet(ctx)
-			builder := exprs.NewExprBuilder(extSet)
+			extSet := substrait.GetExtensionIDSet(ctx)
+			builder := substrait.NewExprBuilder(extSet)
 
 			err := builder.SetInputSchema(schema)
 			rq.NoError(err, "Failed to set input schema")
@@ -682,12 +682,12 @@ func Test_Types(t *testing.T) {
 			e, err := b.BuildExpr()
 			rq.NoError(err, "Failed to build expression")
 
-			ctx = exprs.WithExtensionIDSet(ctx, extSet)
+			ctx = substrait.WithExtensionIDSet(ctx, extSet)
 
 			dr := compute.NewDatum(record)
 			defer dr.Release()
 
-			_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+			_, err = substrait.ExecuteScalarExpression(ctx, schema, e, dr)
 			rq.NoError(err, "Failed to execute scalar expression")
 		})
 	}
@@ -708,27 +708,27 @@ func TestLargeTypes(t *testing.T) {
 	dr := compute.NewDatumWithoutOwning(rec)
 
 	t.Run("large_string ref", func(t *testing.T) {
-		bldr := exprs.NewExprBuilder(extSet)
+		bldr := substrait.NewExprBuilder(extSet)
 		require.NoError(t, bldr.SetInputSchema(sc))
 
 		e, err := bldr.FieldRef("str").BuildExpr()
 		require.NoError(t, err, "Failed to build field reference expression")
 
 		ctx := context.Background()
-		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, dr)
+		result, err := substrait.ExecuteScalarExpression(ctx, sc, e, dr)
 		require.NoError(t, err, "Failed to execute scalar expression")
 		defer result.Release()
 	})
 
 	t.Run("large_binary ref", func(t *testing.T) {
-		bldr := exprs.NewExprBuilder(extSet)
+		bldr := substrait.NewExprBuilder(extSet)
 		require.NoError(t, bldr.SetInputSchema(sc))
 
 		e, err := bldr.FieldRef("bin").BuildExpr()
 		require.NoError(t, err, "Failed to build field reference expression")
 
 		ctx := context.Background()
-		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, dr)
+		result, err := substrait.ExecuteScalarExpression(ctx, sc, e, dr)
 		require.NoError(t, err, "Failed to execute scalar expression")
 		defer result.Release()
 	})
@@ -768,13 +768,13 @@ func TestDictionaryTypes(t *testing.T) {
 			defer rec.Release()
 			input := compute.NewDatumWithoutOwning(rec)
 
-			bldr := exprs.NewExprBuilder(extSet)
+			bldr := substrait.NewExprBuilder(extSet)
 			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
 				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
 
 			cases := []struct {
 				name     string
-				ex       exprs.Builder
+				ex       substrait.Builder
 				expected string
 			}{
 				{"equal", bldr.MustCallScalar("equal", nil, bldr.FieldRef("col"), bldr.Literal(tt.lit)),
@@ -788,8 +788,8 @@ func TestDictionaryTypes(t *testing.T) {
 					ex, err := c.ex.BuildExpr()
 					require.NoError(t, err)
 
-					ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-					result, err := exprs.ExecuteScalarExpression(ctx, dictSchema, ex, input)
+					ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+					result, err := substrait.ExecuteScalarExpression(ctx, dictSchema, ex, input)
 					require.NoError(t, err)
 					defer result.Release()
 
@@ -830,7 +830,7 @@ func TestDictionaryTypes(t *testing.T) {
 			rec := array.NewRecordBatch(dictSchema, []arrow.Array{col}, int64(col.Len()))
 			defer rec.Release()
 
-			bldr := exprs.NewExprBuilder(extSet)
+			bldr := substrait.NewExprBuilder(extSet)
 			require.NoError(t, bldr.SetInputSchema(arrow.NewSchema(
 				[]arrow.Field{{Name: "col", Type: tt.valueType, Nullable: true}}, nil)))
 			ex, err := bldr.FieldRef("col").BuildExpr()
@@ -839,13 +839,13 @@ func TestDictionaryTypes(t *testing.T) {
 				// Bypass signature validation to exercise kernel dispatch for
 				// is_nan on string and binary dictionaries.
 				ex, err = expr.NewCustomScalarFunc(extSet.GetSubstraitRegistry(),
-					substraitext.NewScalarFuncVariant(exprs.FunctionID{URN: exprs.SubstraitComparisonFuncsURI, Name: tt.fn}),
+					substraitext.NewScalarFuncVariant(substrait.FunctionID{URN: substrait.SubstraitComparisonFuncsURI, Name: tt.fn}),
 					&types.BooleanType{Nullability: types.NullabilityNullable}, nil, ex)
 				require.NoError(t, err)
 			}
 
-			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-			_, err = exprs.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
+			ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			_, err = substrait.ExecuteScalarExpression(ctx, dictSchema, ex, compute.NewDatumWithoutOwning(rec))
 			assert.ErrorIs(t, err, tt.err)
 			assert.ErrorContains(t, err, "dictionary<")
 		})
@@ -883,13 +883,13 @@ func TestFieldRefTypeMismatchReleases(t *testing.T) {
 			require.NoError(t, err)
 			defer rec.Release()
 
-			bldr := exprs.NewExprBuilder(extSet)
+			bldr := substrait.NewExprBuilder(extSet)
 			require.NoError(t, bldr.SetInputSchema(exprSchema))
 			e, err := bldr.FieldRefList(tt.path...).BuildExpr()
 			require.NoError(t, err)
 
 			ctx := compute.WithAllocator(context.Background(), mem)
-			result, err := exprs.ExecuteScalarExpression(ctx, dataSchema, e, compute.NewDatumWithoutOwning(rec))
+			result, err := substrait.ExecuteScalarExpression(ctx, dataSchema, e, compute.NewDatumWithoutOwning(rec))
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
 			assert.ErrorContains(t, err, tt.wantMsg)
 			assert.Nil(t, result)
@@ -908,8 +908,8 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 	}
 
 	execute := func(t *testing.T, mem memory.Allocator, sc *arrow.Schema, e expr.Expression, input compute.Datum) compute.Datum {
-		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, input)
+		ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := substrait.ExecuteScalarExpression(ctx, sc, e, input)
 		require.NoError(t, err)
 		return result
 	}
@@ -923,7 +923,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		rec, _, err := array.RecordFromJSON(mem, sc, strings.NewReader(`[{"s": {"a": 1}}, {"s": {"a": 2}}]`))
 		require.NoError(t, err)
 
-		bldr := exprs.NewExprBuilder(extSet)
+		bldr := substrait.NewExprBuilder(extSet)
 		require.NoError(t, bldr.SetInputSchema(sc))
 		e, err := bldr.FieldRefList("s", "a").BuildExpr()
 		require.NoError(t, err)
@@ -948,7 +948,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		input := scalarInput(t, mem, dt, `[{"s": {"b": "aGVsbG8="}}]`)
 		sc := arrow.NewSchema(dt.Fields(), nil)
 
-		bldr := exprs.NewExprBuilder(extSet)
+		bldr := substrait.NewExprBuilder(extSet)
 		require.NoError(t, bldr.SetInputSchema(sc))
 		e, err := bldr.FieldRefList("s", "b").BuildExpr()
 		require.NoError(t, err)
@@ -971,7 +971,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		defer input.Release()
 		sc := arrow.NewSchema(dt.Fields(), nil)
 
-		st, err := exprs.ToSubstraitType(dt, false, extSet)
+		st, err := substrait.ToSubstraitType(dt, false, extSet)
 		require.NoError(t, err)
 		e, err := expr.NewRootFieldRef(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0,
 			Child: &expr.ListElementRef{Offset: 1}}},
@@ -993,7 +993,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 		input := scalarInput(t, mem, dt, `[{"s": {"l": [{"x": "aGVsbG8="}, {"x": "d29ybGQ="}]}}]`)
 		sc := arrow.NewSchema(dt.Fields(), nil)
 
-		st, err := exprs.ToSubstraitType(dt, false, extSet)
+		st, err := substrait.ToSubstraitType(dt, false, extSet)
 		require.NoError(t, err)
 		e, err := expr.NewRootFieldRef(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0,
 			Child: &expr.ListElementRef{Offset: 1, Child: &expr.StructFieldRef{Field: 0}}}},
@@ -1016,7 +1016,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 			arrow.Field{Name: "t", Type: inner, Nullable: true}), Nullable: true})
 		input := scalarInput(t, mem, dt, `[{"s": {"t": {"b": "aGVsbG8="}}}]`)
 
-		result, err := exprs.GetReferencedValue(mem,
+		result, err := substrait.GetReferencedValue(mem,
 			&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0}},
 			compute.NewDatumWithoutOwning(input), extSet)
 		require.NoError(t, err)
@@ -1035,7 +1035,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 			strings.NewReader(`[["YQ==", "Yg=="], ["Yw==", "ZA=="]]`))
 		require.NoError(t, err)
 
-		result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: 1},
+		result, err := substrait.GetReferencedValue(mem, &expr.ListElementRef{Offset: 1},
 			compute.NewDatumWithoutOwning(lists), extSet)
 		require.NoError(t, err)
 		lists.Release()
@@ -1056,7 +1056,7 @@ func TestNestedFieldRefResultOwnership(t *testing.T) {
 			arrow.Field{Name: "b", Type: arrow.BinaryTypes.Binary, Nullable: true}), Nullable: true})
 		input := scalarInput(t, mem, dt, `[{"s": {"b": "aGVsbG8="}}]`)
 
-		result, err := exprs.GetScalar(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0}},
+		result, err := substrait.GetScalar(&expr.StructFieldRef{Field: 0, Child: &expr.StructFieldRef{Field: 0}},
 			input, mem, extSet)
 		require.NoError(t, err)
 		input.Release()
@@ -1106,7 +1106,7 @@ func TestListElementRefPerRow(t *testing.T) {
 				lists.Release()
 				lists = sliced
 			}
-			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
+			result, err := substrait.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
 				compute.NewDatumWithoutOwning(lists), extSet)
 			require.NoError(t, err)
 			lists.Release()
@@ -1144,7 +1144,7 @@ func TestListElementRefPerRow(t *testing.T) {
 				require.NoError(t, err)
 			}
 			defer lists.Release()
-			result, err := exprs.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
+			result, err := substrait.GetReferencedValue(mem, &expr.ListElementRef{Offset: tt.offset},
 				compute.NewDatumWithoutOwning(lists), extSet)
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
 			assert.ErrorContains(t, err, "out of bounds")
@@ -1160,7 +1160,7 @@ func TestListElementRefPerRow(t *testing.T) {
 		lists, _, err := array.FromJSON(mem, dt,
 			strings.NewReader(`[[{"x": "a"}, {"x": "b"}], null, [{"x": "d"}, {"x": "e"}]]`))
 		require.NoError(t, err)
-		result, err := exprs.GetReferencedValue(mem,
+		result, err := substrait.GetReferencedValue(mem,
 			&expr.ListElementRef{Offset: 1, Child: &expr.StructFieldRef{Field: 0}},
 			compute.NewDatumWithoutOwning(lists), extSet)
 		require.NoError(t, err)
@@ -1183,15 +1183,15 @@ func TestListElementRefPerRow(t *testing.T) {
 		require.NoError(t, err)
 		defer rec.Release()
 
-		ref, err := exprs.NewFieldRefFromDotPath(".l[1]", schema)
+		ref, err := substrait.NewFieldRefFromDotPath(".l[1]", schema)
 		require.NoError(t, err)
-		st, err := exprs.ToSubstraitType(arrow.StructOf(schema.Fields()...), false, extSet)
+		st, err := substrait.ToSubstraitType(arrow.StructOf(schema.Fields()...), false, extSet)
 		require.NoError(t, err)
 		e, err := expr.NewRootFieldRef(ref, types.NewRecordTypeFromStruct(*st.(*types.StructType)))
 		require.NoError(t, err)
 
-		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-		result, err := exprs.ExecuteScalarExpression(ctx, schema, e, compute.NewDatumWithoutOwning(rec))
+		ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := substrait.ExecuteScalarExpression(ctx, schema, e, compute.NewDatumWithoutOwning(rec))
 		require.NoError(t, err)
 		defer result.Release()
 
@@ -1274,13 +1274,13 @@ func TestNestedFieldRefSlicedStruct(t *testing.T) {
 					arrow.Field{Name: "t", Type: arrow.StructOf(
 						arrow.Field{Name: "a", Type: tt.exprType, Nullable: true}), Nullable: true}), Nullable: true}}, nil)
 			}
-			bldr := exprs.NewExprBuilder(extSet)
+			bldr := substrait.NewExprBuilder(extSet)
 			require.NoError(t, bldr.SetInputSchema(exprSchema))
 			e, err := bldr.FieldRefList(tt.path...).BuildExpr()
 			require.NoError(t, err)
 
-			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-			result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
+			ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			result, err := substrait.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
 			if tt.expected == "" {
 				assert.ErrorIs(t, err, arrow.ErrInvalid)
 				assert.Nil(t, result)
@@ -1320,13 +1320,13 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		sliced := rec.NewSlice(1, 4)
 		defer sliced.Release()
 
-		bldr := exprs.NewExprBuilder(extSet)
+		bldr := substrait.NewExprBuilder(extSet)
 		require.NoError(t, bldr.SetInputSchema(sc))
 		e, err := bldr.FieldRefList("s", "a").BuildExpr()
 		require.NoError(t, err)
 
-		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
+		ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := substrait.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(sliced))
 		require.NoError(t, err)
 		defer result.Release()
 
@@ -1349,13 +1349,13 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		input := scalar.NewStructScalar([]scalar.Scalar{inner}, dt)
 		sc := arrow.NewSchema(dt.Fields(), nil)
 
-		bldr := exprs.NewExprBuilder(extSet)
+		bldr := substrait.NewExprBuilder(extSet)
 		require.NoError(t, bldr.SetInputSchema(sc))
 		e, err := bldr.FieldRefList("s", "b").BuildExpr()
 		require.NoError(t, err)
 
-		ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
-		result, err := exprs.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(input))
+		ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+		result, err := substrait.ExecuteScalarExpression(ctx, sc, e, compute.NewDatumWithoutOwning(input))
 		require.NoError(t, err)
 		defer result.Release()
 		assert.False(t, result.(*compute.ScalarDatum).Value.IsValid())
@@ -1371,7 +1371,7 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 				input := scalar.MakeNullScalar(inputType)
 				defer input.(scalar.Releasable).Release()
 
-				result, err := exprs.GetReferencedValue(memory.DefaultAllocator,
+				result, err := substrait.GetReferencedValue(memory.DefaultAllocator,
 					&expr.StructFieldRef{Field: 0, Child: &expr.ListElementRef{Offset: 0}},
 					compute.NewDatumWithoutOwning(input), extSet)
 				require.NoError(t, err)
@@ -1388,7 +1388,7 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		input := scalar.MakeNullScalar(inputType)
 		defer input.(scalar.Releasable).Release()
 
-		result, err := exprs.GetReferencedValue(memory.DefaultAllocator,
+		result, err := substrait.GetReferencedValue(memory.DefaultAllocator,
 			&expr.StructFieldRef{Field: 0, Child: &expr.MapKeyRef{
 				MapKey: expr.NewPrimitiveLiteral("key", false)}},
 			compute.NewDatumWithoutOwning(input), extSet)
@@ -1409,7 +1409,7 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		data := array.NewData(dt, child.Len(), []*memory.Buffer{nil}, []arrow.ArrayData{child.Data()}, array.UnknownNullCount, 0)
 		defer data.Release()
 
-		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+		result, err := substrait.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
 			&compute.ArrayDatum{Value: data}, extSet)
 		require.NoError(t, err)
 		defer result.Release()
@@ -1434,7 +1434,7 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		require.NoError(t, err)
 		defer parent.Release()
 
-		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+		result, err := substrait.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
 			compute.NewDatumWithoutOwning(parent), extSet)
 		assert.ErrorIs(t, err, arrow.ErrNotImplemented)
 		assert.Nil(t, result)
@@ -1452,7 +1452,7 @@ func TestNestedFieldRefNullStruct(t *testing.T) {
 		require.NoError(t, err)
 		defer parent.Release()
 
-		result, err := exprs.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
+		result, err := substrait.GetReferencedValue(mem, &expr.StructFieldRef{Field: 0},
 			compute.NewDatumWithoutOwning(parent), extSet)
 		require.NoError(t, err)
 		defer result.Release()
@@ -1505,8 +1505,8 @@ func TestDecimalFilterLarge(t *testing.T) {
 
 			rec := array.NewRecordBatch(schema, []arrow.Array{db.NewArray()}, int64(tc.n))
 
-			extSet := exprs.GetExtensionIDSet(ctx)
-			builder := exprs.NewExprBuilder(extSet)
+			extSet := substrait.GetExtensionIDSet(ctx)
+			builder := substrait.NewExprBuilder(extSet)
 
 			err := builder.SetInputSchema(schema)
 			rq.NoError(err, "Failed to set input schema")
@@ -1532,12 +1532,12 @@ func TestDecimalFilterLarge(t *testing.T) {
 				e, err := b.BuildExpr()
 				rq.NoError(err, "Failed to build expression")
 
-				ctx = exprs.WithExtensionIDSet(ctx, extSet)
+				ctx = substrait.WithExtensionIDSet(ctx, extSet)
 
 				dr := compute.NewDatum(rec)
 				defer dr.Release()
 
-				_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+				_, err = substrait.ExecuteScalarExpression(ctx, schema, e, dr)
 				rq.NoError(err, "Failed to execute scalar expression")
 			})
 
@@ -1552,12 +1552,12 @@ func TestDecimalFilterLarge(t *testing.T) {
 				e, err := b.BuildExpr()
 				rq.NoError(err, "Failed to build expression")
 
-				ctx = exprs.WithExtensionIDSet(ctx, extSet)
+				ctx = substrait.WithExtensionIDSet(ctx, extSet)
 
 				dr := compute.NewDatum(rec)
 				defer dr.Release()
 
-				_, err = exprs.ExecuteScalarExpression(ctx, schema, e, dr)
+				_, err = substrait.ExecuteScalarExpression(ctx, schema, e, dr)
 				rq.NoError(err, "Failed to execute scalar expression")
 			})
 		})
@@ -1565,14 +1565,14 @@ func TestDecimalFilterLarge(t *testing.T) {
 }
 
 func TestStartsWithExpr(t *testing.T) {
-	varchar, _, err := exprs.FromSubstraitType(&types.VarCharType{Length: -1}, extSet)
+	varchar, _, err := substrait.FromSubstraitType(&types.VarCharType{Length: -1}, extSet)
 	require.NoError(t, err)
 	sc := arrow.NewSchema([]arrow.Field{
 		{Name: "s", Type: arrow.BinaryTypes.LargeString, Nullable: true},
 		{Name: "v", Type: varchar, Nullable: true},
 	}, nil)
 
-	bldr := exprs.NewExprBuilder(extSet)
+	bldr := substrait.NewExprBuilder(extSet)
 	require.NoError(t, bldr.SetInputSchema(sc))
 	ab := bldr.Literal(expr.NewPrimitiveLiteral("ab", false))
 	caseSensitivity := func(pref string) []*types.FunctionOption {
@@ -1581,7 +1581,7 @@ func TestStartsWithExpr(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		ex       exprs.Builder
+		ex       substrait.Builder
 		expected string
 	}{
 		{"large_string", bldr.MustCallScalar("starts_with", nil, bldr.FieldRef("s"), ab), `[true, null, false, false]`},
@@ -1602,7 +1602,7 @@ func TestStartsWithExpr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer mem.AssertSize(t, 0)
-			ctx := exprs.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
+			ctx := substrait.WithExtensionIDSet(compute.WithAllocator(context.Background(), mem), extSet)
 
 			ex, err := tt.ex.BuildExpr()
 			require.NoError(t, err)
@@ -1616,7 +1616,7 @@ func TestStartsWithExpr(t *testing.T) {
 			require.NoError(t, err)
 			defer rec.Release()
 
-			result, err := exprs.ExecuteScalarExpression(ctx, sc, ex, compute.NewDatumWithoutOwning(rec))
+			result, err := substrait.ExecuteScalarExpression(ctx, sc, ex, compute.NewDatumWithoutOwning(rec))
 			if tt.expected == "" {
 				assert.ErrorIs(t, err, arrow.ErrNotImplemented)
 				return
