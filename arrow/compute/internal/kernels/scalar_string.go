@@ -339,6 +339,74 @@ func visitStringValues[OffsetT int32 | int64](arg0 *exec.ArraySpan,
 		func(pos int64) { visit(data[offsets[pos]:offsets[pos+1]]) }, nullFn)
 }
 
+// dataReservation tracks the bytes reserved on a string builder so a
+// kernel can append with UnsafeAppend and still grow safely. The initial
+// reservation is a size hint rather than a bound: UnsafeAppend does not
+// grow the data buffer itself, so append grows the reservation before
+// writing a value that would outgrow it, and fails with arrow.ErrInvalid
+// once the output would exceed what the builder can address. A string_view
+// output has to stay in one data buffer, so for a view builder the hint
+// must bound the output: append fails rather than grow it.
+type dataReservation struct {
+	bldr     array.StringLikeBuilder
+	limit    int64 // most data bytes bldr can address
+	reserved int64 // bytes reserved on bldr in total
+	written  int64 // bytes appended so far
+	view     bool  // view builder: no data for inline values, and no growth
+}
+
+// newDataReservation reserves hint bytes of out-of-line data on bldr. A
+// view builder's output has to fit its reservation, so its hint is taken
+// as is and one over the builder's single data buffer limit returns
+// reserveFormattedDataExact's arrow.ErrInvalid. An offset builder's buffer
+// grows in place, so its hint is only capped at the limit: an output that
+// fits the limit is not rejected for its hint, and append enforces the
+// limit on the actual output.
+func newDataReservation(bldr array.StringLikeBuilder, hint int64) (*dataReservation, error) {
+	r := &dataReservation{bldr: bldr, limit: formattedDataLimit(bldr), view: isViewBuilder(bldr)}
+	if !r.view {
+		hint = min(hint, r.limit)
+	}
+	if err := reserveFormattedDataExact(bldr, hint); err != nil {
+		return nil, err
+	}
+	r.reserved = hint
+	return r, nil
+}
+
+// append appends v with UnsafeAppend, growing the reservation first if v
+// would outgrow it. Inline view values live in their headers and consume
+// no reserved data, so they count against neither the reservation nor the
+// limit. Past the hint there is no basis for a tighter estimate, so the
+// reservation doubles up to the limit; growing by one value at a time
+// would reallocate the data buffer on every value. A view builder's data
+// buffer cannot grow in place, so for it an output that outgrows the hint
+// fails instead of spilling into a second buffer. The limit only comes
+// into play for utf8 and string_view: large_utf8's is MaxInt64, more
+// bytes than an output can hold.
+func (r *dataReservation) append(v []byte) error {
+	if r.view && arrow.IsViewInline(len(v)) {
+		r.bldr.UnsafeAppend(v)
+		return nil
+	}
+	end := r.written + int64(len(v))
+	if end > r.limit {
+		return fmt.Errorf("%w: output (%d bytes) exceeds single data buffer limit (%d bytes) for %s",
+			arrow.ErrInvalid, end, r.limit, r.bldr.Type())
+	}
+	if end > r.reserved {
+		if r.view {
+			return fmt.Errorf("%w: string_view output (%d bytes) outgrew its %d byte reservation",
+				arrow.ErrInvalid, end, r.reserved)
+		}
+		r.reserved = min(max(2*r.reserved, end), r.limit)
+		r.bldr.ReserveData(int(r.reserved - r.written))
+	}
+	r.bldr.UnsafeAppend(v)
+	r.written = end
+	return nil
+}
+
 // utf8CaseExecOffset is the utf8 or large_utf8 kernel of the utf8_upper
 // and utf8_lower functions.
 func utf8CaseExecOffset[OffsetT int32 | int64](mapRune utf8CodePointMapper) exec.ArrayKernelExec {
@@ -347,26 +415,24 @@ func utf8CaseExecOffset[OffsetT int32 | int64](mapRune utf8CodePointMapper) exec
 		bldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type).(array.StringLikeBuilder)
 		defer bldr.Release()
 
-		// A Unicode simple case mapping grows a two-byte code point to at
-		// most three bytes, so half again the input bytes is an upper
-		// bound on the output size.
+		// Half again the input bytes fits the output under today's
+		// Unicode tables, where a simple case mapping grows a code point
+		// by at most one byte (two to three).
 		var total int64
 		visitStringValues[OffsetT](arg0, func(v []byte) { total += int64(len(v)) }, func() {})
 		bldr.Reserve(int(arg0.Len))
-		if err := reserveFormattedDataExact(bldr, total*3/2); err != nil {
+		resv, err := newDataReservation(bldr, total*3/2)
+		if err != nil {
 			return err
 		}
 
-		var (
-			scratch []byte
-			err     error
-		)
+		var scratch []byte
 		visitStringValues[OffsetT](arg0, func(v []byte) {
 			if err != nil {
 				return
 			}
 			if scratch, err = appendMapped(scratch[:0], v, mapRune); err == nil {
-				bldr.UnsafeAppend(scratch)
+				err = resv.append(scratch)
 			}
 		}, bldr.AppendNull)
 		if err != nil {
@@ -392,33 +458,32 @@ func utf8CaseExecView(mapRune utf8CodePointMapper) exec.ArrayKernelExec {
 		bldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type).(array.StringLikeBuilder)
 		defer bldr.Release()
 
+		// Half again the input bytes bounds the output under today's
+		// Unicode tables, where a simple case mapping grows a code point
+		// by at most one byte (two to three). The bound has to hold: a
+		// string_view data buffer cannot grow in place, and an inline
+		// value can grow out of line (12 bytes to 18), so every value
+		// counts toward it.
 		var total int64
 		bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
 			func(pos int64) { total += int64(views[pos].Len()) }, func() {})
 		bldr.Reserve(int(arg0.Len))
-		if err := reserveFormattedDataExact(bldr, total*3/2); err != nil {
+		resv, err := newDataReservation(bldr, total*3/2)
+		if err != nil {
 			return err
 		}
 
-		var (
-			scratch []byte
-			err     error
-		)
+		var scratch []byte
 		bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
 			func(pos int64) {
 				if err != nil {
 					return
 				}
 				if scratch, err = appendMapped(scratch[:0], viewBytes(&views[pos], data), mapRune); err == nil {
-					bldr.UnsafeAppend(scratch)
+					err = resv.append(scratch)
 				}
 			}, bldr.AppendNull)
 		if err != nil {
-			// Release on a discarded view builder does not free its
-			// out-of-line blocks, so materialize the partial result to
-			// transfer the blocks somewhere they get freed.
-			arr := bldr.NewArray()
-			arr.Release()
 			return err
 		}
 

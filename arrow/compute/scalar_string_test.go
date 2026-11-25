@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -499,6 +500,82 @@ func TestUtf8CaseConversion(t *testing.T) {
 			assert.ErrorIs(t, err, arrow.ErrInvalid)
 		})
 	}
+}
+
+// TestUtf8CaseViewSingleBuffer verifies that the string_view kernels
+// return their output in one data buffer. A kernel result cannot carry the
+// second buffer a view builder allocates once its out-of-line values
+// outgrow the reservation, so the reservation has to cover the whole
+// input, inline values included: a 12-byte inline value of two-byte code
+// points maps to 18 bytes. Every code point is checked against
+// strings.ToUpper and strings.ToLower, which apply the same simple case
+// mapping.
+func TestUtf8CaseViewSingleBuffer(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	t.Cleanup(func() { mem.AssertSize(t, 0) })
+	ctx := compute.WithAllocator(context.Background(), mem)
+
+	fns := []struct {
+		name string
+		call func(context.Context, compute.Datum) (compute.Datum, error)
+		ref  func(string) string
+	}{
+		{"utf8_upper", compute.Utf8Upper, strings.ToUpper},
+		{"utf8_lower", compute.Utf8Lower, strings.ToLower},
+	}
+	check := func(t *testing.T, values []string, input arrow.Array) {
+		in := compute.NewDatumWithoutOwning(input)
+		defer in.Release()
+
+		for _, fn := range fns {
+			t.Run(fn.name, func(t *testing.T) {
+				got, err := fn.call(ctx, in)
+				require.NoError(t, err)
+				defer got.Release()
+
+				out := got.(*compute.ArrayDatum).Value
+				require.Len(t, out.Buffers(), 3, "output must fit one data buffer")
+				arr := array.MakeFromData(out).(*array.StringView)
+				defer arr.Release()
+				require.Equal(t, len(values), arr.Len())
+				for i, v := range values {
+					require.Equal(t, fn.ref(v), arr.Value(i), "value %d: %q", i, v)
+				}
+			})
+		}
+	}
+
+	t.Run("inline values that grow out of line", func(t *testing.T) {
+		// 2000 values of 18 bytes need more than one 32 KiB block if the
+		// reservation does not cover them.
+		bldr := array.NewStringViewBuilder(mem)
+		v := strings.Repeat("\u0250", 6)
+		values := make([]string, 2000)
+		for i := range values {
+			values[i] = v
+			bldr.Append(v)
+		}
+		input := bldr.NewArray()
+		defer input.Release()
+		check(t, values, input)
+	})
+
+	t.Run("all code points", func(t *testing.T) {
+		// Six copies of a two-byte code point make an inline value.
+		var values []string
+		bldr := array.NewStringViewBuilder(mem)
+		for r := rune(0); r <= utf8.MaxRune; r++ {
+			if !utf8.ValidRune(r) {
+				continue
+			}
+			s := strings.Repeat(string(r), 6)
+			values = append(values, s)
+			bldr.Append(s)
+		}
+		input := bldr.NewArray()
+		defer input.Release()
+		check(t, values, input)
+	})
 }
 
 func TestUtf8StringFuncs(t *testing.T) {

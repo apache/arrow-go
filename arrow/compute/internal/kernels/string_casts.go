@@ -382,7 +382,7 @@ func reserveFormattedData(bldr array.StringLikeBuilder, input *exec.ArraySpan, p
 func reserveFormattedDataExact(bldr array.StringLikeBuilder, total int64) error {
 	limit := formattedDataLimit(bldr)
 	if total > limit {
-		return fmt.Errorf("%w: formatted cast payload (%d bytes) exceeds single data buffer limit (%d bytes) for destination builder",
+		return fmt.Errorf("%w: payload (%d bytes) exceeds single data buffer limit (%d bytes) for destination builder",
 			arrow.ErrInvalid, total, limit)
 	}
 	if total > 0 {
