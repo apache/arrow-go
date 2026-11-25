@@ -266,3 +266,26 @@ func TestUnrecognizedExtensionType(t *testing.T) {
 
 	assert.Truef(t, array.RecordEqual(rec, batchNoExt), "expected: %s\ngot: %s\n", batchNoExt, rec)
 }
+
+func TestDecimalFromFBPrecision(t *testing.T) {
+	for _, tc := range []struct{ width, max int32 }{{32, 9}, {64, 18}, {128, 38}, {256, 76}} {
+		for _, precision := range []int32{-1, 0, 1, tc.max, tc.max + 1} {
+			b := flatbuffers.NewBuilder(0)
+			flatbuf.DecimalStart(b)
+			flatbuf.DecimalAddBitWidth(b, tc.width)
+			flatbuf.DecimalAddPrecision(b, precision)
+			flatbuf.DecimalAddScale(b, -2)
+			b.Finish(flatbuf.DecimalEnd(b))
+			data := flatbuf.GetRootAsDecimal(b.FinishedBytes(), 0)
+			got, err := decimalFromFB(*data)
+			if precision < 1 || precision > tc.max {
+				assert.Error(t, err, "width=%d precision=%d", tc.width, precision)
+			} else if assert.NoError(t, err, "width=%d precision=%d", tc.width, precision) {
+				decimal := got.(arrow.DecimalType)
+				assert.Equal(t, int(tc.width), decimal.BitWidth())
+				assert.Equal(t, precision, decimal.GetPrecision())
+				assert.Equal(t, int32(-2), decimal.GetScale())
+			}
+		}
+	}
+}

@@ -980,13 +980,13 @@ func floatToFB(b *flatbuffers.Builder, bw int32) flatbuffers.UOffsetT {
 func decimalFromFB(data flatbuf.Decimal) (arrow.DataType, error) {
 	switch data.BitWidth() {
 	case 32:
-		return &arrow.Decimal32Type{Precision: data.Precision(), Scale: data.Scale()}, nil
+		return arrow.NewDecimalType(arrow.DECIMAL32, data.Precision(), data.Scale())
 	case 64:
-		return &arrow.Decimal64Type{Precision: data.Precision(), Scale: data.Scale()}, nil
+		return arrow.NewDecimalType(arrow.DECIMAL64, data.Precision(), data.Scale())
 	case 128:
-		return &arrow.Decimal128Type{Precision: data.Precision(), Scale: data.Scale()}, nil
+		return arrow.NewDecimalType(arrow.DECIMAL128, data.Precision(), data.Scale())
 	case 256:
-		return &arrow.Decimal256Type{Precision: data.Precision(), Scale: data.Scale()}, nil
+		return arrow.NewDecimalType(arrow.DECIMAL256, data.Precision(), data.Scale())
 	default:
 		return nil, fmt.Errorf("arrow/ipc: invalid decimal bitwidth: %d", data.BitWidth())
 	}
