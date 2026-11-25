@@ -24,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/bitutil"
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/internal/bitutils"
@@ -228,6 +229,295 @@ func GetStartsWithKernels() []exec.ScalarKernel {
 			initMatchSubstring(ty.(arrow.BinaryDataType).IsUtf8()))
 		k.NullHandling = exec.NullIntersection
 		k.MemAlloc = exec.MemPrealloc
+		kernels = append(kernels, k)
+	}
+	return kernels
+}
+
+// utf8Length returns the number of Unicode code points in v by counting
+// the bytes that are not UTF-8 continuation bytes. This matches the C++
+// kernels, which count the same way and only assume valid UTF-8.
+func utf8Length(v []byte) int {
+	var n int
+	for _, b := range v {
+		if b&0xc0 != 0x80 {
+			n++
+		}
+	}
+	return n
+}
+
+func utf8Length32(_ *exec.KernelCtx, v []byte, _ *error) int32 {
+	return int32(utf8Length(v))
+}
+
+func utf8Length64(_ *exec.KernelCtx, v []byte, _ *error) int64 {
+	return int64(utf8Length(v))
+}
+
+// utf8LengthView is the string_view kernel of the utf8_length function. It
+// reads out-of-line values from Buffers[2], so inputs with more than one
+// data buffer must be coalesced before execution.
+func utf8LengthView(_ *exec.KernelCtx, in *exec.ExecSpan, out *exec.ExecResult) error {
+	var (
+		arg0    = &in.Values[0].Array
+		views   = arrow.ViewHeaderTraits.CastFromBytes(arg0.Buffers[1].Buf)[arg0.Offset:]
+		data    = arg0.Buffers[2].Buf
+		outVals = exec.GetSpanValues[int32](out, 1)
+		outPos  int
+	)
+
+	bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
+		func(pos int64) {
+			outVals[outPos] = int32(utf8Length(viewBytes(&views[pos], data)))
+			outPos++
+		}, func() { outPos++ })
+	return nil
+}
+
+// GetUtf8LengthKernels returns the kernels for the utf8_length function
+// over the string types. The output width follows the offset width of the
+// input type, matching the C++ kernels (utf8 -> int32, large_utf8 ->
+// int64). The string_view kernel is a Go addition; the C++ registry
+// registers utf8_length for utf8 and large_utf8 only.
+func GetUtf8LengthKernels() []exec.ScalarKernel {
+	mk := func(inType, outType arrow.DataType, ex exec.ArrayKernelExec) exec.ScalarKernel {
+		k := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(inType)},
+			exec.NewOutputType(outType), ex, nil)
+		k.NullHandling = exec.NullIntersection
+		k.MemAlloc = exec.MemPrealloc
+		return k
+	}
+	return []exec.ScalarKernel{
+		mk(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32,
+			ScalarUnaryNotNullBinaryArg[int32, int32](utf8Length32)),
+		mk(arrow.BinaryTypes.LargeString, arrow.PrimitiveTypes.Int64,
+			ScalarUnaryNotNullBinaryArg[int64, int64](utf8Length64)),
+		mk(arrow.BinaryTypes.StringView, arrow.PrimitiveTypes.Int32, utf8LengthView),
+	}
+}
+
+// utf8CodePointMapper is a per-code-point case mapping such as
+// unicode.ToUpper or unicode.ToLower. Like the utf8proc calls used by the
+// C++ kernels, these are simple one-to-one Unicode case mappings.
+type utf8CodePointMapper func(rune) rune
+
+// appendMapped appends v to dst with each of its code points mapped
+// through mapRune. ASCII bytes are mapped without decoding, which relies
+// on mapRune keeping ASCII closed, as unicode.ToUpper and unicode.ToLower
+// do for simple Unicode case mappings. Returns an error wrapping
+// arrow.ErrInvalid when v is not valid UTF-8, matching the C++ kernels
+// which fail on invalid UTF-8 input.
+func appendMapped(dst, v []byte, mapRune utf8CodePointMapper) ([]byte, error) {
+	for len(v) > 0 {
+		if v[0] < utf8.RuneSelf {
+			dst = append(dst, byte(mapRune(rune(v[0]))))
+			v = v[1:]
+			continue
+		}
+		r, size := utf8.DecodeRune(v)
+		if r == utf8.RuneError && size == 1 {
+			return nil, fmt.Errorf("%w: Invalid UTF8 sequence in input", arrow.ErrInvalid)
+		}
+		if u := mapRune(r); u != r {
+			dst = utf8.AppendRune(dst, u)
+		} else {
+			dst = append(dst, v[:size]...)
+		}
+		v = v[size:]
+	}
+	return dst, nil
+}
+
+// visitStringValues calls visit for each valid value of the utf8 or
+// large_utf8 array arg0, and nullFn for each null value.
+func visitStringValues[OffsetT int32 | int64](arg0 *exec.ArraySpan,
+	visit func([]byte), nullFn func()) {
+	offsets := exec.GetSpanOffsets[OffsetT](arg0, 1)
+	data := arg0.Buffers[2].Buf
+	bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
+		func(pos int64) { visit(data[offsets[pos]:offsets[pos+1]]) }, nullFn)
+}
+
+// dataReservation tracks the bytes reserved on a string builder so a
+// kernel can append with UnsafeAppend and still grow safely. The initial
+// reservation is a size hint rather than a bound: UnsafeAppend does not
+// grow the data buffer itself, so append grows the reservation before
+// writing a value that would outgrow it, and fails with arrow.ErrInvalid
+// once the output would exceed what the builder can address. A string_view
+// output has to stay in one data buffer, so for a view builder the hint
+// must bound the output: append fails rather than grow it.
+type dataReservation struct {
+	bldr     array.StringLikeBuilder
+	limit    int64 // most data bytes bldr can address
+	reserved int64 // bytes reserved on bldr in total
+	written  int64 // bytes appended so far
+	view     bool  // view builder: no data for inline values, and no growth
+}
+
+// newDataReservation reserves hint bytes of out-of-line data on bldr. A
+// view builder's output has to fit its reservation, so its hint is taken
+// as is and one over the builder's single data buffer limit returns
+// reserveFormattedDataExact's arrow.ErrInvalid. An offset builder's buffer
+// grows in place, so its hint is only capped at the limit: an output that
+// fits the limit is not rejected for its hint, and append enforces the
+// limit on the actual output.
+func newDataReservation(bldr array.StringLikeBuilder, hint int64) (*dataReservation, error) {
+	r := &dataReservation{bldr: bldr, limit: formattedDataLimit(bldr), view: isViewBuilder(bldr)}
+	if !r.view {
+		hint = min(hint, r.limit)
+	}
+	if err := reserveFormattedDataExact(bldr, hint); err != nil {
+		return nil, err
+	}
+	r.reserved = hint
+	return r, nil
+}
+
+// append appends v with UnsafeAppend, growing the reservation first if v
+// would outgrow it. Inline view values live in their headers and consume
+// no reserved data, so they count against neither the reservation nor the
+// limit. Past the hint there is no basis for a tighter estimate, so the
+// reservation doubles up to the limit; growing by one value at a time
+// would reallocate the data buffer on every value. A view builder's data
+// buffer cannot grow in place, so for it an output that outgrows the hint
+// fails instead of spilling into a second buffer. The limit only comes
+// into play for utf8 and string_view: large_utf8's is MaxInt64, more
+// bytes than an output can hold.
+func (r *dataReservation) append(v []byte) error {
+	if r.view && arrow.IsViewInline(len(v)) {
+		r.bldr.UnsafeAppend(v)
+		return nil
+	}
+	end := r.written + int64(len(v))
+	if end > r.limit {
+		return fmt.Errorf("%w: output (%d bytes) exceeds single data buffer limit (%d bytes) for %s",
+			arrow.ErrInvalid, end, r.limit, r.bldr.Type())
+	}
+	if end > r.reserved {
+		if r.view {
+			return fmt.Errorf("%w: string_view output (%d bytes) outgrew its %d byte reservation",
+				arrow.ErrInvalid, end, r.reserved)
+		}
+		r.reserved = min(max(2*r.reserved, end), r.limit)
+		r.bldr.ReserveData(int(r.reserved - r.written))
+	}
+	r.bldr.UnsafeAppend(v)
+	r.written = end
+	return nil
+}
+
+// utf8CaseExecOffset is the utf8 or large_utf8 kernel of the utf8_upper
+// and utf8_lower functions.
+func utf8CaseExecOffset[OffsetT int32 | int64](mapRune utf8CodePointMapper) exec.ArrayKernelExec {
+	return func(ctx *exec.KernelCtx, in *exec.ExecSpan, out *exec.ExecResult) error {
+		arg0 := &in.Values[0].Array
+		bldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type).(array.StringLikeBuilder)
+		defer bldr.Release()
+
+		// Half again the input bytes fits the output under today's
+		// Unicode tables, where a simple case mapping grows a code point
+		// by at most one byte (two to three).
+		var total int64
+		visitStringValues[OffsetT](arg0, func(v []byte) { total += int64(len(v)) }, func() {})
+		bldr.Reserve(int(arg0.Len))
+		resv, err := newDataReservation(bldr, total*3/2)
+		if err != nil {
+			return err
+		}
+
+		var scratch []byte
+		visitStringValues[OffsetT](arg0, func(v []byte) {
+			if err != nil {
+				return
+			}
+			if scratch, err = appendMapped(scratch[:0], v, mapRune); err == nil {
+				err = resv.append(scratch)
+			}
+		}, bldr.AppendNull)
+		if err != nil {
+			return err
+		}
+
+		arr := bldr.NewArray()
+		out.TakeOwnership(arr.Data())
+		arr.Release()
+		return nil
+	}
+}
+
+// utf8CaseExecView is the string_view kernel of the utf8_upper and
+// utf8_lower functions. It reads out-of-line values from Buffers[2], so
+// inputs with more than one data buffer must be coalesced before
+// execution.
+func utf8CaseExecView(mapRune utf8CodePointMapper) exec.ArrayKernelExec {
+	return func(ctx *exec.KernelCtx, in *exec.ExecSpan, out *exec.ExecResult) error {
+		arg0 := &in.Values[0].Array
+		views := arrow.ViewHeaderTraits.CastFromBytes(arg0.Buffers[1].Buf)[arg0.Offset:]
+		data := arg0.Buffers[2].Buf
+		bldr := array.NewBuilder(exec.GetAllocator(ctx.Ctx), out.Type).(array.StringLikeBuilder)
+		defer bldr.Release()
+
+		// Half again the input bytes bounds the output under today's
+		// Unicode tables, where a simple case mapping grows a code point
+		// by at most one byte (two to three). The bound has to hold: a
+		// string_view data buffer cannot grow in place, and an inline
+		// value can grow out of line (12 bytes to 18), so every value
+		// counts toward it.
+		var total int64
+		bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
+			func(pos int64) { total += int64(views[pos].Len()) }, func() {})
+		bldr.Reserve(int(arg0.Len))
+		resv, err := newDataReservation(bldr, total*3/2)
+		if err != nil {
+			return err
+		}
+
+		var scratch []byte
+		bitutils.VisitBitBlocks(arg0.Buffers[0].Buf, arg0.Offset, arg0.Len,
+			func(pos int64) {
+				if err != nil {
+					return
+				}
+				if scratch, err = appendMapped(scratch[:0], viewBytes(&views[pos], data), mapRune); err == nil {
+					err = resv.append(scratch)
+				}
+			}, bldr.AppendNull)
+		if err != nil {
+			return err
+		}
+
+		arr := bldr.NewArray()
+		out.TakeOwnership(arr.Data())
+		arr.Release()
+		return nil
+	}
+}
+
+// GetUtf8CaseKernels returns the kernels for the utf8_upper and utf8_lower
+// functions over the string types. The output type of each kernel matches
+// its input type, like the C++ kernels, which register utf8_upper and
+// utf8_lower for utf8 and large_utf8 only; the string_view kernels are a
+// Go addition.
+func GetUtf8CaseKernels(mapRune utf8CodePointMapper) []exec.ScalarKernel {
+	types := []arrow.DataType{
+		arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView,
+	}
+	kernels := make([]exec.ScalarKernel, 0, len(types))
+	for _, ty := range types {
+		var ex exec.ArrayKernelExec
+		switch ty.ID() {
+		case arrow.STRING_VIEW:
+			ex = utf8CaseExecView(mapRune)
+		case arrow.LARGE_STRING:
+			ex = utf8CaseExecOffset[int64](mapRune)
+		default:
+			ex = utf8CaseExecOffset[int32](mapRune)
+		}
+		k := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(ty)},
+			exec.NewOutputType(ty), ex, nil)
+		k.NullHandling = exec.NullComputedNoPrealloc
+		k.MemAlloc = exec.MemNoPrealloc
 		kernels = append(kernels, k)
 	}
 	return kernels

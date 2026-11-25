@@ -27,7 +27,8 @@
 //
 // The function registry holds scalar functions (element-wise arithmetic,
 // comparisons, boolean logic, bit-wise operations, rounding, set lookup with
-// is_in, prefix matching with starts_with, list_element and the null
+// is_in, prefix matching with starts_with, string length and case mapping
+// with utf8_length, utf8_upper and utf8_lower, list_element and the null
 // checks), vector functions (array_filter, array_take, unique,
 // dictionary_encode, cumulative_sum and the run-end encode/decode
 // functions) and the meta functions cast, filter, take, sort
