@@ -17,7 +17,7 @@
 
 *.s
 *.tmpldata
-go.sum
+*go.sum
 
 .github/pull_request_template.md
 
