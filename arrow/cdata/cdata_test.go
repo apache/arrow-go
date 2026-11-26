@@ -34,12 +34,14 @@ import (
 	"runtime/cgo"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/arrio"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/internal/arrdata"
@@ -2039,4 +2041,229 @@ func TestImportMapNullability(t *testing.T) {
 			}
 		}
 	}
+}
+
+// streamLifetimeBatch builds batch i of the stream used by
+// TestImportedStreamRelease. It mixes a nested column, a dictionary column
+// and a null column, which has no buffers at all.
+func streamLifetimeBatch(t testing.TB, mem memory.Allocator, i int) arrow.RecordBatch {
+	t.Helper()
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "list", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32), Nullable: true},
+		{Name: "dict", Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String}, Nullable: true},
+		{Name: "null", Type: arrow.Null, Nullable: true},
+	}, nil)
+	b := array.NewRecordBuilder(mem, schema)
+	defer b.Release()
+
+	lb := b.Field(0).(*array.ListBuilder)
+	lb.Append(true)
+	lb.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{int32(i), int32(i + 1)}, nil)
+	lb.AppendNull()
+	db := b.Field(1).(*array.BinaryDictionaryBuilder)
+	require.NoError(t, db.AppendString(fmt.Sprintf("v%d", i)))
+	db.AppendNull()
+	b.Field(2).(*array.NullBuilder).AppendNulls(2)
+	return b.NewRecordBatch()
+}
+
+// TestImportedStreamRelease checks the release contract documented on
+// ImportCRecordReader (issue 1576) with a stream whose release callbacks are
+// counted. Expected counts follow the C stream interface spec, "Result
+// lifetimes": arrays returned by get_next are released on their own and
+// their lifetime is not tied to the stream. No subtest calls runtime.GC, so
+// every release seen here comes from an explicit Release.
+func TestImportedStreamRelease(t *testing.T) {
+	const nbatches = 3
+
+	type counted struct {
+		rdr interface {
+			arrio.Reader
+			array.RecordReader
+		}
+		state unsafe.Pointer
+	}
+
+	// newStream exports a Go reader over nbatches batches allocated from
+	// mem and wraps it in a counting stream.
+	newStream := func(t *testing.T, mem memory.Allocator, failSchema bool, failNextAt int) (*CArrowArrayStream, unsafe.Pointer) {
+		recs := make([]arrow.RecordBatch, nbatches)
+		for i := range recs {
+			recs[i] = streamLifetimeBatch(t, mem, i)
+		}
+		src, err := array.NewRecordReader(recs[0].Schema(), recs)
+		require.NoError(t, err)
+		for _, r := range recs {
+			r.Release()
+		}
+		var inner, out CArrowArrayStream
+		ExportRecordReader(src, &inner)
+		src.Release()
+		state := setupCountingStream(&inner, failSchema, failNextAt, &out)
+		t.Cleanup(func() { freeCountingStream(state) })
+		return &out, state
+	}
+
+	open := func(t *testing.T, mem memory.Allocator, failNextAt int) counted {
+		stream, state := newStream(t, mem, false, failNextAt)
+		r, err := ImportCRecordReader(stream, nil)
+		require.NoError(t, err)
+		// the documented way to reach Release is a type assertion
+		rdr, ok := r.(interface {
+			arrio.Reader
+			array.RecordReader
+		})
+		require.True(t, ok, "ImportCRecordReader must return an array.RecordReader")
+		return counted{rdr: rdr, state: state}
+	}
+
+	// balanced checks that the stream was released once, that every batch
+	// handed out was released once, and that the Go memory behind the
+	// exported stream is gone.
+	balanced := func(t *testing.T, mem *memory.CheckedAllocator, state unsafe.Pointer) {
+		sr, out, br := countingStreamCounts(state)
+		assert.Equal(t, 1, sr, "stream release callback")
+		assert.Equal(t, out, br, "batch release callbacks")
+		mem.AssertSize(t, 0)
+	}
+
+	// streamErrno checks that err wraps a nonzero syscall.Errno from the C
+	// stream. The numeric value is not compared to a Go errno constant,
+	// because MinGW EIO does not match syscall.EIO on windows.
+	streamErrno := func(t *testing.T, err error) {
+		t.Helper()
+		var errno syscall.Errno
+		assert.ErrorAs(t, err, &errno)
+		assert.NotZero(t, errno)
+		assert.ErrorContains(t, err, "injected error")
+	}
+
+	t.Run("read to end", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		c := open(t, mem, -1)
+		for i := 0; ; i++ {
+			rec, err := c.rdr.Read()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			require.NoError(t, err)
+			want := streamLifetimeBatch(t, memory.DefaultAllocator, i)
+			assert.Truef(t, array.RecordEqual(want, rec), "batch %d: want %s, got %s", i, want, rec)
+			want.Release()
+		}
+		// the reader drops each batch on the next Read, so after io.EOF
+		// all batches are released but the stream is still open
+		sr, out, br := countingStreamCounts(c.state)
+		assert.Equal(t, [3]int{0, nbatches, nbatches}, [3]int{sr, out, br})
+		c.rdr.Release()
+		balanced(t, mem, c.state)
+	})
+
+	t.Run("release before first read", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		c := open(t, mem, -1)
+		c.rdr.Release()
+		sr, out, _ := countingStreamCounts(c.state)
+		assert.Equal(t, [2]int{1, 0}, [2]int{sr, out})
+		balanced(t, mem, c.state)
+	})
+
+	t.Run("release mid stream", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		c := open(t, mem, -1)
+		_, err := c.rdr.Read()
+		require.NoError(t, err)
+		// Release also drops the batch the reader still holds
+		c.rdr.Release()
+		_, out, _ := countingStreamCounts(c.state)
+		assert.Equal(t, 1, out)
+		balanced(t, mem, c.state)
+	})
+
+	t.Run("retain reader", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		c := open(t, mem, -1)
+		c.rdr.Retain()
+		c.rdr.Release()
+		sr, _, _ := countingStreamCounts(c.state)
+		assert.Equal(t, 0, sr, "stream released while a reference is left")
+		c.rdr.Release()
+		balanced(t, mem, c.state)
+	})
+
+	t.Run("get_next error", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		c := open(t, mem, 1)
+		_, err := c.rdr.Read()
+		require.NoError(t, err)
+		_, err = c.rdr.Read()
+		streamErrno(t, err)
+		streamErrno(t, c.rdr.Err())
+		// the failed Read already dropped the previous batch
+		sr, out, br := countingStreamCounts(c.state)
+		assert.Equal(t, [3]int{0, 1, 1}, [3]int{sr, out, br})
+		c.rdr.Release()
+		balanced(t, mem, c.state)
+	})
+
+	t.Run("get_schema error", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		stream, state := newStream(t, mem, true, -1)
+		r, err := ImportCRecordReader(stream, nil)
+		streamErrno(t, err)
+		assert.Nil(t, r)
+		// on error the stream is already released, the caller owns nothing
+		balanced(t, mem, state)
+	})
+
+	t.Run("retained batch outlives reader", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		c := open(t, mem, -1)
+		rec, err := c.rdr.Read()
+		require.NoError(t, err)
+		rec.Retain()
+		c.rdr.Release()
+
+		// the stream is gone, but the retained batch must keep its foreign
+		// buffers: its release callback has not run and the exported Go
+		// memory behind it is still allocated
+		sr, out, br := countingStreamCounts(c.state)
+		assert.Equal(t, [3]int{1, 1, 0}, [3]int{sr, out, br})
+		assert.NotZero(t, mem.CurrentAlloc())
+		want := streamLifetimeBatch(t, memory.DefaultAllocator, 0)
+		assert.Truef(t, array.RecordEqual(want, rec), "want %s, got %s", want, rec)
+		want.Release()
+
+		rec.Release()
+		balanced(t, mem, c.state)
+	})
+
+	t.Run("zero buffer batch", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		schema := arrow.NewSchema([]arrow.Field{{Name: "null", Type: arrow.Null, Nullable: true}}, nil)
+		col := array.NewNull(4)
+		rec := array.NewRecordBatch(schema, []arrow.Array{col}, 4)
+		col.Release()
+		src, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+		require.NoError(t, err)
+		rec.Release()
+		var inner, stream CArrowArrayStream
+		ExportRecordReader(src, &inner)
+		src.Release()
+		state := setupCountingStream(&inner, false, -1, &stream)
+		defer freeCountingStream(state)
+
+		r, err := ImportCRecordReader(&stream, nil)
+		require.NoError(t, err)
+		got, err := r.Read()
+		require.NoError(t, err)
+		// nothing was imported that needs the C memory, so the importer
+		// runs the batch release callback right away; the batch stays usable
+		_, out, br := countingStreamCounts(state)
+		assert.Equal(t, [2]int{1, 1}, [2]int{out, br})
+		assert.EqualValues(t, 4, got.NumRows())
+		assert.Equal(t, 4, got.Column(0).NullN())
+		r.(array.RecordReader).Release()
+		balanced(t, mem, state)
+	})
 }
