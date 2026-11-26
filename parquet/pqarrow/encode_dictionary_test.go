@@ -1080,6 +1080,10 @@ func TestWriteDictionaryConvertsValues(t *testing.T) {
 		{"time64[ns]", arrow.FixedWidthTypes.Time64ns, times, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Time64ns},
 		{"date64", arrow.FixedWidthTypes.Date64, `["1960-01-01", "2020-01-01"]`, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Date32},
 		{"float16", arrow.FixedWidthTypes.Float16, `[1.5, -20]`, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Float16},
+		// values above the signed maximum of the int32 and int64 physical types
+		{"uint32", arrow.PrimitiveTypes.Uint32, `[1, 4000000000]`, parquet.V2_LATEST, nil, arrow.PrimitiveTypes.Uint32},
+		{"uint32 v1.0", arrow.PrimitiveTypes.Uint32, `[1, 4000000000]`, parquet.V1_0, nil, arrow.PrimitiveTypes.Uint32},
+		{"uint64", arrow.PrimitiveTypes.Uint64, `[1, 18000000000000000000]`, parquet.V2_LATEST, nil, arrow.PrimitiveTypes.Uint64},
 	}
 
 	for _, tt := range tests {

@@ -57,6 +57,10 @@ func dictionaryDirectWriteSupported(cw file.ColumnChunkWriter, arr arrow.Array) 
 	case *arrow.Date64Type, *arrow.Float16Type:
 		// stored as int32 days and as a 2 byte fixed len byte array
 		return false
+	case *arrow.Uint32Type, *arrow.Uint64Type:
+		// stored by reinterpreting the bits as int32 and int64, while the direct path
+		// casts them and rejects values above the signed maximum
+		return false
 	default:
 		return arrow.IsPrimitive(dt.ID()) || arrow.IsBaseBinary(dt.ID())
 	}
