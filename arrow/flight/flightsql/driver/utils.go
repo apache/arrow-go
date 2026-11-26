@@ -85,9 +85,25 @@ func fromArrowType(arr arrow.Array, idx int) (interface{}, error) {
 		return c.Value(idx), nil
 	case *array.Int64:
 		return c.Value(idx), nil
+	case *array.Uint8:
+		return c.Value(idx), nil
+	case *array.Uint16:
+		return c.Value(idx), nil
+	case *array.Uint32:
+		return c.Value(idx), nil
+	case *array.Uint64:
+		return c.Value(idx), nil
 	case *array.Binary:
 		return c.Value(idx), nil
+	case *array.LargeBinary:
+		return c.Value(idx), nil
+	case *array.BinaryView:
+		return c.Value(idx), nil
 	case *array.String:
+		return c.Value(idx), nil
+	case *array.LargeString:
+		return c.Value(idx), nil
+	case *array.StringView:
 		return c.Value(idx), nil
 	case *array.Time32:
 		d32 := arr.DataType().(*arrow.Time32Type)
