@@ -1203,6 +1203,45 @@ func TestDeltaBitPacking(t *testing.T) {
 	assert.Equal(t, dec.ValuesLeft(), 0)
 }
 
+func TestBooleanPlainEncoderPadsWithZeros(t *testing.T) {
+	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
+	allTrue := []byte{0xff}
+
+	tests := []struct {
+		name string
+		put  func(encoding.BooleanEncoder, []bool)
+	}{
+		{name: "Put", put: func(enc encoding.BooleanEncoder, values []bool) { enc.Put(values) }},
+		{name: "PutBitmap", put: func(enc encoding.BooleanEncoder, values []bool) {
+			bitmap := make([]byte, bitutil.BytesForBits(int64(len(values))))
+			for i, v := range values {
+				bitutil.SetBitTo(bitmap, i, v)
+			}
+			enc.(interface{ PutBitmap([]byte, int64, int64) }).PutBitmap(bitmap, 0, int64(len(values)))
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
+			benc := enc.(encoding.BooleanEncoder)
+
+			test.put(benc, []bool{true, true, true, true, true, true, true, true})
+			buf, err := benc.FlushValues()
+			require.NoError(t, err)
+			assert.Equal(t, allTrue, buf.Bytes())
+			buf.Release()
+
+			// the bits past the last value are zero, not the previous page's values,
+			// so the same values encode to the same bytes
+			test.put(benc, []bool{true, false, true})
+			buf, err = benc.FlushValues()
+			require.NoError(t, err)
+			assert.Equal(t, []byte{0x05}, buf.Bytes())
+			buf.Release()
+		})
+	}
+}
+
 func TestBooleanPlainDecoderAfterFlushing(t *testing.T) {
 	descr := schema.NewColumn(schema.NewBooleanNode("bool", parquet.Repetitions.Optional, -1), 0, 0)
 	enc := encoding.NewEncoder(parquet.Types.Boolean, parquet.Encodings.Plain, false, descr, memory.DefaultAllocator)
