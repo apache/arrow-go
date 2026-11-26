@@ -785,6 +785,9 @@ func (w *columnWriter) Close() (err error) {
 			return err
 		}
 
+		if observe := w.props.ColumnChunkBoundsObserver(); observe != nil && w.rowsWritten > 0 && chunkStats.HasMin && chunkStats.HasMax {
+			observe(w.descr.ColumnPath(), chunkStats.Min, chunkStats.Max)
+		}
 		chunkStats.ApplyStatSizeLimits(int(w.props.MaxStatsSizeFor(w.descr.Path())))
 		chunkStats.Signed = schema.SortSIGNED == w.descr.SortOrder()
 

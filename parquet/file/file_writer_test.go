@@ -986,6 +986,58 @@ func (t *PageIndexRoundTripSuite) TestDropLargeStats() {
 	})
 }
 
+func TestColumnChunkBoundsObserver(t *testing.T) {
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+	b := array.NewRecordBuilder(memory.DefaultAllocator, sc)
+	defer b.Release()
+
+	long := string(bytes.Repeat([]byte("z"), int(parquet.DefaultMaxStatsSize)+1))
+	b.Field(0).(*array.StringBuilder).AppendValues(
+		[]string{"a", long, long, long, "", "", "", ""},
+		[]bool{true, true, true, true, true, true, false, false},
+	)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	write := func(opts ...parquet.WriterProperty) []byte {
+		var buf bytes.Buffer
+		props := parquet.NewWriterProperties(append([]parquet.WriterProperty{parquet.WithMaxRowGroupLength(2)}, opts...)...)
+		w, err := pqarrow.NewFileWriter(sc, &buf, props, pqarrow.DefaultWriterProps())
+		require.NoError(t, err)
+		require.NoError(t, w.Write(rec))
+		require.NoError(t, w.Close())
+		return buf.Bytes()
+	}
+
+	var bounds [][2]string
+	observer := parquet.WithColumnChunkBoundsObserver(func(path parquet.ColumnPath, min, max []byte) {
+		require.Equal(t, parquet.ColumnPath{"value"}, path)
+		bounds = append(bounds, [2]string{string(min), string(max)})
+	})
+	data := write(observer)
+	require.Equal(t, [][2]string{{"a", long}, {long, long}, {"", ""}}, bounds)
+	require.Equal(t, write(), data)
+
+	r, err := file.NewParquetReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer r.Close()
+	require.Equal(t, 4, r.NumRowGroups())
+	meta := r.MetaData()
+	first := meta.RowGroups[0].Columns[0].MetaData.Statistics
+	require.Equal(t, []byte("a"), first.MinValue)
+	require.False(t, first.IsSetMaxValue())
+	second := meta.RowGroups[1].Columns[0].MetaData.Statistics
+	require.False(t, second.IsSetMinValue())
+	require.False(t, second.IsSetMaxValue())
+
+	bounds = nil
+	statsOff := parquet.WithStatsFor("value", false)
+	require.Equal(t, write(statsOff), write(statsOff, observer))
+	require.Empty(t, bounds)
+}
+
 func (t *PageIndexRoundTripSuite) TestMultiplePages() {
 	props := parquet.NewWriterProperties(parquet.WithAllocator(t.mem),
 		parquet.WithDataPageVersion(t.pageVersion),
