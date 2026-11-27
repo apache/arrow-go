@@ -404,13 +404,13 @@ func (a *LargeBinary) Validate() error {
 	if len(a.valueOffsets) < expNumOffsets {
 		return fmt.Errorf("arrow/array: large binary offset buffer must have at least %d values, got %d", expNumOffsets, len(a.valueOffsets))
 	}
-	firstOffset := int(a.valueOffsets[a.data.offset])
-	if firstOffset > len(a.valueBytes) {
+	firstOffset := a.valueOffsets[a.data.offset]
+	if firstOffset > int64(len(a.valueBytes)) {
 		return fmt.Errorf("arrow/array: large binary offset %d out of bounds of data buffer (length %d)", firstOffset, len(a.valueBytes))
 	}
 
-	lastOffset := int(a.valueOffsets[expNumOffsets-1])
-	if lastOffset > len(a.valueBytes) {
+	lastOffset := a.valueOffsets[expNumOffsets-1]
+	if lastOffset > int64(len(a.valueBytes)) {
 		return fmt.Errorf("arrow/array: large binary offset %d out of bounds of data buffer (length %d)", lastOffset, len(a.valueBytes))
 	}
 	return nil
@@ -715,8 +715,8 @@ func validateViewLayout(arr ViewLike, kind string) error {
 		return fmt.Errorf("arrow/array: non-empty %s array has no view buffer", kind)
 	}
 
-	expNumViews := data.offset + data.length
-	if len(data.buffers[1].Bytes())/arrow.ViewHeaderSizeBytes < expNumViews {
+	expNumViews := int64(data.offset) + int64(data.length)
+	if int64(len(data.buffers[1].Bytes())/arrow.ViewHeaderSizeBytes) < expNumViews {
 		return fmt.Errorf("arrow/array: %s buffer must have at least %d view values", kind, expNumViews)
 	}
 	return nil
@@ -770,8 +770,8 @@ func validateViewValues(arr ViewLike, dataBuffers []*memory.Buffer, validateValu
 		}
 
 		offset := int(view.BufferOffset())
-		end := offset + view.Len()
-		if end > buf.Len() {
+		end := int64(offset) + int64(view.Len())
+		if end > int64(buf.Len()) {
 			return fmt.Errorf("arrow/array: view at slot %d references range %d-%d of buffer %d but that buffer is only %d bytes long", i, offset, end, view.BufferIndex(), buf.Len())
 		}
 
