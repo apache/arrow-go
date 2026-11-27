@@ -322,7 +322,7 @@ func writeBatchSpacedArrow[T byteArrayArrowOffset](w *ByteArrayColumnChunkWriter
 func (w *ByteArrayColumnChunkWriter) WriteBatchArrow(values []byte, offsets []int32, defLevels, repLevels []int16) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = utils.FormatRecoveredError("unknown error type", r)
+			err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
 		}
 	}()
 	if _, ok := w.currentEncoder.(byteArrayArrowEncoder32); !ok {
@@ -335,7 +335,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchArrow(values []byte, offsets []in
 func (w *ByteArrayColumnChunkWriter) WriteBatchArrow64(values []byte, offsets []int64, defLevels, repLevels []int16) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = utils.FormatRecoveredError("unknown error type", r)
+			err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
 		}
 	}()
 	if _, ok := w.currentEncoder.(byteArrayArrowEncoder64); !ok {
@@ -348,7 +348,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchArrow64(values []byte, offsets []
 func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedArrow(values []byte, offsets []int32, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = utils.FormatRecoveredError("unknown error type", r)
+			err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
 		}
 	}()
 	if _, ok := w.currentEncoder.(byteArrayArrowEncoder32); !ok {
@@ -361,7 +361,7 @@ func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedArrow(values []byte, offset
 func (w *ByteArrayColumnChunkWriter) WriteBatchSpacedArrow64(values []byte, offsets []int64, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = utils.FormatRecoveredError("unknown error type", r)
+			err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
 		}
 	}()
 	if _, ok := w.currentEncoder.(byteArrayArrowEncoder64); !ok {
