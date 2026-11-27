@@ -823,6 +823,9 @@ func uniqueFinalize(ctx *exec.KernelCtx, results []*exec.ArraySpan) ([]*exec.Arr
 	if !ok {
 		return nil, fmt.Errorf("%w: HashState in invalid state", arrow.ErrInvalid)
 	}
+	// GetDictionary copies the values out of the memo table, so the
+	// table's buffers can be released once the result is built.
+	defer releaseHashMemo(impl)
 
 	for _, r := range results {
 		// release any pre-allocation we did
