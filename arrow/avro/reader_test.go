@@ -266,6 +266,7 @@ func TestOCFReaderValues(t *testing.T) {
 		rows []any
 		want string
 	}{
+		{"null", `"null"`, []any{nil, nil}, `[null,null]`},
 		{"bytes", `"bytes"`, []any{payload, []byte{}}, `["AAH+/w==",""]`},
 		{"nullable bytes", `["null","bytes"]`, []any{map[string]any{"bytes": payload}, nil}, `["AAH+/w==",null]`},
 		{"nullable record", `["null",` + rec + `]`, []any{x(7), nil, x(8)}, `[{"x":7},null,{"x":8}]`},
@@ -335,6 +336,7 @@ func TestOCFReaderSchemaEditMismatch(t *testing.T) {
 		{"array", `{"type":"array","items":"int"}`, "unsupported value of type int32 for List column"},
 		{"map", `{"type":"map","values":"int"}`, "unsupported value of type int32 for Map column"},
 		{"record", `{"type":"record","name":"R","fields":[{"name":"x","type":"int"}]}`, "unsupported value of type int32 for Struct column"},
+		{"null", `"null"`, "unsupported value of type int32 for Null column"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

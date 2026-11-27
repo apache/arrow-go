@@ -108,6 +108,14 @@ func (f *fieldPos) newChild(childName string) *fieldPos {
 func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	f := parent.newChild(field.Name)
 	switch bt := b.(type) {
+	case *array.NullBuilder:
+		f.appendFunc = func(data interface{}) error {
+			if data != nil {
+				return fmt.Errorf("avro: unsupported value of type %T for Null column", data)
+			}
+			bt.AppendNull()
+			return nil
+		}
 	case *array.BinaryBuilder:
 		f.appendFunc = func(data interface{}) error {
 			return appendBinaryData(bt, data)
