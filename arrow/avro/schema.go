@@ -280,6 +280,15 @@ func arrowSchemafromAvro(n *schemaNode) {
 
 // iterate record Fields
 func iterateFields(n *schemaNode) {
+	// An Arrow schema cannot represent a record that contains itself, so reject
+	// a record that is also one of its enclosing records. The top schemaNode has
+	// no parent and repeats the root record, so the walk stops before it.
+	for p := n.parent; p != nil && p.parent != nil; p = p.parent {
+		if p.node.Type == "record" && p.node.Name == n.node.Name && p.node.Namespace == n.node.Namespace {
+			name, _ := isNamedSchema(n.node)
+			panic(fmt.Errorf("recursive avro record %q at %s: arrow schemas cannot represent recursive types", name, n.schemaPath()))
+		}
+	}
 	for _, f := range n.node.Fields {
 		ft := n.resolveRef(f.Type, f.Name)
 		switch ft.Type {
