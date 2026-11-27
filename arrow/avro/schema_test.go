@@ -130,7 +130,7 @@ func TestSchemaStringEqual(t *testing.T) {
 				},
 				{
 					Name: "uuidField",
-					Type: arrow.BinaryTypes.String,
+					Type: extensions.NewUUIDType(),
 				},
 				{
 					Name: "fixedUuidField",

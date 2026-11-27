@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,7 +144,7 @@ func TestReader(t *testing.T) {
 				},
 				{
 					Name: "uuidField",
-					Type: arrow.BinaryTypes.String,
+					Type: extensions.NewUUIDType(),
 				},
 				{
 					Name: "fixedUuidField",
@@ -253,13 +254,16 @@ func TestReader(t *testing.T) {
 
 // TestOCFReaderValues writes one row per entry in rows to a record whose only
 // field, f, has the Avro type typ, and compares the column that NewOCFReader
-// reads back with want as JSON.
+// reads back with want as JSON. Field-level attributes of f, such as a
+// field-level logicalType, follow the type in typ.
 func TestOCFReaderValues(t *testing.T) {
 	const rec = `{"type":"record","name":"R","fields":[{"name":"x","type":"int"}]}`
 	const listAndMap = `{"type":"record","name":"P","fields":[{"name":"l","type":{"type":"array","items":"int"}},{"name":"m","type":{"type":"map","values":"int"}}]}`
 	payload := []byte{0x00, 0x01, 0xfe, 0xff}
 	x := func(v int32) map[string]any { return map[string]any{"x": v} }
 	lm := map[string]any{"l": []any{int32(1)}, "m": map[string]any{"a": int32(2)}}
+	ts := time.UnixMilli(1_700_000_000_123).UTC()
+	tsMicros := time.UnixMicro(1_700_000_000_123_456).UTC()
 	tests := []struct {
 		name string
 		typ  string
@@ -310,6 +314,14 @@ func TestOCFReaderValues(t *testing.T) {
 		{"time-millis on long", `{"type":"long","logicalType":"time-millis"}`, []any{int64(5)}, `[5]`},
 		{"timestamp-millis on int", `{"type":"int","logicalType":"timestamp-millis"}`, []any{int32(5)}, `[5]`},
 		{"duration on fixed(10)", `{"type":"fixed","name":"D","size":10,"logicalType":"duration"}`, []any{[10]byte{1}}, `["AQAAAAAAAAAAAA=="]`},
+		{"field-level timestamp-millis on long", `"long","logicalType":"timestamp-millis"`, []any{ts}, `["2023-11-14T22:13:20.123Z"]`},
+		{"field-level decimal on bytes", `"bytes","logicalType":"decimal","precision":4,"scale":2`, []any{big.NewRat(1234, 100)}, `["12.34"]`},
+		{"field-level timestamp-millis on a nullable long", `["null","long"],"logicalType":"timestamp-millis"`, []any{ts, nil}, `["2023-11-14T22:13:20.123Z",null]`},
+		{"logical type in the type wins over the field", `{"type":"long","logicalType":"timestamp-micros"},"logicalType":"timestamp-millis"`,
+			[]any{tsMicros}, `["2023-11-14T22:13:20.123456Z"]`},
+		{"field-level scale fills the type's decimal", `{"type":"bytes","logicalType":"decimal","precision":6},"logicalType":"decimal","scale":2`,
+			[]any{big.NewRat(1234, 100)}, `["12.34"]`},
+		{"field-level logical type that does not fit", `"int","logicalType":"timestamp-millis"`, []any{int32(5)}, `[5]`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

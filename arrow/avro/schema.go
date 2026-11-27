@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -281,6 +282,47 @@ func arrowSchemafromAvro(n *schemaNode) {
 	}
 }
 
+// liftFieldLogical returns the type of the record field f with a field-level
+// logicalType moved onto it, as twmb/avro does before it decodes the field. The
+// logical type moves onto the type, or onto the first non-null branch of a
+// union, and a logical type already on that type wins. Where the logical type
+// in effect is decimal, the field's precision and scale fill in the ones the
+// type does not have. isLogicalSchemaType then ignores a logical type that does
+// not fit, as twmb/avro does.
+func liftFieldLogical(f avro.SchemaField) avro.SchemaNode {
+	t := f.Type
+	logical, _ := f.Props["logicalType"].(string)
+	if logical == "" {
+		return t
+	}
+	target := &t
+	if t.Type == "union" {
+		t.Branches = slices.Clone(t.Branches)
+		target = nil
+		for i := range t.Branches {
+			if t.Branches[i].Type != "null" {
+				target = &t.Branches[i]
+				break
+			}
+		}
+		if target == nil {
+			return t
+		}
+	}
+	if target.LogicalType == "" {
+		target.LogicalType = logical
+	}
+	if target.LogicalType == "decimal" {
+		if p, ok := f.Props["precision"].(int64); ok && target.Precision == 0 {
+			target.Precision = int(p)
+		}
+		if s, ok := f.Props["scale"].(int64); ok && target.Scale == 0 {
+			target.Scale = int(s)
+		}
+	}
+	return t
+}
+
 // iterate record Fields
 func iterateFields(n *schemaNode) {
 	// An Arrow schema cannot represent a record that contains itself, so reject
@@ -293,7 +335,7 @@ func iterateFields(n *schemaNode) {
 		}
 	}
 	for _, f := range n.node.Fields {
-		ft := n.resolveRef(f.Type, f.Name)
+		ft := n.resolveRef(liftFieldLogical(f), f.Name)
 		switch ft.Type {
 		// Avro "array" field type
 		case "array":
