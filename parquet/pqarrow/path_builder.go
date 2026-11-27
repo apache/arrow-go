@@ -310,6 +310,7 @@ type pathBuilder struct {
 	info             pathInfo
 	paths            []pathInfo
 	nullableInParent bool
+	vectorLeaves     []bool
 
 	refCount *atomic.Int64
 }
@@ -465,15 +466,18 @@ func (p *pathBuilder) Visit(arr arrow.Array) error {
 }
 
 func (p *pathBuilder) addTerminalInfo(arr arrow.Array) {
-	p.info.leafIsNullable = p.nullableInParent
-	if p.nullableInParent {
+	// FINITE_VECTOR leaves are required on disk. Treat them as present when
+	// computing levels. The writer checks the visited values before writing.
+	vectorLeaf := len(p.paths) < len(p.vectorLeaves) && p.vectorLeaves[len(p.paths)]
+	p.info.leafIsNullable = p.nullableInParent && !vectorLeaf
+	if p.info.leafIsNullable {
 		p.info.maxDefLevel++
 	}
 
 	// we don't use null_count because if the null_count isn't known
 	// and the array does in fact contain nulls, we will end up traversing
 	// the null bitmap twice.
-	if lazyNoNulls(arr) {
+	if vectorLeaf || lazyNoNulls(arr) {
 		p.info.path = append(p.info.path, &allPresentTerminalNode{p.info.maxDefLevel})
 		p.info.leafIsNullable = false
 	} else if lazyNullCount(arr) == int64(arr.Len()) {
@@ -530,11 +534,20 @@ func (m *multipathLevelBuilder) Release() {
 }
 
 func newMultipathLevelBuilder(arr arrow.Array, fieldNullable bool) (*multipathLevelBuilder, error) {
+	return buildMultipathLevels(arr, fieldNullable, nil)
+}
+
+func buildMultipathLevels(arr arrow.Array, fieldNullable bool, vectorLeaves []bool) (*multipathLevelBuilder, error) {
 	ret := &multipathLevelBuilder{
 		refCount:  utils.NewRefCount(1),
 		rootRange: elemRange{int64(0), int64(arr.Data().Len())},
 		data:      arr.Data(),
-		builder:   pathBuilder{nullableInParent: fieldNullable, paths: make([]pathInfo, 0), refCount: utils.NewRefCount(1)},
+		builder: pathBuilder{
+			nullableInParent: fieldNullable,
+			vectorLeaves:     vectorLeaves,
+			paths:            make([]pathInfo, 0),
+			refCount:         utils.NewRefCount(1),
+		},
 	}
 	if err := ret.builder.Visit(arr); err != nil {
 		ret.builder.Release()

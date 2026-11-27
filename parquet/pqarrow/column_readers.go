@@ -487,7 +487,8 @@ func (lr *listReader) buildArray(lenBound int64) (*arrow.Chunked, error) {
 	}
 
 	validityIO := file.ValidityBitmapInputOutput{ReadUpperBound: lenBound}
-	if lr.field.Nullable {
+	// Required fixed-size lists can still be absent under a null struct.
+	if lr.field.Nullable || lr.field.Type.ID() == arrow.FIXED_SIZE_LIST {
 		validityBuffer = memory.NewResizableBuffer(lr.rctx.mem)
 		validityBuffer.Resize(int(bitutil.BytesForBits(lenBound)))
 		defer validityBuffer.Release()
@@ -594,7 +595,7 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 	runCount := 0
 	previousValid := false
 	for idx := 0; idx < length; idx++ {
-		valid := !lr.field.Nullable || bitutil.BitIsSet(validity, idx)
+		valid := bitutil.BitIsSet(validity, idx)
 		if valid {
 			if size := offsets[idx+1] - offsets[idx]; size != int32(listSize) {
 				return nil, fmt.Errorf("expected all lists to be of size=%d, but index %d had size=%d", listSize, idx, size)
@@ -619,10 +620,10 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 		pieces := make([]arrow.Array, 0, runCount)
 		defer func() { releaseArrays(pieces) }()
 		for i := 0; i < length; {
-			valid := !lr.field.Nullable || bitutil.BitIsSet(validity, i)
+			valid := bitutil.BitIsSet(validity, i)
 			end := i + 1
 			for end < length {
-				nextValid := !lr.field.Nullable || bitutil.BitIsSet(validity, end)
+				nextValid := bitutil.BitIsSet(validity, end)
 				if nextValid != valid {
 					break
 				}
@@ -652,10 +653,10 @@ func (lr *listReader) buildFixedSizeListArray(length int, offsets []int32, valid
 		clear(indicesValidity.Bytes())
 
 		for i := 0; i < length; {
-			valid := !lr.field.Nullable || bitutil.BitIsSet(validity, i)
+			valid := bitutil.BitIsSet(validity, i)
 			end := i + 1
 			for end < length {
-				nextValid := !lr.field.Nullable || bitutil.BitIsSet(validity, end)
+				nextValid := bitutil.BitIsSet(validity, end)
 				if nextValid != valid {
 					break
 				}

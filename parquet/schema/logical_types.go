@@ -50,6 +50,8 @@ func getLogicalType(l *format.LogicalType) LogicalType {
 		return MapLogicalType{}
 	case l.IsSetLIST():
 		return ListLogicalType{}
+	case l.IsSetFINITE_VECTOR():
+		return FiniteVectorLogicalType{numElements: l.FINITE_VECTOR.NumElements}
 	case l.IsSetENUM():
 		return EnumLogicalType{}
 	case l.IsSetDECIMAL():
@@ -307,6 +309,55 @@ func (ListLogicalType) toThrift() *format.LogicalType {
 func (ListLogicalType) Equals(rhs LogicalType) bool {
 	_, ok := rhs.(ListLogicalType)
 	return ok
+}
+
+// FiniteVectorLogicalType describes an ordinary Parquet list with a fixed
+// number of required, finite elements.
+type FiniteVectorLogicalType struct {
+	baseLogicalType
+	numElements int32
+}
+
+// NewFiniteVectorLogicalType creates a vector annotation with a positive size.
+func NewFiniteVectorLogicalType(numElements int32) (FiniteVectorLogicalType, error) {
+	if numElements <= 0 {
+		return FiniteVectorLogicalType{}, fmt.Errorf("FINITE_VECTOR requires a positive number of elements, got %d", numElements)
+	}
+	return FiniteVectorLogicalType{numElements: numElements}, nil
+}
+
+// NumElements returns the number of elements in each present vector.
+func (t FiniteVectorLogicalType) NumElements() int32 { return t.numElements }
+
+func (FiniteVectorLogicalType) SortOrder() SortOrder { return SortUNKNOWN }
+func (FiniteVectorLogicalType) IsNested() bool       { return true }
+func (FiniteVectorLogicalType) IsApplicable(parquet.Type, int32) bool {
+	return false
+}
+
+func (FiniteVectorLogicalType) ToConvertedType() (ConvertedType, DecimalMetadata) {
+	return ConvertedTypes.List, DecimalMetadata{}
+}
+
+func (FiniteVectorLogicalType) IsCompatible(t ConvertedType, dec DecimalMetadata) bool {
+	return t == ConvertedTypes.List && !dec.IsSet
+}
+
+func (t FiniteVectorLogicalType) String() string {
+	return fmt.Sprintf("FiniteVector(num_elements=%d)", t.numElements)
+}
+
+func (t FiniteVectorLogicalType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{"Type": "FiniteVector", "num_elements": t.numElements})
+}
+
+func (t FiniteVectorLogicalType) toThrift() *format.LogicalType {
+	return &format.LogicalType{FINITE_VECTOR: &format.FiniteVectorType{NumElements: t.numElements}}
+}
+
+func (t FiniteVectorLogicalType) Equals(rhs LogicalType) bool {
+	other, ok := rhs.(FiniteVectorLogicalType)
+	return ok && t.numElements == other.numElements
 }
 
 // EnumLogicalType is for representing an enum, which should be a byte array type
