@@ -119,6 +119,19 @@ go test "${test_args[@]}" -short -tags ${tags},noasm ./...
 
 popd
 
+pushd "${source_dir}/substrait"
+
+# substrait is released separately and requires a released Arrow Go. Test it
+# against that release, and against this checkout to catch breaking changes
+# before they are released.
+go test "${test_args[@]}" -short -tags ${tags} ./...
+
+substrait_workspace="$(mktemp -d)/go.work"
+GOWORK="${substrait_workspace}" go work init "${source_dir}" "${source_dir}/substrait"
+GOWORK="${substrait_workspace}" go test "${test_args[@]}" -short -tags ${tags} ./...
+
+popd
+
 pushd "${source_dir}/parquet"
 
 # parquet/file holds the large-value regression tests, which are what exhaust
