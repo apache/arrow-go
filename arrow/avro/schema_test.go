@@ -19,6 +19,7 @@ package avro
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,7 +130,7 @@ func TestSchemaStringEqual(t *testing.T) {
 				},
 				{
 					Name: "uuidField",
-					Type: arrow.BinaryTypes.String,
+					Type: extensions.NewUUIDType(),
 				},
 				{
 					Name: "fixedUuidField",
@@ -237,7 +238,8 @@ func TestArrowSchemaFromAvro_Deprecated_PreservesLogicalTypesOnFixed(t *testing.
 // OCF requires a record at the top level. Non-record roots are rejected by our
 // own guard, while a record with an empty name is rejected earlier by the avro
 // parser; both must surface an error rather than produce a degenerate schema.
-func TestArrowSchemaFromAvroJSON_RejectsInvalidRoot(t *testing.T) {
+// A record that contains itself has no Arrow equivalent and is rejected too.
+func TestArrowSchemaFromAvroJSON_RejectsInvalidSchema(t *testing.T) {
 	tests := []struct {
 		name       string
 		schemaJSON string
@@ -247,6 +249,9 @@ func TestArrowSchemaFromAvroJSON_RejectsInvalidRoot(t *testing.T) {
 		{name: "string root", schemaJSON: `"string"`, wantErr: "must be a record"},
 		{name: "array root", schemaJSON: `{"type":"array","items":"int"}`, wantErr: "must be a record"},
 		{name: "empty record name", schemaJSON: `{"type":"record","name":"","fields":[{"name":"x","type":"int"}]}`, wantParse: true},
+		{name: "recursive record", schemaJSON: `{"type":"record","name":"Node","fields":[{"name":"next","type":["null","Node"]}]}`, wantErr: `recursive avro record "Node"`},
+		{name: "recursive nested record", schemaJSON: `{"type":"record","name":"Root","fields":[{"name":"tree","type":{"type":"record","name":"Tree","namespace":"ns","fields":[{"name":"children","type":{"type":"array","items":"Tree"}}]}}]}`, wantErr: `recursive avro record "ns.Tree"`},
+		{name: "mutually recursive records", schemaJSON: `{"type":"record","name":"A","fields":[{"name":"b","type":["null",{"type":"record","name":"B","fields":[{"name":"a","type":["null","A"]}]}]}]}`, wantErr: `recursive avro record "A"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -291,20 +296,40 @@ func TestArrowSchemaFromAvroJSON_RejectsInvalidDecimalPrecision(t *testing.T) {
 	}
 }
 
-// A named record referenced again by name resolves back to the same definition.
+// A named record referenced again by name resolves back to the same definition,
+// and a record inside another record with the same short name converts.
 func TestArrowSchemaFromAvroJSON_ReusedNamedReference(t *testing.T) {
-	const schemaJSON = `{"type":"record","name":"Root","fields":[
-		{"name":"a","type":{"type":"record","name":"Foo","fields":[{"name":"x","type":"int"}]}},
-		{"name":"b","type":"Foo"}]}`
-	s, err := ArrowSchemaFromAvroJSON(schemaJSON)
-	if err != nil {
-		t.Fatalf("ArrowSchemaFromAvroJSON: %v", err)
+	tests := []struct {
+		name       string
+		schemaJSON string
+		want       []string // the Arrow type of each top-level field
+	}{
+		{"reference in a sibling field", `{"type":"record","name":"Root","fields":[
+			{"name":"a","type":{"type":"record","name":"Foo","fields":[{"name":"x","type":"int"}]}},
+			{"name":"b","type":"Foo"}]}`, []string{"struct<x: int32>", "struct<x: int32>"}},
+		{"same short name in another namespace inside", `{"type":"record","name":"R","fields":[
+			{"name":"a","type":{"type":"record","name":"A","namespace":"x","fields":[
+				{"name":"b","type":{"type":"record","name":"A","namespace":"y","fields":[{"name":"y","type":"int"}]}}]}}]}`,
+			[]string{"struct<b: struct<y: int32>>"}},
+		{"short reference to a dotted name", `{"type":"record","name":"R","fields":[
+			{"name":"a","type":{"type":"record","name":"x.A","fields":[{"name":"v","type":"int"}]}},
+			{"name":"b","type":{"type":"record","name":"B","namespace":"x","fields":[{"name":"c","type":"A"}]}}]}`,
+			[]string{"struct<v: int32>", "struct<c: struct<v: int32>>"}},
 	}
-	if s.NumFields() != 2 {
-		t.Fatalf("got %d fields, want 2", s.NumFields())
-	}
-	if a, b := s.Field(0).Type.String(), s.Field(1).Type.String(); a != b {
-		t.Fatalf("reused reference resolved to a different type:\n a = %s\n b = %s", a, b)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := ArrowSchemaFromAvroJSON(tt.schemaJSON)
+			if err != nil {
+				t.Fatalf("ArrowSchemaFromAvroJSON: %v", err)
+			}
+			var got []string
+			for _, f := range s.Fields() {
+				got = append(got, f.Type.String())
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("field types:\n got = %q\nwant = %q", got, tt.want)
+			}
+		})
 	}
 }
 

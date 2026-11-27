@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
@@ -110,10 +112,12 @@ func (node *schemaNode) rememberNamed(s avro.SchemaNode) {
 		full = s.Namespace + "." + s.Name
 	}
 	node.namedCache[full] = s
-	if existing, ok := node.bareToFull[s.Name]; ok && existing != full {
-		node.ambiguousBare[s.Name] = struct{}{}
+	// A dotted name such as "x.A" is a full name, and its short name is "A".
+	short := s.Name[strings.LastIndexByte(s.Name, '.')+1:]
+	if existing, ok := node.bareToFull[short]; ok && existing != full {
+		node.ambiguousBare[short] = struct{}{}
 	} else {
-		node.bareToFull[s.Name] = full
+		node.bareToFull[short] = full
 	}
 }
 
@@ -278,10 +282,60 @@ func arrowSchemafromAvro(n *schemaNode) {
 	}
 }
 
+// liftFieldLogical returns the type of the record field f with a field-level
+// logicalType moved onto it, as twmb/avro does before it decodes the field. The
+// logical type moves onto the type, or onto the first non-null branch of a
+// union, and a logical type already on that type wins. Where the logical type
+// in effect is decimal, the field's precision and scale fill in the ones the
+// type does not have. isLogicalSchemaType then ignores a logical type that does
+// not fit, as twmb/avro does.
+func liftFieldLogical(f avro.SchemaField) avro.SchemaNode {
+	t := f.Type
+	logical, _ := f.Props["logicalType"].(string)
+	if logical == "" {
+		return t
+	}
+	target := &t
+	if t.Type == "union" {
+		t.Branches = slices.Clone(t.Branches)
+		target = nil
+		for i := range t.Branches {
+			if t.Branches[i].Type != "null" {
+				target = &t.Branches[i]
+				break
+			}
+		}
+		if target == nil {
+			return t
+		}
+	}
+	if target.LogicalType == "" {
+		target.LogicalType = logical
+	}
+	if target.LogicalType == "decimal" {
+		if p, ok := f.Props["precision"].(int64); ok && target.Precision == 0 {
+			target.Precision = int(p)
+		}
+		if s, ok := f.Props["scale"].(int64); ok && target.Scale == 0 {
+			target.Scale = int(s)
+		}
+	}
+	return t
+}
+
 // iterate record Fields
 func iterateFields(n *schemaNode) {
+	// An Arrow schema cannot represent a record that contains itself, so reject
+	// a record that is also one of its enclosing records. The top schemaNode has
+	// no parent and repeats the root record, so the walk stops before it.
+	for p := n.parent; p != nil && p.parent != nil; p = p.parent {
+		if p.node.Type == "record" && p.node.Name == n.node.Name && p.node.Namespace == n.node.Namespace {
+			name, _ := isNamedSchema(n.node)
+			panic(fmt.Errorf("recursive avro record %q at %s: arrow schemas cannot represent recursive types", name, n.schemaPath()))
+		}
+	}
 	for _, f := range n.node.Fields {
-		ft := n.resolveRef(f.Type, f.Name)
+		ft := n.resolveRef(liftFieldLogical(f), f.Name)
 		switch ft.Type {
 		// Avro "array" field type
 		case "array":
@@ -402,8 +456,27 @@ func nullableBranch(s avro.SchemaNode) (avro.SchemaNode, bool) {
 	return *nonNull, true
 }
 
+// isLogicalSchemaType reports whether s has a logical type that applies to its
+// underlying type. The Avro spec has a reader ignore an unknown logical type,
+// and one on an underlying type or size that the logical type does not allow.
+// twmb/avro then decodes the underlying type, so we convert that type instead.
 func isLogicalSchemaType(s avro.SchemaNode) bool {
-	return s.LogicalType != ""
+	switch s.LogicalType {
+	case "decimal":
+		return s.Type == "bytes" || s.Type == "fixed"
+	case "big-decimal":
+		return s.Type == "bytes"
+	case "uuid":
+		return s.Type == "string" || s.Type == "fixed" && s.Size == 16
+	case "date", "time-millis":
+		return s.Type == "int"
+	case "time-micros", "timestamp-millis", "timestamp-micros", "timestamp-nanos",
+		"local-timestamp-millis", "local-timestamp-micros", "local-timestamp-nanos":
+		return s.Type == "long"
+	case "duration":
+		return s.Type == "fixed" && s.Size == 12
+	}
+	return false
 }
 
 func isNamedSchema(s avro.SchemaNode) (string, bool) {
@@ -548,6 +621,12 @@ func avroLogicalToArrowField(n *schemaNode) {
 	// stores a number in days, and the third stores a number in milliseconds.
 	case "duration":
 		dt = arrow.FixedWidthTypes.MonthDayNanoInterval
+
+	// The big-decimal logical type annotates Avro bytes, and each value carries
+	// its own scale, which no Arrow decimal type has. We read each value as its
+	// exact decimal text.
+	case "big-decimal":
+		dt = arrow.BinaryTypes.String
 	}
 	n.arrowField = buildArrowField(n, dt, arrow.Metadata{})
 }
