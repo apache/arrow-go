@@ -1092,3 +1092,97 @@ func TestDictOfEmptyStringsRoundtrip(t *testing.T) {
 		assert.Zero(t, col.(*array.String).Value(i))
 	}
 }
+
+func TestWriteDictionaryConvertsValues(t *testing.T) {
+	const timestamps = `["1960-01-01T01:02:03Z", "2020-01-01T01:02:03Z"]`
+	const times = `["05:06:07", "01:02:03"]`
+
+	coerceTo := func(unit arrow.TimeUnit) []pqarrow.WriterOption {
+		return []pqarrow.WriterOption{pqarrow.WithCoerceTimestamps(unit), pqarrow.WithTruncatedTimestamps(true)}
+	}
+
+	tests := []struct {
+		name         string
+		valueType    arrow.DataType
+		values       string
+		version      parquet.Version
+		opts         []pqarrow.WriterOption
+		expectedType arrow.DataType
+	}{
+		{"timestamp[s]", arrow.FixedWidthTypes.Timestamp_s, timestamps, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Timestamp_ms},
+		{"timestamp[ms]", arrow.FixedWidthTypes.Timestamp_ms, timestamps, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Timestamp_ms},
+		{"timestamp[us]", arrow.FixedWidthTypes.Timestamp_us, timestamps, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Timestamp_us},
+		{"timestamp[ns]", arrow.FixedWidthTypes.Timestamp_ns, timestamps, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Timestamp_ns},
+		{"timestamp[ns] v1.0", arrow.FixedWidthTypes.Timestamp_ns, timestamps, parquet.V1_0, nil, arrow.FixedWidthTypes.Timestamp_us},
+		{"timestamp[ns] v2.4", arrow.FixedWidthTypes.Timestamp_ns, timestamps, parquet.V2_4, nil, arrow.FixedWidthTypes.Timestamp_us},
+		{"timestamp[s] coerced to us", arrow.FixedWidthTypes.Timestamp_s, timestamps, parquet.V2_LATEST, coerceTo(arrow.Microsecond), arrow.FixedWidthTypes.Timestamp_us},
+		{"timestamp[us] coerced to ms", arrow.FixedWidthTypes.Timestamp_us, timestamps, parquet.V2_LATEST, coerceTo(arrow.Millisecond), arrow.FixedWidthTypes.Timestamp_ms},
+		{"timestamp[us] coerced to us", arrow.FixedWidthTypes.Timestamp_us, timestamps, parquet.V2_LATEST, coerceTo(arrow.Microsecond), arrow.FixedWidthTypes.Timestamp_us},
+		{"timestamp[ns] as int96", arrow.FixedWidthTypes.Timestamp_ns, timestamps, parquet.V2_LATEST,
+			[]pqarrow.WriterOption{pqarrow.WithDeprecatedInt96Timestamps(true)}, arrow.FixedWidthTypes.Timestamp_ns},
+		{"time32[s]", arrow.FixedWidthTypes.Time32s, times, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Time32ms},
+		{"time32[ms]", arrow.FixedWidthTypes.Time32ms, times, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Time32ms},
+		{"time64[us]", arrow.FixedWidthTypes.Time64us, times, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Time64us},
+		{"time64[ns]", arrow.FixedWidthTypes.Time64ns, times, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Time64ns},
+		{"date64", arrow.FixedWidthTypes.Date64, `["1960-01-01", "2020-01-01"]`, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Date32},
+		{"float16", arrow.FixedWidthTypes.Float16, `[1.5, -20]`, parquet.V2_LATEST, nil, arrow.FixedWidthTypes.Float16},
+		// values above the signed maximum of the int32 and int64 physical types
+		{"uint32", arrow.PrimitiveTypes.Uint32, `[1, 4000000000]`, parquet.V2_LATEST, nil, arrow.PrimitiveTypes.Uint32},
+		{"uint32 v1.0", arrow.PrimitiveTypes.Uint32, `[1, 4000000000]`, parquet.V1_0, nil, arrow.PrimitiveTypes.Uint32},
+		{"uint64", arrow.PrimitiveTypes.Uint64, `[1, 18000000000000000000]`, parquet.V2_LATEST, nil, arrow.PrimitiveTypes.Uint64},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+
+			fromJSON := func(dt arrow.DataType, data string) arrow.Array {
+				arr, _, err := array.FromJSON(mem, dt, strings.NewReader(data))
+				require.NoError(t, err)
+				return arr
+			}
+
+			dictionary := fromJSON(tt.valueType, tt.values)
+			defer dictionary.Release()
+			indices := fromJSON(arrow.PrimitiveTypes.Int8, `[0, 1, null, 0, 1]`)
+			defer indices.Release()
+			dictType := &arrow.DictionaryType{IndexType: indices.DataType(), ValueType: tt.valueType}
+			full := array.NewDictionaryArray(dictType, indices, dictionary)
+			defer full.Release()
+			values := array.NewSlice(full, 1, 5)
+			defer values.Release()
+
+			sc := arrow.NewSchema([]arrow.Field{{Name: "values", Type: dictType, Nullable: true}}, nil)
+			rec := array.NewRecordBatch(sc, []arrow.Array{values}, int64(values.Len()))
+			defer rec.Release()
+
+			var output bytes.Buffer
+			writer, err := pqarrow.NewFileWriter(sc, &output,
+				parquet.NewWriterProperties(parquet.WithAllocator(mem), parquet.WithVersion(tt.version)),
+				pqarrow.NewArrowWriterProperties(append(tt.opts, pqarrow.WithAllocator(mem))...))
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+
+			tbl, err := pqarrow.ReadTable(context.Background(), bytes.NewReader(output.Bytes()),
+				parquet.NewReaderProperties(mem), pqarrow.ArrowReadProperties{}, mem)
+			require.NoError(t, err)
+			defer tbl.Release()
+
+			expectedDictionary := fromJSON(tt.expectedType, tt.values)
+			defer expectedDictionary.Release()
+			expectedIndices := array.NewSlice(indices, 1, 5)
+			defer expectedIndices.Release()
+			ctx := compute.WithAllocator(context.Background(), mem)
+			expected, err := compute.TakeArray(ctx, expectedDictionary, expectedIndices)
+			require.NoError(t, err)
+			defer expected.Release()
+
+			require.Len(t, tbl.Column(0).Data().Chunks(), 1)
+			actual := tbl.Column(0).Data().Chunk(0)
+			assert.Truef(t, arrow.TypeEqual(expected.DataType(), actual.DataType()), "expected: %s\ngot: %s", expected.DataType(), actual.DataType())
+			assert.Truef(t, array.Equal(expected, actual), "expected: %s\ngot: %s", expected, actual)
+		})
+	}
+}
