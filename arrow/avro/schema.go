@@ -411,8 +411,27 @@ func nullableBranch(s avro.SchemaNode) (avro.SchemaNode, bool) {
 	return *nonNull, true
 }
 
+// isLogicalSchemaType reports whether s has a logical type that applies to its
+// underlying type. The Avro spec has a reader ignore an unknown logical type,
+// and one on an underlying type or size that the logical type does not allow.
+// twmb/avro then decodes the underlying type, so we convert that type instead.
 func isLogicalSchemaType(s avro.SchemaNode) bool {
-	return s.LogicalType != ""
+	switch s.LogicalType {
+	case "decimal":
+		return s.Type == "bytes" || s.Type == "fixed"
+	case "big-decimal":
+		return s.Type == "bytes"
+	case "uuid":
+		return s.Type == "string" || s.Type == "fixed" && s.Size == 16
+	case "date", "time-millis":
+		return s.Type == "int"
+	case "time-micros", "timestamp-millis", "timestamp-micros", "timestamp-nanos",
+		"local-timestamp-millis", "local-timestamp-micros", "local-timestamp-nanos":
+		return s.Type == "long"
+	case "duration":
+		return s.Type == "fixed" && s.Size == 12
+	}
+	return false
 }
 
 func isNamedSchema(s avro.SchemaNode) (string, bool) {

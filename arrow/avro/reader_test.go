@@ -303,6 +303,13 @@ func TestOCFReaderValues(t *testing.T) {
 			[]any{map[string]any{"a": []any{map[string]any{"b": int32(1)}}}}, `[[{"key":"a","value":[[{"key":"b","value":1}]]}]]`},
 		{"map of arrays of arrays", `{"type":"map","values":{"type":"array","items":{"type":"array","items":"int"}}}`,
 			[]any{map[string]any{"a": []any{[]any{int32(1)}, []any{}}}}, `[[{"key":"a","value":[[1],[]]}]]`},
+		{"unknown logical type", `{"type":"string","logicalType":"foo"}`, []any{"s"}, `["s"]`},
+		{"decimal on int", `{"type":"int","logicalType":"decimal","precision":4,"scale":2}`, []any{int32(5)}, `[5]`},
+		{"uuid on bytes", `{"type":"bytes","logicalType":"uuid"}`, []any{[]byte("0123456789abcdef")}, `["MDEyMzQ1Njc4OWFiY2RlZg=="]`},
+		{"uuid on fixed(4)", `{"type":"fixed","name":"F","size":4,"logicalType":"uuid"}`, []any{[4]byte{1, 2, 3, 4}}, `["AQIDBA=="]`},
+		{"time-millis on long", `{"type":"long","logicalType":"time-millis"}`, []any{int64(5)}, `[5]`},
+		{"timestamp-millis on int", `{"type":"int","logicalType":"timestamp-millis"}`, []any{int32(5)}, `[5]`},
+		{"duration on fixed(10)", `{"type":"fixed","name":"D","size":10,"logicalType":"duration"}`, []any{[10]byte{1}}, `["AQAAAAAAAAAAAA=="]`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
