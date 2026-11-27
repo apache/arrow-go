@@ -318,6 +318,60 @@ func TestUniqueBoolean(t *testing.T) {
 	assert.True(t, array.Equal(expected, result))
 }
 
+// The types below are hashed with a binary memo table, whose buffers come
+// from the context allocator and have to be released once unique is done.
+func TestUniqueReleasesBinaryMemoTable(t *testing.T) {
+	tests := []struct {
+		dt       arrow.DataType
+		input    string
+		expected string
+	}{
+		{arrow.BinaryTypes.String, `["foo", null, "bar", "foo"]`, `["foo", null, "bar"]`},
+		{arrow.BinaryTypes.LargeString, `["foo", null, "bar", "foo"]`, `["foo", null, "bar"]`},
+		{arrow.BinaryTypes.Binary, `["Zm9v", null, "YmFy", "Zm9v"]`, `["Zm9v", null, "YmFy"]`},
+		{arrow.BinaryTypes.LargeBinary, `["Zm9v", null, "YmFy", "Zm9v"]`, `["Zm9v", null, "YmFy"]`},
+		{&arrow.FixedSizeBinaryType{ByteWidth: 3}, `["Zm9v", null, "YmFy", "Zm9v"]`, `["Zm9v", null, "YmFy"]`},
+		{&arrow.Decimal128Type{Precision: 5, Scale: 2}, `["1.25", null, "-3.50", "1.25"]`, `["1.25", null, "-3.50"]`},
+		{&arrow.Decimal256Type{Precision: 5, Scale: 2}, `["1.25", null, "-3.50", "1.25"]`, `["1.25", null, "-3.50"]`},
+		{arrow.FixedWidthTypes.MonthDayNanoInterval,
+			`[{"months": 1, "days": 2, "nanoseconds": 3}, null, {"months": 4, "days": 5, "nanoseconds": 6}, {"months": 1, "days": 2, "nanoseconds": 3}]`,
+			`[{"months": 1, "days": 2, "nanoseconds": 3}, null, {"months": 4, "days": 5, "nanoseconds": 6}]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dt.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer mem.AssertSize(t, 0)
+			ctx := compute.WithAllocator(context.Background(), mem)
+
+			input, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.input))
+			require.NoError(t, err)
+			defer input.Release()
+			expected, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.expected))
+			require.NoError(t, err)
+			defer expected.Release()
+
+			result, err := compute.UniqueArray(ctx, input)
+			require.NoError(t, err)
+			defer result.Release()
+
+			assertArraysEqual(t, expected, result)
+
+			// chunked input runs the kernel once per chunk and finalizes once
+			chunked := arrow.NewChunked(tt.dt, []arrow.Array{input, input})
+			defer chunked.Release()
+
+			out, err := compute.Unique(ctx, &compute.ChunkedDatum{Value: chunked})
+			require.NoError(t, err)
+			defer out.Release()
+
+			chunkedResult := out.(*compute.ArrayDatum).MakeArray()
+			defer chunkedResult.Release()
+			assertArraysEqual(t, expected, chunkedResult)
+		})
+	}
+}
+
 func TestUniqueTimeTimestamp(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer mem.AssertSize(t, 0)
