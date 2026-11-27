@@ -311,6 +311,10 @@ func TestArrowSchemaFromAvroJSON_ReusedNamedReference(t *testing.T) {
 			{"name":"a","type":{"type":"record","name":"A","namespace":"x","fields":[
 				{"name":"b","type":{"type":"record","name":"A","namespace":"y","fields":[{"name":"y","type":"int"}]}}]}}]}`,
 			[]string{"struct<b: struct<y: int32>>"}},
+		{"short reference to a dotted name", `{"type":"record","name":"R","fields":[
+			{"name":"a","type":{"type":"record","name":"x.A","fields":[{"name":"v","type":"int"}]}},
+			{"name":"b","type":{"type":"record","name":"B","namespace":"x","fields":[{"name":"c","type":"A"}]}}]}`,
+			[]string{"struct<v: int32>", "struct<c: struct<v: int32>>"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

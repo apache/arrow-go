@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
@@ -110,10 +111,12 @@ func (node *schemaNode) rememberNamed(s avro.SchemaNode) {
 		full = s.Namespace + "." + s.Name
 	}
 	node.namedCache[full] = s
-	if existing, ok := node.bareToFull[s.Name]; ok && existing != full {
-		node.ambiguousBare[s.Name] = struct{}{}
+	// A dotted name such as "x.A" is a full name, and its short name is "A".
+	short := s.Name[strings.LastIndexByte(s.Name, '.')+1:]
+	if existing, ok := node.bareToFull[short]; ok && existing != full {
+		node.ambiguousBare[short] = struct{}{}
 	} else {
-		node.bareToFull[s.Name] = full
+		node.bareToFull[short] = full
 	}
 }
 
