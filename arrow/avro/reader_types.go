@@ -33,258 +33,29 @@ import (
 )
 
 type dataLoader struct {
-	idx, depth int32
-	list       *fieldPos
-	item       *fieldPos
-	mapField   *fieldPos
-	mapKey     *fieldPos
-	mapValue   *fieldPos
-	fields     []*fieldPos
-	children   []*dataLoader
+	fields []*fieldPos
 }
 
 var (
 	ErrNullStructData = errors.New("null struct data")
 )
 
-func newDataLoader() *dataLoader { return &dataLoader{idx: 0, depth: 0} }
+func newDataLoader() *dataLoader { return &dataLoader{} }
 
-// drawTree takes the tree of field builders produced by mapFieldBuilders()
-// and produces another tree structure and aggregates fields whose values can
-// be retrieved from a `map[string]any` into a slice of builders, and creates a hierarchy to
-// deal with nested types (lists and maps).
-func (d *dataLoader) drawTree(field *fieldPos) {
-	for _, f := range field.children() {
-		if f.isList || f.isMap {
-			if f.isList {
-				c := d.newListChild(f)
-				if !f.childrens[0].isList {
-					c.item = f.childrens[0]
-					c.drawTree(f.childrens[0])
-				} else {
-					c.drawTree(f.childrens[0].childrens[0])
-				}
-			}
-			if f.isMap {
-				c := d.newMapChild(f)
-				if !arrow.IsNested(f.childrens[1].builder.Type().ID()) {
-					c.mapKey = f.childrens[0]
-					c.mapValue = f.childrens[1]
-				} else {
-					c.mapKey = f.childrens[0]
-					m := c.newChild()
-					m.mapValue = f.childrens[1]
-					m.drawTree(f.childrens[1])
-				}
-			}
-		} else {
-			d.fields = append(d.fields, f)
-			if len(f.children()) > 0 {
-				d.drawTree(f)
-			}
-		}
-	}
-}
+// drawTree keeps the top-level fields of the tree of field builders produced
+// by mapFieldBuilders(). The appendFunc of a list, map, or struct field appends
+// the items, keys and values, or fields under it.
+func (d *dataLoader) drawTree(field *fieldPos) { d.fields = field.childrens }
 
-// loadDatum loads decoded Avro data to the schema fields' builder functions.
-// Since array.StructBuilder.AppendNull() will recursively append null to all of the
-// struct's fields, in the case of nil being passed to a struct's builderFunc it will
-// return a ErrNullStructData error to signal that all its sub-fields can be skipped.
+// loadDatum appends each top-level field of a decoded Avro record.
 func (d *dataLoader) loadDatum(data any) error {
-	if d.list == nil && d.mapField == nil {
-		if d.mapValue != nil {
-			if err := appendValue(d.mapValue, data); err != nil {
-				return err
-			}
-		}
-		var NullParent *fieldPos
-		for _, f := range d.fields {
-			if f.parent == NullParent {
-				continue
-			}
-			if d.mapValue == nil {
-				err := f.appendFunc(f.getValue(data))
-				if err != nil {
-					if err == ErrNullStructData {
-						NullParent = f
-						continue
-					}
-					return err
-				}
-			} else {
-				switch dt := data.(type) {
-				case nil:
-					err := f.appendFunc(dt)
-					if err != nil {
-						if err == ErrNullStructData {
-							NullParent = f
-							continue
-						}
-						return err
-					}
-				case []any:
-					if len(d.children) < 1 {
-						for _, e := range dt {
-							err := f.appendFunc(e)
-							if err != nil {
-								if err == ErrNullStructData {
-									NullParent = f
-									continue
-								}
-								return err
-							}
-						}
-					} else {
-						for _, e := range dt {
-							if err := d.children[0].loadDatum(e); err != nil {
-								return err
-							}
-						}
-					}
-				case map[string]any:
-					err := f.appendFunc(f.getValue(dt))
-					if err != nil {
-						if err == ErrNullStructData {
-							NullParent = f
-							continue
-						}
-						return err
-					}
-				}
-
-			}
-		}
-		for _, c := range d.children {
-			if c.list != nil {
-				if err := c.loadDatum(c.list.getValue(data)); err != nil {
-					return err
-				}
-			}
-			if c.mapField != nil {
-				switch dt := data.(type) {
-				case nil:
-					if err := c.loadDatum(dt); err != nil {
-						return err
-					}
-				case map[string]any:
-					if err := c.loadDatum(c.mapField.getValue(dt)); err != nil {
-						return err
-					}
-				default:
-					if err := c.loadDatum(c.mapField.getValue(data)); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	} else {
-		if d.list != nil {
-			switch dt := data.(type) {
-			case nil:
-				if err := appendValue(d.list, dt); err != nil {
-					return err
-				}
-			case []any:
-				if err := appendValue(d.list, dt); err != nil {
-					return err
-				}
-				for _, e := range dt {
-					if d.item != nil {
-						if err := appendValue(d.item, e); err != nil {
-							return err
-						}
-					}
-					var NullParent *fieldPos
-					for _, f := range d.fields {
-						if f.parent == NullParent {
-							continue
-						}
-						err := f.appendFunc(f.getValue(e))
-						if err != nil {
-							if err == ErrNullStructData {
-								NullParent = f
-								continue
-							}
-							return err
-						}
-					}
-					for _, c := range d.children {
-						if c.list != nil {
-							if err := c.loadDatum(c.list.getValue(e)); err != nil {
-								return err
-							}
-						}
-						if c.mapField != nil {
-							if err := c.loadDatum(c.mapField.getValue(e)); err != nil {
-								return err
-							}
-						}
-					}
-				}
-			case map[string]any:
-				if err := appendValue(d.list, dt["array"]); err != nil {
-					return err
-				}
-				for _, e := range dt["array"].([]any) {
-					if d.item != nil {
-						if err := appendValue(d.item, e); err != nil {
-							return err
-						}
-					}
-					var NullParent *fieldPos
-					for _, f := range d.fields {
-						if f.parent == NullParent {
-							continue
-						}
-						err := f.appendFunc(f.getValue(e))
-						if err != nil {
-							if err == ErrNullStructData {
-								NullParent = f
-								continue
-							}
-							return err
-						}
-					}
-					for _, c := range d.children {
-						if err := c.loadDatum(c.list.getValue(e)); err != nil {
-							return err
-						}
-					}
-				}
-			default:
-				if err := appendValue(d.list, data); err != nil {
-					return err
-				}
-				if err := appendValue(d.item, dt); err != nil {
-					return err
-				}
-			}
-		}
-		if d.mapField != nil {
-			switch dt := data.(type) {
-			case nil:
-				if err := appendValue(d.mapField, dt); err != nil {
-					return err
-				}
-			case map[string]any:
-				if err := appendValue(d.mapField, dt); err != nil {
-					return err
-				}
-				for k, v := range dt {
-					if err := appendValue(d.mapKey, k); err != nil {
-						return err
-					}
-					if d.mapValue != nil {
-						if err := appendValue(d.mapValue, v); err != nil {
-							return err
-						}
-					} else {
-						if err := d.children[0].loadDatum(v); err != nil {
-							return err
-						}
-					}
-				}
-			}
+	record, ok := data.(map[string]any)
+	if !ok {
+		return fmt.Errorf("avro: unsupported value of type %T for a record", data)
+	}
+	for _, f := range d.fields {
+		if err := appendValue(f, record[f.fieldName]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -302,128 +73,18 @@ func appendValue(f *fieldPos, data any) error {
 	return nil
 }
 
-func (d *dataLoader) newChild() *dataLoader {
-	var child = &dataLoader{
-		depth: d.depth + 1,
-	}
-	d.children = append(d.children, child)
-	return child
-}
-
-func (d *dataLoader) newListChild(list *fieldPos) *dataLoader {
-	var child = &dataLoader{
-		list:  list,
-		item:  list.childrens[0],
-		depth: d.depth + 1,
-	}
-	d.children = append(d.children, child)
-	return child
-}
-
-func (d *dataLoader) newMapChild(mapField *fieldPos) *dataLoader {
-	var child = &dataLoader{
-		mapField: mapField,
-		depth:    d.depth + 1,
-	}
-	d.children = append(d.children, child)
-	return child
-}
-
 type fieldPos struct {
-	parent       *fieldPos
-	fieldName    string
-	builder      array.Builder
-	path         []string
-	isList       bool
-	isItem       bool
-	isStruct     bool
-	isMap        bool
-	typeName     string
-	appendFunc   func(val interface{}) error
-	metadatas    arrow.Metadata
-	childrens    []*fieldPos
-	index, depth int32
+	fieldName  string
+	appendFunc func(val interface{}) error
+	childrens  []*fieldPos
 }
 
-func newFieldPos() *fieldPos { return &fieldPos{index: -1} }
+func newFieldPos() *fieldPos { return &fieldPos{} }
 
-func (f *fieldPos) children() []*fieldPos { return f.childrens }
-
-func (f *fieldPos) newChild(childName string, childBuilder array.Builder, meta arrow.Metadata) *fieldPos {
-	var child = fieldPos{
-		parent:    f,
-		fieldName: childName,
-		builder:   childBuilder,
-		metadatas: meta,
-		index:     int32(len(f.childrens)),
-		depth:     f.depth + 1,
-	}
-	if f.isList {
-		child.isItem = true
-	}
-	child.path = child.buildNamePath()
-	f.childrens = append(f.childrens, &child)
-	return &child
-}
-
-func (f *fieldPos) buildNamePath() []string {
-	var path []string
-	var listPath []string
-	cur := f
-	for i := f.depth - 1; i >= 0; i-- {
-		if cur.typeName == "" {
-			path = append([]string{cur.fieldName}, path...)
-		} else {
-			path = append([]string{cur.fieldName, cur.typeName}, path...)
-		}
-		if !cur.parent.isMap {
-			cur = cur.parent
-		}
-	}
-	if f.parent.parent != nil && f.parent.parent.isList {
-		for i := len(path) - 1; i >= 0; i-- {
-			if path[i] != "item" {
-				listPath = append([]string{path[i]}, listPath...)
-			} else {
-				return listPath
-			}
-		}
-	}
-	if f.parent != nil && f.parent.fieldName == "value" {
-		for i := len(path) - 1; i >= 0; i-- {
-			if path[i] != "value" {
-				listPath = append([]string{path[i]}, listPath...)
-			} else {
-				return listPath
-			}
-		}
-	}
-	return path
-}
-
-// NamePath returns a slice of keys making up the path to the field
-func (f *fieldPos) namePath() []string { return f.path }
-
-// GetValue retrieves the value from the map[string]any
-// by following the field's key path
-func (f *fieldPos) getValue(m any) any {
-	if _, ok := m.(map[string]any); !ok {
-		return m
-	}
-	for _, key := range f.namePath() {
-		valueMap, ok := m.(map[string]any)
-		if !ok {
-			if key == "item" {
-				return m
-			}
-			return nil
-		}
-		m, ok = valueMap[key]
-		if !ok {
-			return nil
-		}
-	}
-	return m
+func (f *fieldPos) newChild(childName string) *fieldPos {
+	child := &fieldPos{fieldName: childName}
+	f.childrens = append(f.childrens, child)
+	return child
 }
 
 // Avro data is loaded to Arrow arrays using the following type mapping:
@@ -440,11 +101,12 @@ func (f *fieldPos) getValue(m any) any {
 //	array					[]interface{}	List
 //	enum					string			Dictionary
 //	fixed					[]byte			FixedSizeBinary
-//	map and record	map[string]any	Struct
+//	map						map[string]any	Map
+//	record					map[string]any	Struct
 //
 // mapFieldBuilders builds a tree of field builders matching the Arrow schema
 func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
-	f := parent.newChild(field.Name, b, field.Metadata)
+	f := parent.newChild(field.Name)
 	switch bt := b.(type) {
 	case *array.BinaryBuilder:
 		f.appendFunc = func(data interface{}) error {
@@ -512,8 +174,8 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 		}
 	case *array.LargeListBuilder:
 		vb := bt.ValueBuilder()
-		f.isList = true
 		mapFieldBuilders(vb, field.Type.(*arrow.LargeListType).ElemField(), f)
+		item := f.childrens[0]
 		f.appendFunc = func(data interface{}) error {
 			switch dt := data.(type) {
 			case nil:
@@ -524,15 +186,20 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 				} else {
 					bt.Append(true)
 				}
+				for _, e := range dt {
+					if err := appendValue(item, e); err != nil {
+						return err
+					}
+				}
 			default:
-				bt.Append(true)
+				return fmt.Errorf("avro: unsupported value of type %T for LargeList column", data)
 			}
 			return nil
 		}
 	case *array.ListBuilder:
 		vb := bt.ValueBuilder()
-		f.isList = true
 		mapFieldBuilders(vb, field.Type.(*arrow.ListType).ElemField(), f)
+		item := f.childrens[0]
 		f.appendFunc = func(data interface{}) error {
 			switch dt := data.(type) {
 			case nil:
@@ -543,24 +210,38 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 				} else {
 					bt.Append(true)
 				}
+				for _, e := range dt {
+					if err := appendValue(item, e); err != nil {
+						return err
+					}
+				}
 			default:
-				bt.Append(true)
+				return fmt.Errorf("avro: unsupported value of type %T for List column", data)
 			}
 			return nil
 		}
 	case *array.MapBuilder:
-		// has metadata for objects in values
-		f.isMap = true
 		kb := bt.KeyBuilder()
 		ib := bt.ItemBuilder()
 		mapFieldBuilders(kb, field.Type.(*arrow.MapType).KeyField(), f)
 		mapFieldBuilders(ib, field.Type.(*arrow.MapType).ItemField(), f)
+		key, value := f.childrens[0], f.childrens[1]
 		f.appendFunc = func(data interface{}) error {
-			switch data.(type) {
+			switch dt := data.(type) {
 			case nil:
 				bt.AppendNull()
-			default:
+			case map[string]any:
 				bt.Append(true)
+				for k, v := range dt {
+					if err := appendValue(key, k); err != nil {
+						return err
+					}
+					if err := appendValue(value, v); err != nil {
+						return err
+					}
+				}
+			default:
+				return fmt.Errorf("avro: unsupported value of type %T for Map column", data)
 			}
 			return nil
 		}
@@ -573,20 +254,25 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 			return appendStringData(bt, data)
 		}
 	case *array.StructBuilder:
-		// has metadata for Avro Union named types
-		f.typeName, _ = field.Metadata.GetValue("typeName")
-		f.isStruct = true
 		// create children
 		for i, p := range field.Type.(*arrow.StructType).Fields() {
 			mapFieldBuilders(bt.FieldBuilder(i), p, f)
 		}
 		f.appendFunc = func(data interface{}) error {
-			switch data.(type) {
+			switch dt := data.(type) {
 			case nil:
+				// AppendNull appends a null to every field under the struct.
 				bt.AppendNull()
 				return ErrNullStructData
-			default:
+			case map[string]any:
 				bt.Append(true)
+				for _, c := range f.childrens {
+					if err := appendValue(c, dt[c.fieldName]); err != nil {
+						return err
+					}
+				}
+			default:
+				return fmt.Errorf("avro: unsupported value of type %T for Struct column", data)
 			}
 			return nil
 		}
@@ -601,6 +287,10 @@ func mapFieldBuilders(b array.Builder, field arrow.Field, parent *fieldPos) {
 	case *array.TimestampBuilder:
 		f.appendFunc = func(data interface{}) error {
 			return appendTimestampData(bt, data)
+		}
+	default:
+		f.appendFunc = func(interface{}) error {
+			return fmt.Errorf("avro: unsupported Arrow type %s for column %q", field.Type, field.Name)
 		}
 	}
 }
