@@ -381,6 +381,7 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 				return ret, fmt.Errorf("invalid union type code spec %q", f)
 			}
 			var typeCodes []arrow.UnionTypeCode
+			var seenCodes [128]bool
 			for i := range strings.SplitSeq(val, ",") {
 				v, e := strconv.ParseInt(i, 10, 8)
 				if e != nil {
@@ -391,6 +392,10 @@ func importSchema(schema *CArrowSchema) (ret arrow.Field, err error) {
 					err = fmt.Errorf("%w: negative type code in union: format string %s", arrow.ErrInvalid, f)
 					return
 				}
+				if seenCodes[v] {
+					return ret, fmt.Errorf("%w: duplicate union type code %d", arrow.ErrInvalid, v)
+				}
+				seenCodes[v] = true
 				typeCodes = append(typeCodes, arrow.UnionTypeCode(v))
 			}
 
@@ -841,6 +846,14 @@ func (imp *cimporter) doImport() error {
 	case *arrow.SparseUnionType:
 		if err := imp.checkNoNulls(); err != nil {
 			return err
+		}
+		// validateCArrayHeader checked that offset + length fits in an int.
+		end := int(imp.arr.offset) + int(imp.arr.length)
+		for i, child := range imp.children {
+			if child.data.Len() < end {
+				return fmt.Errorf("%w: sparse union child %d has length %d, expected at least %d",
+					arrow.ErrInvalid, i, child.data.Len(), end)
+			}
 		}
 
 		var buf *memory.Buffer
