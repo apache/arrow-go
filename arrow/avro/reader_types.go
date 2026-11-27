@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -506,10 +507,37 @@ func appendStringData(b *array.StringBuilder, data interface{}) error {
 		b.AppendNull()
 	case string:
 		b.Append(dt)
+	case *big.Rat:
+		// A big-decimal value arrives as a *big.Rat.
+		s, ok := decimalText(dt)
+		if !ok {
+			return fmt.Errorf("avro: value %s has no exact decimal text for String column", dt.RatString())
+		}
+		b.Append(s)
 	default:
 		return fmt.Errorf("avro: unsupported value of type %T for String column", data)
 	}
 	return nil
+}
+
+// decimalText returns the decimal text of r with the fewest digits after the
+// point that represent r exactly. It returns false when no decimal text is
+// exact, which is when r's reduced denominator has a prime factor other than
+// 2 and 5.
+func decimalText(r *big.Rat) (string, bool) {
+	d := new(big.Int).Set(r.Denom())
+	twos := d.TrailingZeroBits()
+	d.Rsh(d, twos)
+	digits := int(twos)
+	if d.BitLen() > 1 {
+		// d must be a power of 5, which in base 5 is a 1 followed by zeros.
+		s := d.Text(5)
+		if s[0] != '1' || strings.TrimRight(s[1:], "0") != "" {
+			return "", false
+		}
+		digits = max(digits, len(s)-1)
+	}
+	return r.FloatString(digits), true
 }
 
 func appendTime32Data(b *array.Time32Builder, data interface{}) error {

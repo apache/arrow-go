@@ -621,6 +621,12 @@ func avroLogicalToArrowField(n *schemaNode) {
 	// stores a number in days, and the third stores a number in milliseconds.
 	case "duration":
 		dt = arrow.FixedWidthTypes.MonthDayNanoInterval
+
+	// The big-decimal logical type annotates Avro bytes, and each value carries
+	// its own scale, which no Arrow decimal type has. We read each value as its
+	// exact decimal text.
+	case "big-decimal":
+		dt = arrow.BinaryTypes.String
 	}
 	n.arrowField = buildArrowField(n, dt, arrow.Metadata{})
 }

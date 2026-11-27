@@ -264,6 +264,8 @@ func TestOCFReaderValues(t *testing.T) {
 	lm := map[string]any{"l": []any{int32(1)}, "m": map[string]any{"a": int32(2)}}
 	ts := time.UnixMilli(1_700_000_000_123).UTC()
 	tsMicros := time.UnixMicro(1_700_000_000_123_456).UTC()
+	const bigDecimal = `{"type":"bytes","logicalType":"big-decimal"}`
+	manyDigits, _ := new(big.Rat).SetString("12345678901234567890.0000000001")
 	tests := []struct {
 		name string
 		typ  string
@@ -322,6 +324,9 @@ func TestOCFReaderValues(t *testing.T) {
 		{"field-level scale fills the type's decimal", `{"type":"bytes","logicalType":"decimal","precision":6},"logicalType":"decimal","scale":2`,
 			[]any{big.NewRat(1234, 100)}, `["12.34"]`},
 		{"field-level logical type that does not fit", `"int","logicalType":"timestamp-millis"`, []any{int32(5)}, `[5]`},
+		{"big-decimal", bigDecimal, []any{big.NewRat(1234, 100), big.NewRat(-15, 10), big.NewRat(42, 1), new(big.Rat), manyDigits},
+			`["12.34","-1.5","42","0","12345678901234567890.0000000001"]`},
+		{"nullable big-decimal", `["null",` + bigDecimal + `]`, []any{big.NewRat(3, 2), nil}, `["1.5",null]`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
