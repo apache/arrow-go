@@ -1033,6 +1033,22 @@ func (c *CastSuite) TestDecimal256ToInt() {
 	})
 }
 
+func (c *CastSuite) TestDecimalToIntTruncateTowardZero() {
+	for _, decType := range []arrow.DataType{&arrow.Decimal128Type{Precision: 2, Scale: 1}, &arrow.Decimal256Type{Precision: 2, Scale: 1}} {
+		c.Run(decType.String(), func() {
+			const input = `["1.9", "-1.9", "1.5", "-1.5", "0.9", "-0.9", "1.1", "-1.1", "0.0", null]`
+			c.checkCastFails(decType, input, compute.SafeCastOptions(arrow.PrimitiveTypes.Int64))
+			for _, safe := range []bool{true, false} {
+				c.Run("safe="+strconv.FormatBool(safe), func() {
+					opts := compute.NewCastOptions(arrow.PrimitiveTypes.Int64, safe)
+					opts.AllowDecimalTruncate = true
+					c.checkCastOpts(decType, arrow.PrimitiveTypes.Int64, input, `[1, -1, 1, -1, 0, 0, 1, -1, 0, null]`, *opts)
+				})
+			}
+		})
+	}
+}
+
 func (c *CastSuite) TestIntegerToDecimal() {
 	for _, decType := range []arrow.DataType{&arrow.Decimal128Type{Precision: 22, Scale: 2}, &arrow.Decimal256Type{Precision: 22, Scale: 2}} {
 		c.Run(decType.String(), func() {

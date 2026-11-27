@@ -111,7 +111,7 @@ func CastDecimal256ToInteger[T arrow.IntType | arrow.UintType](ctx *exec.KernelC
 			})
 		} else {
 			ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val dec.Decimal256, err *error) T {
-				v := val.ReduceScaleBy(inScale, true)
+				v := val.ReduceScaleBy(inScale, false)
 				return decimalToIntImpl[dec.Decimal256, T](opts.AllowIntOverflow, min, max, v, err)
 			})
 		}
@@ -152,7 +152,7 @@ func CastDecimal128ToInteger[T arrow.IntType | arrow.UintType](ctx *exec.KernelC
 			})
 		} else {
 			ex = ScalarUnaryNotNull(func(_ *exec.KernelCtx, val decimal128.Num, err *error) T {
-				v := val.ReduceScaleBy(inScale, true)
+				v := val.ReduceScaleBy(inScale, false)
 				return decimalToIntImpl[decimal128.Num, T](opts.AllowIntOverflow, min, max, v, err)
 			})
 		}
