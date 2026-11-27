@@ -1298,6 +1298,77 @@ func TestEmptyUnionExport(t *testing.T) {
 	assert.NotEqualValues(t, unsafe.Pointer(nil), buffers[0])
 }
 
+func TestImportUnionDuplicateTypeCodes(t *testing.T) {
+	for _, format := range []string{"+us:0,0", "+ud:0,0"} {
+		t.Run(format, func(t *testing.T) {
+			schemas := testUnion([]string{format, "i", "C"}, []string{"", "i", "u"}, []int64{0, 0, 0})
+			defer freeMallocedSchemas(schemas)
+			schema := unsafe.Slice(schemas, 3)[0]
+			defer ReleaseCArrowSchema(schema)
+			arr := createTestSparseUnion()
+			defer arr.Release()
+			var out CArrowArray
+			ExportArrowArray(arr, &out, nil)
+			count := wrapCountingRelease(&out)
+			defer freeCountingRelease(count)
+			defer ReleaseCArrowArray(&out)
+
+			_, imported, err := ImportCArray(&out, schema)
+			require.ErrorIs(t, err, arrow.ErrInvalid)
+			require.Nil(t, imported)
+			assert.True(t, schemaIsReleased(schema))
+			assert.Zero(t, getCountingReleaseCount(count), "schema errors leave the array with the caller")
+			ReleaseCArrowArray(&out)
+			assert.Equal(t, 1, getCountingReleaseCount(count))
+		})
+	}
+}
+
+func TestImportSparseUnionChildCoverage(t *testing.T) {
+	for _, sliced := range []bool{false, true} {
+		for _, short := range []bool{false, true} {
+			t.Run(fmt.Sprintf("sliced=%t/short=%t", sliced, short), func(t *testing.T) {
+				arr := createTestSparseUnion()
+				defer arr.Release()
+				var out CArrowArray
+				var schema CArrowSchema
+				ExportArrowArray(arr, &out, &schema)
+				defer ReleaseCArrowSchema(&schema)
+				count := wrapCountingRelease(&out)
+				defer freeCountingRelease(count)
+				defer ReleaseCArrowArray(&out)
+				start := int64(0)
+				if sliced {
+					out.offset, out.length = 1, 3
+					start = 1
+				}
+				if short {
+					child := unsafe.Slice(out.children, out.n_children)[0]
+					child.length = out.length - 1
+					if sliced {
+						child.length = out.length // enough rows without the parent's offset
+					}
+				}
+
+				_, imported, err := ImportCArray(&out, &schema)
+				assert.True(t, schemaIsReleased(&schema))
+				if short {
+					require.ErrorIs(t, err, arrow.ErrInvalid)
+					require.Nil(t, imported)
+				} else {
+					require.NoError(t, err)
+					expected := array.NewSlice(arr, start, int64(arr.Len()))
+					assert.True(t, array.Equal(expected, imported))
+					expected.Release()
+					imported.Release()
+				}
+				ReleaseCArrowArray(&out)
+				assert.Equal(t, 1, getCountingReleaseCount(count))
+			})
+		}
+	}
+}
+
 func TestExtensionArrayRoundTrip(t *testing.T) {
 	tests := []struct {
 		name     string
