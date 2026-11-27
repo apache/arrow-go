@@ -75,7 +75,9 @@ func ImportCArrowSchema(out *CArrowSchema) (*arrow.Schema, error) {
 // by the resulting array interface object. The passed in ArrowArray will have it's ownership
 // transferred to the resulting arrow.Array via ArrowArrayMove. The underlying array.Data
 // object that is owned by the Array will now be the owner of the memory pointer and
-// will call ArrowArrayRelease when it is released and garbage collected via runtime.SetFinalizer.
+// will call ArrowArrayRelease once the last imported buffer (children and dictionary
+// included) is released, or right away if the array has no buffers to import. There is
+// no garbage collector cleanup on this path, so the returned array must be released.
 //
 // NOTE: The array takes ownership of the underlying memory buffers via ArrowArrayMove,
 // it does not take ownership of the actual arr object itself.
@@ -166,9 +168,8 @@ func ImportCRecordBatch(arr *CArrowArray, sc *CArrowSchema) (arrow.RecordBatch, 
 // ImportCArrayStream creates an arrio.Reader from an ArrowArrayStream taking ownership
 // of the underlying stream object via ArrowArrayStreamMove.
 //
-// The records returned by this reader must be released manually after they are returned.
-// The reader itself will release the stream via SetFinalizer when it is garbage collected.
-// It will return (nil, io.EOF) from the Read function when there are no more records to return.
+// The returned reader and its record batches follow the same ownership and release
+// rules as ImportCRecordReader.
 //
 // NOTE: The reader takes ownership of the underlying memory buffers via ArrowArrayStreamMove,
 // it does not take ownership of the actual stream object itself.
@@ -183,12 +184,36 @@ func ImportCArrayStream(stream *CArrowArrayStream, schema *arrow.Schema) arrio.R
 	return reader
 }
 
-// ImportCStreamReader creates an arrio.Reader from an ArrowArrayStream taking ownership
-// of the underlying stream object via ArrowArrayStreamMove.
+// ImportCRecordReader creates an arrio.Reader from an ArrowArrayStream taking ownership
+// of the underlying stream object via ArrowArrayStreamMove. If err is not nil, the
+// stream has already been released.
 //
-// The records returned by this reader must be released manually after they are returned.
-// The reader itself will release the stream via SetFinalizer when it is garbage collected.
-// It will return (nil, io.EOF) from the Read function when there are no more records to return.
+// The returned reader always implements array.RecordReader. Use its Release to release
+// the stream at a known point instead of waiting for the garbage collector:
+//
+//	r, err := cdata.ImportCRecordReader(stream, nil)
+//	if err != nil {
+//		return err
+//	}
+//	defer r.(array.RecordReader).Release()
+//
+// Ownership rules:
+//   - The caller owns one reference to the reader. Retain adds one and Release drops one.
+//     When the last reference is dropped, Release drops the reader's current record batch
+//     and calls the stream's release callback once before it returns.
+//   - A record batch returned by Read (or by RecordBatch after Next) is owned by the reader
+//     and stays valid until the next Read or Next call, or until the reader is released.
+//     Call Retain on it to keep it longer, then Release it when done.
+//   - Each record batch owns its own ArrowArray. Its release callback runs when the last
+//     buffer of that batch is released, which may be after the stream was released.
+//     Releasing the reader never frees a batch that the caller still retains.
+//
+// If the reader is never released, a cleanup registered with runtime.AddCleanup runs
+// after the reader becomes unreachable, on the garbage collector's schedule and possibly
+// not before the program exits. That cleanup releases the stream and the reader's
+// temporary ArrowArray; it does not release the current record batch.
+//
+// Read returns (nil, io.EOF) when there are no more record batches.
 //
 // NOTE: The reader takes ownership of the underlying memory buffers via ArrowArrayStreamMove,
 // it does not take ownership of the actual stream object itself.

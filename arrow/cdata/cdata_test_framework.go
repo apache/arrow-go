@@ -159,6 +159,8 @@ package cdata
 // int get_counting_release_count(void* cr);
 // void* setup_single_array_stream(struct ArrowArray* arr, struct ArrowSchema* sc, struct ArrowArrayStream* out);
 // int get_single_array_stream_release_count(void* stream_state);
+// void* setup_counting_stream(struct ArrowArrayStream* inner, int fail_schema, int fail_next_at, struct ArrowArrayStream* out);
+// void get_counting_stream_counts(void* state, int* stream_releases, int* batches_out, int* batch_releases);
 import "C"
 
 import (
@@ -664,6 +666,30 @@ func getSingleArrayStreamReleaseCount(state unsafe.Pointer) int {
 }
 
 func freeSingleArrayStreamState(state unsafe.Pointer) {
+	C.free(state)
+}
+
+// setupCountingStream moves inner into a counting wrapper written to out.
+// failSchema makes get_schema fail; get_next fails once failNextAt batches
+// have been handed out (-1 never fails). Free the state with C.free.
+func setupCountingStream(inner *CArrowArrayStream, failSchema bool, failNextAt int, out *CArrowArrayStream) unsafe.Pointer {
+	fs := 0
+	if failSchema {
+		fs = 1
+	}
+	return C.setup_counting_stream((*C.struct_ArrowArrayStream)(unsafe.Pointer(inner)), C.int(fs), C.int(failNextAt), (*C.struct_ArrowArrayStream)(unsafe.Pointer(out)))
+}
+
+// countingStreamCounts returns how many times the stream release callback
+// ran, how many batches get_next handed out, and how many of those batches
+// had their release callback run.
+func countingStreamCounts(state unsafe.Pointer) (streamReleases, batchesOut, batchReleases int) {
+	var sr, bo, br C.int
+	C.get_counting_stream_counts(state, &sr, &bo, &br)
+	return int(sr), int(bo), int(br)
+}
+
+func freeCountingStream(state unsafe.Pointer) {
 	C.free(state)
 }
 

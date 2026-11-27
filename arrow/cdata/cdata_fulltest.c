@@ -583,3 +583,76 @@ void* setup_single_array_stream(struct ArrowArray* arr, struct ArrowSchema* sche
 int get_single_array_stream_release_count(void* state) {
   return ((SingleArrayStream*)state)->releases;
 }
+
+// CountingStream wraps a stream and counts its release callback, the batches
+// it hands out and the release callbacks of those batches. The state is freed
+// by the test, so batches can still be released after the stream.
+typedef struct {
+  struct ArrowArrayStream inner;
+  int fail_schema;
+  int fail_next_at;
+  int stream_releases;
+  int batches_out;
+  int batch_releases;
+} CountingStream;
+typedef struct {
+  CountingStream* owner;
+  void (*release)(struct ArrowArray*);
+  void* private_data;
+} CountingBatch;
+static void counting_batch_release(struct ArrowArray* arr) {
+  CountingBatch* cb = arr->private_data;
+  cb->owner->batch_releases++;
+  arr->release = cb->release;
+  arr->private_data = cb->private_data;
+  free(cb);
+  arr->release(arr);
+}
+static int counting_get_schema(struct ArrowArrayStream* stream, struct ArrowSchema* out) {
+  CountingStream* state = stream->private_data;
+  if (state->fail_schema) return EIO;
+  return state->inner.get_schema(&state->inner, out);
+}
+static int counting_get_next(struct ArrowArrayStream* stream, struct ArrowArray* out) {
+  CountingStream* state = stream->private_data;
+  if (state->batches_out == state->fail_next_at) return EIO;
+  int rc = state->inner.get_next(&state->inner, out);
+  if (rc != 0 || out->release == NULL) return rc;
+  CountingBatch* cb = malloc(sizeof(*cb));
+  cb->owner = state;
+  cb->release = out->release;
+  cb->private_data = out->private_data;
+  out->release = counting_batch_release;
+  out->private_data = cb;
+  state->batches_out++;
+  return 0;
+}
+static const char* counting_get_last_error(struct ArrowArrayStream* stream) {
+  return "injected error";
+}
+static void counting_stream_release(struct ArrowArrayStream* stream) {
+  CountingStream* state = stream->private_data;
+  state->stream_releases++;
+  ArrowArrayStreamRelease(&state->inner);
+  ArrowArrayStreamMarkReleased(stream);
+}
+void* setup_counting_stream(struct ArrowArrayStream* inner, int fail_schema, int fail_next_at,
+                            struct ArrowArrayStream* out) {
+  CountingStream* state = calloc(1, sizeof(*state));
+  ArrowArrayStreamMove(inner, &state->inner);
+  state->fail_schema = fail_schema;
+  state->fail_next_at = fail_next_at;
+  out->get_schema = counting_get_schema;
+  out->get_next = counting_get_next;
+  out->get_last_error = counting_get_last_error;
+  out->release = counting_stream_release;
+  out->private_data = state;
+  return state;
+}
+void get_counting_stream_counts(void* state, int* stream_releases, int* batches_out,
+                                int* batch_releases) {
+  CountingStream* s = state;
+  *stream_releases = s->stream_releases;
+  *batches_out = s->batches_out;
+  *batch_releases = s->batch_releases;
+}
