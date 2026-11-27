@@ -391,15 +391,27 @@ func WithMaxStatsSize(maxStatsSize int64) WriterProperty {
 	}
 }
 
-// WithColumnChunkBoundsObserver observes the min and max in Parquet statistics
-// encoding as each column chunk closes, before the statistics size limit is
-// applied. Chunks without min/max statistics do not call the observer.
+// ColumnChunkBounds holds a column chunk's min and max in Parquet statistics
+// encoding. Use the column's schema for its physical type and sort order.
 //
-// The arguments are read-only and must be copied if needed after the callback
-// returns. The observer runs synchronously and does not alter the file's
-// statistics. Use the observed bounds only if writing the file succeeds.
+// RowGroup and Column are zero-based indexes in the file's row groups and
+// leaf columns. Both are -1 for standalone column writers outside a file writer.
+// Path, Min, and Max are read-only and must be copied to retain them.
+type ColumnChunkBounds struct {
+	Path             ColumnPath
+	RowGroup, Column int
+	Min, Max         []byte
+}
+
+// WithColumnChunkBoundsObserver calls observe synchronously with each column
+// chunk's min and max, before the statistics size limit is applied. Chunks
+// without both bounds do not call the observer. Use the observed bounds only
+// if writing the file succeeds.
+//
+// Different writers sharing these properties can call observe concurrently,
+// so observe must be safe for concurrent use in that case.
 // Pass nil to disable the observer.
-func WithColumnChunkBoundsObserver(observe func(path ColumnPath, min, max []byte)) WriterProperty {
+func WithColumnChunkBoundsObserver(observe func(ColumnChunkBounds)) WriterProperty {
 	return func(cfg *writerPropConfig) {
 		cfg.wr.columnChunkBoundsObserver = observe
 	}
@@ -645,7 +657,7 @@ type WriterProperties struct {
 	encryptionProps *FileEncryptionProperties
 	sortingCols     []SortingColumn
 
-	columnChunkBoundsObserver func(ColumnPath, []byte, []byte)
+	columnChunkBoundsObserver func(ColumnChunkBounds)
 }
 
 func defaultWriterProperties() *WriterProperties {
@@ -1012,7 +1024,7 @@ func (w *WriterProperties) MaxStatsSizePath(path ColumnPath) int64 {
 
 // ColumnChunkBoundsObserver returns the callback configured by
 // [WithColumnChunkBoundsObserver], or nil if none is configured.
-func (w *WriterProperties) ColumnChunkBoundsObserver() func(ColumnPath, []byte, []byte) {
+func (w *WriterProperties) ColumnChunkBoundsObserver() func(ColumnChunkBounds) {
 	return w.columnChunkBoundsObserver
 }
 

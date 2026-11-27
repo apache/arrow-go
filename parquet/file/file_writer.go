@@ -247,7 +247,7 @@ func (fw *Writer) appendRowGroup(buffered bool) (*rowGroupWriter, error) {
 	}
 
 	rgMeta := fw.metadata.AppendRowGroup()
-	rgw, err := newRowGroupWriter(fw.sink, rgMeta, int16(fw.rowGroups),
+	rgw, err := newRowGroupWriter(fw.sink, rgMeta, fw.rowGroups,
 		fw.props, buffered, fw.fileEncryptor, fw.pageIndexBuilder)
 	if err != nil {
 		return nil, err

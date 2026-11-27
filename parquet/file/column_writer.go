@@ -104,6 +104,8 @@ type columnWriter struct {
 	metaData *metadata.ColumnChunkMetaDataBuilder
 	descr    *schema.Column
 
+	rowGroupOrdinal, columnOrdinal int
+
 	// scratch buffer if validity bits need to be recalculated
 	bitsBuffer *memory.Buffer
 	levelInfo  LevelInfo
@@ -184,16 +186,18 @@ type columnWriter struct {
 
 func newColumnWriterBase(metaData *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, useDict bool, enc parquet.Encoding, props *parquet.WriterProperties) columnWriter {
 	ret := columnWriter{
-		metaData:     metaData,
-		descr:        metaData.Descr(),
-		levelInfo:    computeLevelInfo(metaData.Descr()),
-		pager:        pager,
-		hasDict:      useDict,
-		encoding:     enc,
-		props:        props,
-		mem:          props.Allocator(),
-		defLevelSink: encoding.NewPooledBufferWriter(0),
-		repLevelSink: encoding.NewPooledBufferWriter(0),
+		metaData:        metaData,
+		descr:           metaData.Descr(),
+		rowGroupOrdinal: -1,
+		columnOrdinal:   -1,
+		levelInfo:       computeLevelInfo(metaData.Descr()),
+		pager:           pager,
+		hasDict:         useDict,
+		encoding:        enc,
+		props:           props,
+		mem:             props.Allocator(),
+		defLevelSink:    encoding.NewPooledBufferWriter(0),
+		repLevelSink:    encoding.NewPooledBufferWriter(0),
 	}
 	if pager.HasCompressor() {
 		ret.compressedTemp = new(bytes.Buffer)
@@ -786,7 +790,13 @@ func (w *columnWriter) Close() (err error) {
 		}
 
 		if observe := w.props.ColumnChunkBoundsObserver(); observe != nil && w.rowsWritten > 0 && chunkStats.HasMin && chunkStats.HasMax {
-			observe(w.descr.ColumnPath(), chunkStats.Min, chunkStats.Max)
+			observe(parquet.ColumnChunkBounds{
+				Path:     w.descr.ColumnPath(),
+				RowGroup: w.rowGroupOrdinal,
+				Column:   w.columnOrdinal,
+				Min:      chunkStats.Min,
+				Max:      chunkStats.Max,
+			})
 		}
 		chunkStats.ApplyStatSizeLimits(int(w.props.MaxStatsSizeFor(w.descr.Path())))
 		chunkStats.Signed = schema.SortSIGNED == w.descr.SortOrder()
