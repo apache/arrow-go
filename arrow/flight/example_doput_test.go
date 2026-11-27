@@ -95,7 +95,7 @@ func Example_doPut() {
 		Path: []string{"example", "ids"},
 	})
 
-	for i := int64(0); i < 3; i++ {
+	for i := range int64(3) {
 		bldr.Field(0).(*array.Int64Builder).AppendValues([]int64{i * 10, i*10 + 1}, nil)
 		rec := bldr.NewRecordBatch()
 		err = wr.Write(rec)
@@ -105,8 +105,8 @@ func Example_doPut() {
 		}
 	}
 
-	// closing the writer ends the IPC stream, CloseSend tells the server
-	// that the client has nothing more to send
+	// Close releases the writer. CloseSend ends the stream, which is what
+	// makes the server's reader stop.
 	if err = wr.Close(); err != nil {
 		log.Fatal(err)
 	}
