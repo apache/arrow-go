@@ -2613,6 +2613,10 @@ func (w *FixedLenByteArrayColumnChunkWriter) FallbackToPlain() {
 // and writer properties to determine the correct type of column writer to construct and whether
 // or not to use dictionary encoding.
 func NewColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, props *parquet.WriterProperties) ColumnChunkWriter {
+	return newColumnChunkWriter(meta, pager, props, -1, -1)
+}
+
+func newColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, props *parquet.WriterProperties, rowGroup, column int) ColumnChunkWriter {
 	descr := meta.Descr()
 	useDict := props.DictionaryEnabledFor(descr.Path()) && descr.PhysicalType() != parquet.Types.Boolean && descr.PhysicalType() != parquet.Types.Int96
 	enc := props.EncodingFor(descr.Path())
@@ -2622,21 +2626,37 @@ func NewColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageW
 
 	switch descr.PhysicalType() {
 	case parquet.Types.Int32:
-		return NewInt32ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewInt32ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.Int64:
-		return NewInt64ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewInt64ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.Int96:
-		return NewInt96ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewInt96ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.Float:
-		return NewFloat32ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewFloat32ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.Double:
-		return NewFloat64ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewFloat64ColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.Boolean:
-		return NewBooleanColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewBooleanColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.ByteArray:
-		return NewByteArrayColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewByteArrayColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	case parquet.Types.FixedLenByteArray:
-		return NewFixedLenByteArrayColumnChunkWriter(meta, pager, useDict, enc, props)
+		w := NewFixedLenByteArrayColumnChunkWriter(meta, pager, useDict, enc, props)
+		w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+		return w
 	default:
 		panic("unimplemented")
 	}

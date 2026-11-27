@@ -74,7 +74,7 @@ type rowGroupWriter struct {
 	compressedBytesWritten int64
 	closed                 bool
 	closeErr               error
-	ordinal                int16
+	ordinal                int
 	nextColumnIdx          int
 	nrows                  int
 	buffered               bool
@@ -87,7 +87,7 @@ type rowGroupWriter struct {
 	bloomFilters map[string]metadata.BloomFilterBuilder
 }
 
-func newRowGroupWriter(sink utils.WriterTell, rgMeta *metadata.RowGroupMetaDataBuilder, ordinal int16, props *parquet.WriterProperties, buffered bool, fileEncryptor encryption.FileEncryptor, pageIdxBldr *metadata.PageIndexBuilder) (*rowGroupWriter, error) {
+func newRowGroupWriter(sink utils.WriterTell, rgMeta *metadata.RowGroupMetaDataBuilder, ordinal int, props *parquet.WriterProperties, buffered bool, fileEncryptor encryption.FileEncryptor, pageIdxBldr *metadata.PageIndexBuilder) (*rowGroupWriter, error) {
 	ret := &rowGroupWriter{
 		sink:             sink,
 		metadata:         rgMeta,
@@ -186,17 +186,17 @@ func (rg *rowGroupWriter) NextColumn() (ColumnChunkWriter, error) {
 
 	if rg.pager == nil {
 		var err error
-		rg.pager, err = NewPageWriter(rg.sink, rg.props.CompressionFor(path), rg.props.CompressionLevelFor(path), colMeta, rg.ordinal, int16(columnOrdinal), rg.props.Allocator(), false, metaEncryptor, dataEncryptor)
+		rg.pager, err = NewPageWriter(rg.sink, rg.props.CompressionFor(path), rg.props.CompressionLevelFor(path), colMeta, int16(rg.ordinal), int16(columnOrdinal), rg.props.Allocator(), false, metaEncryptor, dataEncryptor)
 		if err != nil {
 			return nil, err
 		}
 		rg.pager.SetIndexBuilders(colIdxBldr, offsetIdxBldr)
 	} else {
-		rg.pager.Reset(rg.sink, rg.props.CompressionFor(path), rg.props.CompressionLevelFor(path), colMeta, rg.ordinal, int16(columnOrdinal), metaEncryptor, dataEncryptor)
+		rg.pager.Reset(rg.sink, rg.props.CompressionFor(path), rg.props.CompressionLevelFor(path), colMeta, int16(rg.ordinal), int16(columnOrdinal), metaEncryptor, dataEncryptor)
 		rg.pager.SetIndexBuilders(colIdxBldr, offsetIdxBldr)
 	}
 
-	rg.columnWriters[0] = NewColumnChunkWriter(colMeta, rg.pager, rg.props)
+	rg.columnWriters[0] = newColumnChunkWriter(colMeta, rg.pager, rg.props, rg.ordinal, columnOrdinal)
 	rg.bloomFilters[path] = rg.columnWriters[0].GetBloomFilter()
 	return rg.columnWriters[0], nil
 }
@@ -268,7 +268,7 @@ func (rg *rowGroupWriter) Close() error {
 
 		rg.columnWriters = nil
 		rg.metadata.SetNumRows(rg.nrows)
-		if err := rg.metadata.Finish(rg.bytesWritten, rg.ordinal); err != nil {
+		if err := rg.metadata.Finish(rg.bytesWritten, int16(rg.ordinal)); err != nil {
 			rg.closeErr = err
 		}
 	}
@@ -302,14 +302,14 @@ func (rg *rowGroupWriter) initColumns() error {
 			}
 		}
 
-		pager, err := NewPageWriter(rg.sink, rg.props.CompressionFor(path), rg.props.CompressionLevelFor(path), colMeta, rg.ordinal, int16(rg.nextColumnIdx), rg.props.Allocator(), rg.buffered, metaEncryptor, dataEncryptor)
+		pager, err := NewPageWriter(rg.sink, rg.props.CompressionFor(path), rg.props.CompressionLevelFor(path), colMeta, int16(rg.ordinal), int16(rg.nextColumnIdx), rg.props.Allocator(), rg.buffered, metaEncryptor, dataEncryptor)
 		if err != nil {
 			return err
 		}
 		pager.SetIndexBuilders(colIdxBldr, offsetIdxBldr)
 
+		cw := newColumnChunkWriter(colMeta, pager, rg.props, rg.ordinal, rg.nextColumnIdx)
 		rg.nextColumnIdx++
-		cw := NewColumnChunkWriter(colMeta, pager, rg.props)
 		rg.columnWriters = append(rg.columnWriters, cw)
 		rg.bloomFilters[path] = cw.GetBloomFilter()
 	}

@@ -1140,6 +1140,84 @@ func TestPageIndexRoundTripSuite(t *testing.T) {
 	})
 }
 
+func TestColumnChunkBoundsObserver(t *testing.T) {
+	sc := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "other", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+	b := array.NewRecordBuilder(memory.DefaultAllocator, sc)
+	defer b.Release()
+
+	long := string(bytes.Repeat([]byte("z"), int(parquet.DefaultMaxStatsSize)+1))
+	b.Field(0).(*array.StringBuilder).AppendValues(
+		[]string{"a", long, "", "", long, long, "", ""},
+		[]bool{true, true, false, false, true, true, true, true},
+	)
+	b.Field(1).(*array.StringBuilder).AppendValues(
+		[]string{"", "", "b", "d", "", "", "", ""},
+		[]bool{true, true, true, true, false, false, false, false},
+	)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	for _, buffered := range []bool{false, true} {
+		name := "serial"
+		if buffered {
+			name = "buffered"
+		}
+		t.Run(name, func(t *testing.T) {
+			write := func(opts ...parquet.WriterProperty) []byte {
+				var buf bytes.Buffer
+				props := parquet.NewWriterProperties(append([]parquet.WriterProperty{parquet.WithMaxRowGroupLength(2)}, opts...)...)
+				w, err := pqarrow.NewFileWriter(sc, &buf, props, pqarrow.DefaultWriterProps())
+				require.NoError(t, err)
+				if buffered {
+					require.NoError(t, w.WriteBuffered(rec))
+				} else {
+					require.NoError(t, w.Write(rec))
+				}
+				require.NoError(t, w.Close())
+				return buf.Bytes()
+			}
+
+			type bound struct {
+				rowGroup, column int
+				path, min, max   string
+			}
+			var bounds []bound
+			observer := parquet.WithColumnChunkBoundsObserver(func(b parquet.ColumnChunkBounds) {
+				bounds = append(bounds, bound{b.RowGroup, b.Column, b.Path.String(), string(b.Min), string(b.Max)})
+			})
+			data := write(observer)
+			require.ElementsMatch(t, []bound{
+				{0, 0, "value", "a", long},
+				{0, 1, "other", "", ""},
+				{1, 1, "other", "b", "d"},
+				{2, 0, "value", long, long},
+				{3, 0, "value", "", ""},
+			}, bounds)
+			require.Equal(t, write(), data)
+
+			r, err := file.NewParquetReader(bytes.NewReader(data))
+			require.NoError(t, err)
+			defer r.Close()
+			require.Equal(t, 4, r.NumRowGroups())
+			meta := r.MetaData()
+			first := meta.RowGroups[0].Columns[0].MetaData.Statistics
+			require.Equal(t, []byte("a"), first.MinValue)
+			require.False(t, first.IsSetMaxValue())
+			oversized := meta.RowGroups[2].Columns[0].MetaData.Statistics
+			require.False(t, oversized.IsSetMinValue())
+			require.False(t, oversized.IsSetMaxValue())
+
+			bounds = nil
+			statsOff := parquet.WithStatsFor("value", false)
+			require.Equal(t, write(statsOff), write(statsOff, observer))
+			require.ElementsMatch(t, []bound{{0, 1, "other", "", ""}, {1, 1, "other", "b", "d"}}, bounds)
+		})
+	}
+}
+
 func TestWriteBloomFilters(t *testing.T) {
 	input1 := []parquet.ByteArray{
 		parquet.ByteArray("hello"),
@@ -1768,7 +1846,13 @@ func TestEncryptedRowGroupLimit(t *testing.T) {
 	}
 
 	t.Run("unencrypted files are not limited", func(t *testing.T) {
-		props := parquet.NewWriterProperties(parquet.WithDictionaryDefault(false))
+		lastRowGroup := -1
+		props := parquet.NewWriterProperties(
+			parquet.WithDictionaryDefault(false),
+			parquet.WithColumnChunkBoundsObserver(func(b parquet.ColumnChunkBounds) {
+				lastRowGroup = b.RowGroup
+			}),
+		)
 		w, err := file.NewParquetWriterWithError(io.Discard, sc, file.WithWriterProps(props))
 		require.NoError(t, err)
 		for range encryptedOrdinalLimit + 1 {
@@ -1780,6 +1864,7 @@ func TestEncryptedRowGroupLimit(t *testing.T) {
 			require.NoError(t, err)
 		}
 		require.NoError(t, w.Close())
+		require.Equal(t, encryptedOrdinalLimit, lastRowGroup)
 	})
 }
 

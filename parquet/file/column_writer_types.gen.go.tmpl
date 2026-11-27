@@ -674,6 +674,10 @@ func (w *{{.Name}}ColumnChunkWriter) FallbackToPlain() {
 // and writer properties to determine the correct type of column writer to construct and whether
 // or not to use dictionary encoding.
 func NewColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, props *parquet.WriterProperties) ColumnChunkWriter {
+  return newColumnChunkWriter(meta, pager, props, -1, -1)
+}
+
+func newColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageWriter, props *parquet.WriterProperties, rowGroup, column int) ColumnChunkWriter {
   descr := meta.Descr()
   useDict := props.DictionaryEnabledFor(descr.Path()) && descr.PhysicalType() != parquet.Types.Boolean && descr.PhysicalType() != parquet.Types.Int96
   enc := props.EncodingFor(descr.Path())
@@ -684,7 +688,9 @@ func NewColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pager PageW
   switch descr.PhysicalType() {
 {{- range .In}}
   case parquet.Types.{{if .physical}}{{.physical}}{{else}}{{.Name}}{{end}}:
-    return New{{.Name}}ColumnChunkWriter(meta, pager, useDict, enc, props)
+    w := New{{.Name}}ColumnChunkWriter(meta, pager, useDict, enc, props)
+    w.rowGroupOrdinal, w.columnOrdinal = rowGroup, column
+    return w
 {{- end}}
   default:
     panic("unimplemented")

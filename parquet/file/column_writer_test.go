@@ -85,6 +85,44 @@ func (m *mockpagewriter) SetIndexBuilders(colidx metadata.ColumnIndexBuilder, of
 	m.Called(colidx, offsetidx)
 }
 
+func TestColumnChunkBoundsObserverStandalone(t *testing.T) {
+	sc := schema.NewSchema(newSingleColumnSchema(t))
+	for _, tc := range []struct {
+		name  string
+		typed bool
+	}{
+		{"generic constructor", false},
+		{"typed constructor", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			props := parquet.NewWriterProperties(
+				parquet.WithDictionaryDefault(false),
+				parquet.WithColumnChunkBoundsObserver(func(bounds parquet.ColumnChunkBounds) {
+					calls++
+					require.Equal(t, -1, bounds.RowGroup)
+					require.Equal(t, -1, bounds.Column)
+				}),
+			)
+			meta := metadata.NewColumnChunkMetaDataBuilder(props, sc.Column(0))
+			pager, err := file.NewPageWriter(&utils.TellWrapper{Writer: new(bytes.Buffer)}, compress.Codecs.Uncompressed,
+				compress.DefaultCompressionLevel, meta, 0, 0, props.Allocator(), false, nil, nil)
+			require.NoError(t, err)
+
+			var w *file.Int32ColumnChunkWriter
+			if tc.typed {
+				w = file.NewInt32ColumnChunkWriter(meta, pager, false, parquet.Encodings.Plain, props)
+			} else {
+				w = file.NewColumnChunkWriter(meta, pager, props).(*file.Int32ColumnChunkWriter)
+			}
+			_, err = w.WriteBatch([]int32{1}, nil, nil)
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+			require.Equal(t, 1, calls)
+		})
+	}
+}
+
 func TestWriteDataPageV1NumValues(t *testing.T) {
 	sc := schema.NewSchema(schema.MustGroup(schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.Must(schema.ListOf(
