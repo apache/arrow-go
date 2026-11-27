@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,4 +152,37 @@ func TestFromArrowTypeReturnsNilForNullDate32(t *testing.T) {
 	got, err := fromArrowType(arr, 0)
 	require.NoError(t, err)
 	require.Nil(t, got)
+}
+
+func TestFromArrowTypeUnsignedAndLargeTypes(t *testing.T) {
+	tests := []struct {
+		typ  arrow.DataType
+		json string
+		want any
+	}{
+		{arrow.PrimitiveTypes.Uint8, `[255, null]`, uint8(255)},
+		{arrow.PrimitiveTypes.Uint16, `[65535, null]`, uint16(65535)},
+		{arrow.PrimitiveTypes.Uint32, `[4294967295, null]`, uint32(4294967295)},
+		{arrow.PrimitiveTypes.Uint64, `[18446744073709551615, null]`, uint64(18446744073709551615)},
+		{arrow.BinaryTypes.LargeString, `["a", null]`, "a"},
+		{arrow.BinaryTypes.LargeBinary, `["YQ==", null]`, []byte("a")},
+		{arrow.BinaryTypes.StringView, `["a", null]`, "a"},
+		{arrow.BinaryTypes.BinaryView, `["YQ==", null]`, []byte("a")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typ.String(), func(t *testing.T) {
+			arr, _, err := array.FromJSON(memory.DefaultAllocator, tt.typ, strings.NewReader(tt.json))
+			require.NoError(t, err)
+			defer arr.Release()
+
+			got, err := fromArrowType(arr, 0)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+
+			got, err = fromArrowType(arr, 1)
+			require.NoError(t, err)
+			require.Nil(t, got)
+		})
+	}
 }
