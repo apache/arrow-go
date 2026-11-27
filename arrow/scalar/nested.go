@@ -129,6 +129,14 @@ type LargeList struct {
 	*List
 }
 
+func (l *LargeList) CastTo(to arrow.DataType) (Scalar, error) {
+	if l.Valid && arrow.TypeEqual(l.Type, to) {
+		l.Retain()
+		return l, nil
+	}
+	return l.List.CastTo(to)
+}
+
 func NewLargeListScalar(val arrow.Array) *LargeList {
 	return &LargeList{&List{scalar{arrow.LargeListOf(val.DataType()), true}, array.MakeFromData(val.Data())}}
 }
@@ -194,12 +202,28 @@ type Map struct {
 	*List
 }
 
+func (m *Map) CastTo(to arrow.DataType) (Scalar, error) {
+	if m.Valid && arrow.TypeEqual(m.Type, to) {
+		m.Retain()
+		return m, nil
+	}
+	return m.List.CastTo(to)
+}
+
 func NewMapScalar(val arrow.Array) *Map {
 	return &Map{&List{scalar{makeMapType(val.DataType().(*arrow.StructType)), true}, array.MakeFromData(val.Data())}}
 }
 
 type FixedSizeList struct {
 	*List
+}
+
+func (f *FixedSizeList) CastTo(to arrow.DataType) (Scalar, error) {
+	if f.Valid && arrow.TypeEqual(f.Type, to) {
+		f.Retain()
+		return f, nil
+	}
+	return f.List.CastTo(to)
 }
 
 func (f *FixedSizeList) Validate() (err error) {

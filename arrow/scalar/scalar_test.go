@@ -3802,3 +3802,105 @@ func TestExtensionIdentityCastOwnsStorage(t *testing.T) {
 	require.Positive(t, mem.CurrentAlloc(), "cast result should still own the UUID storage")
 	releaseScalar(result)
 }
+
+func TestListLikeScalarSameTypeCastTo(t *testing.T) {
+	t.Run("large_list", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+		defer mem.AssertSize(t, 0)
+
+		vals, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		require.NoError(t, err)
+		src := scalar.NewLargeListScalar(vals)
+		vals.Release()
+
+		got, err := src.CastTo(src.DataType())
+		require.NoError(t, err)
+		assert.Same(t, src, got)
+		_, ok := got.(*scalar.LargeList)
+		assert.True(t, ok, "expected *scalar.LargeList, got %T", got)
+
+		src.Release()
+		require.Positive(t, mem.CurrentAlloc(), "cast result should still own the underlying array")
+
+		arr, err := scalar.MakeArrayFromScalar(got, 2, mem)
+		require.NoError(t, err)
+		assert.Equal(t, 2, arr.Len())
+		arr.Release()
+		releaseScalar(got)
+
+		nullSrc := scalar.MakeNullScalar(arrow.LargeListOf(arrow.PrimitiveTypes.Int32))
+		nullGot, err := nullSrc.CastTo(nullSrc.DataType())
+		require.NoError(t, err)
+		assert.False(t, nullGot.IsValid())
+		_, ok = nullGot.(*scalar.LargeList)
+		assert.True(t, ok, "expected null *scalar.LargeList, got %T", nullGot)
+	})
+
+	t.Run("fixed_size_list", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+		defer mem.AssertSize(t, 0)
+
+		vals, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int32, strings.NewReader(`[1, 2]`))
+		require.NoError(t, err)
+		src := scalar.NewFixedSizeListScalar(vals)
+		vals.Release()
+
+		got, err := src.CastTo(src.DataType())
+		require.NoError(t, err)
+		assert.Same(t, src, got)
+		_, ok := got.(*scalar.FixedSizeList)
+		assert.True(t, ok, "expected *scalar.FixedSizeList, got %T", got)
+
+		src.Release()
+		require.Positive(t, mem.CurrentAlloc(), "cast result should still own the underlying array")
+
+		arr, err := scalar.MakeArrayFromScalar(got, 2, mem)
+		require.NoError(t, err)
+		assert.Equal(t, 2, arr.Len())
+		arr.Release()
+		releaseScalar(got)
+
+		nullSrc := scalar.MakeNullScalar(arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Int32))
+		nullGot, err := nullSrc.CastTo(nullSrc.DataType())
+		require.NoError(t, err)
+		assert.False(t, nullGot.IsValid())
+		_, ok = nullGot.(*scalar.FixedSizeList)
+		assert.True(t, ok, "expected null *scalar.FixedSizeList, got %T", nullGot)
+	})
+
+	t.Run("map", func(t *testing.T) {
+		mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+		defer mem.AssertSize(t, 0)
+
+		entryType := arrow.StructOf(
+			arrow.Field{Name: "key", Type: arrow.BinaryTypes.String, Nullable: false},
+			arrow.Field{Name: "value", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		)
+		entries, _, err := array.FromJSON(mem, entryType, strings.NewReader(`[{"key": "a", "value": 1}, {"key": "b", "value": 2}]`))
+		require.NoError(t, err)
+		src := scalar.NewMapScalar(entries)
+		entries.Release()
+
+		got, err := src.CastTo(src.DataType())
+		require.NoError(t, err)
+		assert.Same(t, src, got)
+		_, ok := got.(*scalar.Map)
+		assert.True(t, ok, "expected *scalar.Map, got %T", got)
+
+		src.Release()
+		require.Positive(t, mem.CurrentAlloc(), "cast result should still own the underlying array")
+
+		arr, err := scalar.MakeArrayFromScalar(got, 2, mem)
+		require.NoError(t, err)
+		assert.Equal(t, 2, arr.Len())
+		arr.Release()
+		releaseScalar(got)
+
+		nullSrc := scalar.MakeNullScalar(arrow.MapOf(arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int32))
+		nullGot, err := nullSrc.CastTo(nullSrc.DataType())
+		require.NoError(t, err)
+		assert.False(t, nullGot.IsValid())
+		_, ok = nullGot.(*scalar.Map)
+		assert.True(t, ok, "expected null *scalar.Map, got %T", nullGot)
+	})
+}
