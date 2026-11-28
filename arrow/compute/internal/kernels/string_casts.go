@@ -298,6 +298,7 @@ func boolToStringCastExec(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.E
 
 	arr := bldr.NewArray()
 	out.TakeOwnership(arr.Data())
+	arr.Release()
 	return nil
 }
 
@@ -327,6 +328,7 @@ func timeToStringCastExec[T timeIntrinsic](ctx *exec.KernelCtx, batch *exec.Exec
 
 	arr := bldr.NewArray()
 	out.TakeOwnership(arr.Data())
+	arr.Release()
 	return nil
 }
 
@@ -351,6 +353,7 @@ func numericToStringCastExec[T arrow.IntType | arrow.UintType | arrow.FloatType]
 
 		arr := bldr.NewArray()
 		out.TakeOwnership(arr.Data())
+		arr.Release()
 		return nil
 	}
 }
@@ -518,6 +521,7 @@ func castTimestampToString(ctx *exec.KernelCtx, batch *exec.ExecSpan, out *exec.
 
 	arr := bldr.NewArray()
 	out.TakeOwnership(arr.Data())
+	arr.Release()
 	return nil
 }
 
@@ -565,12 +569,14 @@ func addNumericAndTemporalToStringCasts(outType exec.OutputType, out []exec.Scal
 	k := exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(arrow.FixedWidthTypes.Boolean)}, outType,
 		getNumericToStringCastExec(arrow.BOOL), nil)
 	k.NullHandling = exec.NullComputedNoPrealloc
+	k.MemAlloc = exec.MemNoPrealloc
 	out = append(out, k)
 
 	for _, dt := range numericTypes {
 		k = exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(dt)}, outType,
 			getNumericToStringCastExec(dt.ID()), nil)
 		k.NullHandling = exec.NullComputedNoPrealloc
+		k.MemAlloc = exec.MemNoPrealloc
 		out = append(out, k)
 	}
 
@@ -578,6 +584,7 @@ func addNumericAndTemporalToStringCasts(outType exec.OutputType, out []exec.Scal
 		k = exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(dt)}, outType,
 			getNumericToStringCastExec(dt.ID()), nil)
 		k.NullHandling = exec.NullComputedNoPrealloc
+		k.MemAlloc = exec.MemNoPrealloc
 		out = append(out, k)
 	}
 
@@ -585,6 +592,7 @@ func addNumericAndTemporalToStringCasts(outType exec.OutputType, out []exec.Scal
 		k = exec.NewScalarKernel([]exec.InputType{exec.NewIDInput(id)}, outType,
 			getNumericToStringCastExec(id), nil)
 		k.NullHandling = exec.NullComputedNoPrealloc
+		k.MemAlloc = exec.MemNoPrealloc
 		out = append(out, k)
 	}
 
