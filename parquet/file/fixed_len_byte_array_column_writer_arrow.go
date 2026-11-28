@@ -81,7 +81,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) writeArrowValuesSpaced(values []byt
 func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchArrow(values []byte, defLevels, repLevels []int16) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = utils.FormatRecoveredError("unknown error type", r)
+			err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
 		}
 	}()
 	if !w.SupportsArrowValues() {
@@ -119,7 +119,7 @@ func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchArrow(values []byte, defL
 func (w *FixedLenByteArrayColumnChunkWriter) WriteBatchSpacedArrow(values []byte, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = utils.FormatRecoveredError("unknown error type", r)
+			err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
 		}
 	}()
 	if !w.SupportsArrowValues() {

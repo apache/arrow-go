@@ -82,7 +82,7 @@ func New{{.Name}}ColumnChunkWriter(meta *metadata.ColumnChunkMetaDataBuilder, pa
 func (w *{{.Name}}ColumnChunkWriter) WriteBatch(values []{{.name}}, defLevels, repLevels []int16) (valueOffset int64, err error) {
   defer func() {
     if r := recover(); r != nil {
-      err = utils.FormatRecoveredError("unknown error type", r)
+      err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
     }
   }()
   // We check for DataPage limits only after we have inserted the values. If a user
@@ -232,7 +232,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpaced(values []{{.name}}, defLev
 func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}}, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
   defer func() {
     if r := recover(); r != nil {
-      err = utils.FormatRecoveredError("unknown error type", r)
+      err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
     }
   }()
   length := len(defLevels)
@@ -347,7 +347,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBatchSpacedWithError(values []{{.name}
 func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatch(bitmap []byte, bitmapOffset int64, numValues int, defLevels, repLevels []int16) (valueOffset int64, err error) {
   defer func() {
     if r := recover(); r != nil {
-      err = utils.FormatRecoveredError("unknown error type", r)
+      err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
     }
   }()
 
@@ -392,7 +392,7 @@ func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatchSpaced(bitmap []byte, bitma
 func (w *{{.Name}}ColumnChunkWriter) WriteBitmapBatchSpacedWithError(bitmap []byte, bitmapOffset int64, numValues int, defLevels, repLevels []int16, validBits []byte, validBitsOffset int64) (valueOffset int64, err error) {
   defer func() {
     if r := recover(); r != nil {
-      err = utils.FormatRecoveredError("unknown error type", r)
+      err = w.recordError(utils.FormatRecoveredError("unknown error type", r))
     }
   }()
   length := len(defLevels)
