@@ -628,8 +628,8 @@ func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 		}
 		keylist[key] = true
 
-		indices := b.schema.FieldIndices(key)
-		if len(indices) == 0 {
+		idx, ok := b.schema.FieldIdx(key)
+		if !ok {
 			var extra interface{}
 			if err := dec.Decode(&extra); err != nil {
 				return err
@@ -637,7 +637,7 @@ func (b *RecordBuilder) unmarshalOne(dec *json.Decoder) (err error) {
 			continue
 		}
 
-		if err := b.fields[indices[0]].UnmarshalOne(dec); err != nil {
+		if err := b.fields[idx].UnmarshalOne(dec); err != nil {
 			return err
 		}
 	}
