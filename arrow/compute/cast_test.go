@@ -733,6 +733,46 @@ func (c *CastSuite) TestFloatingToInt() {
 	}
 }
 
+func (c *CastSuite) TestFloatingToIntOutOfRange() {
+	// tooLarge is the smallest power of two the target can't hold. Out-of-range
+	// conversions saturate on arm64, and for 32- and 64-bit targets the saturated
+	// maximum rounds back to that power of two. The narrower targets are controls:
+	// their maximum is exact in the input type.
+	tests := []struct {
+		from     arrow.DataType
+		to       arrow.DataType
+		tooLarge string
+		inRange  string
+		expected string
+	}{
+		{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Int8, `[128]`, `[127, -128]`, `[127, -128]`},
+		{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Uint8, `[256]`, `[255]`, `[255]`},
+		{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Int32, `[2147483648]`,
+			`[2147483520, -2147483648]`, `[2147483520, -2147483648]`},
+		{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Uint32, `[4294967296]`, `[4294967040]`, `[4294967040]`},
+		{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Int64, `[9223372036854775808]`,
+			`[9223371487098961920, -9223372036854775808]`, `[9223371487098961920, -9223372036854775808]`},
+		{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Int64, `[9223372036854775808]`,
+			`[9223372036854774784, -9223372036854775808]`, `[9223372036854774784, -9223372036854775808]`},
+		{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Uint64, `[18446744073709551616]`,
+			`[18446742974197923840]`, `[18446742974197923840]`},
+		{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Uint64, `[18446744073709551616]`,
+			`[18446744073709549568]`, `[18446744073709549568]`},
+		{arrow.FixedWidthTypes.Float16, arrow.PrimitiveTypes.Int16, `[32768]`, `[32752, -32768]`, `[32752, -32768]`},
+	}
+
+	for _, tt := range tests {
+		c.Run(tt.from.String()+" to "+tt.to.String(), func() {
+			c.checkCastFails(tt.from, tt.tooLarge, compute.SafeCastOptions(tt.to))
+			c.checkCastFails(tt.from, `[1, null, `+tt.tooLarge[1:], compute.SafeCastOptions(tt.to))
+			c.checkCast(tt.from, tt.to, tt.inRange, tt.expected)
+		})
+	}
+
+	// float16 is compared as a float, so -0.0 casts to 0 as it does for float32 and float64.
+	c.checkCast(arrow.FixedWidthTypes.Float16, arrow.PrimitiveTypes.Int32, `[-0.0]`, `[0]`)
+}
+
 func (c *CastSuite) TestFloat16ToFloating() {
 	for _, to := range []arrow.DataType{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64} {
 		c.checkCast(arrow.FixedWidthTypes.Float16, to, `[1.5, null, 0.0, -1.5, 5.5]`, `[1.5, null, 0.0, -1.5, 5.5]`)

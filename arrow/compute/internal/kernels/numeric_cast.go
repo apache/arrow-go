@@ -20,6 +20,7 @@ package kernels
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"unsafe"
 
@@ -584,30 +585,34 @@ func boolToFloat16(_ *exec.KernelCtx, in []byte, out []float16.Num) error {
 	return nil
 }
 
-func wasTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](out OutT, in InT) bool {
+func wasTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](out OutT, in InT, upper float64) bool {
 	switch v := any(in).(type) {
 	case float16.Num:
-		return float16.New(float32(out)) != v
+		f := v.Float32()
+		return float32(out) != f || float64(f) >= upper
 	case float32:
-		return float32(out) != v
+		return float32(out) != v || float64(v) >= upper
 	case float64:
-		return float64(out) != v
+		return float64(out) != v || v >= upper
 	default:
 		return false
 	}
 }
 
-func wasTruncMaybeNull[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](out OutT, in InT, isValid bool) bool {
-	switch v := any(in).(type) {
-	case float16.Num:
-		return isValid && (float16.New(float32(out)) != v)
-	case float32:
-		return isValid && (float32(out) != v)
-	case float64:
-		return isValid && (float64(out) != v)
-	default:
-		return false
+func wasTruncMaybeNull[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](out OutT, in InT, upper float64, isValid bool) bool {
+	return isValid && wasTrunc(out, in, upper)
+}
+
+// intUpperBound returns 2^n, the smallest power of two that does not fit in OutT.
+// Go leaves out-of-range float to int conversions implementation-defined: arm64
+// saturates, so 2^n converts to the maximum value of OutT, which rounds back to
+// 2^n and passes the round-trip check in wasTrunc.
+func intUpperBound[OutT arrow.IntType | arrow.UintType]() float64 {
+	bits := 8 * int(SizeOf[OutT]())
+	if MinOf[OutT]() < 0 {
+		bits--
 	}
+	return math.Ldexp(1, bits)
 }
 
 func checkFloatTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | arrow.UintType](in, out *exec.ArraySpan) error {
@@ -618,6 +623,7 @@ func checkFloatTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | a
 
 	inData := exec.GetSpanValues[InT](in, 1)
 	outData := exec.GetSpanValues[OutT](out, 1)
+	upper := intUpperBound[OutT]()
 
 	bitmap := in.Buffers[0].Buf
 	bitCounter := bitutils.NewOptionalBitBlockCounter(bitmap, in.Offset, in.Len)
@@ -628,24 +634,24 @@ func checkFloatTrunc[InT constraints.Float | float16.Num, OutT arrow.IntType | a
 		if block.Popcnt == block.Len {
 			// fast path: branchless
 			for i := 0; i < int(block.Len); i++ {
-				outOfBounds = outOfBounds || wasTrunc(outData[i], inData[i])
+				outOfBounds = outOfBounds || wasTrunc(outData[i], inData[i], upper)
 			}
 		} else if block.Popcnt > 0 {
 			// must only bounds check non-null
 			for i := 0; i < int(block.Len); i++ {
-				outOfBounds = outOfBounds || wasTruncMaybeNull(outData[i], inData[i], bitutil.BitIsSet(bitmap, int(offsetPos)+i))
+				outOfBounds = outOfBounds || wasTruncMaybeNull(outData[i], inData[i], upper, bitutil.BitIsSet(bitmap, int(offsetPos)+i))
 			}
 		}
 		if outOfBounds {
 			if in.Nulls > 0 {
 				for i := 0; i < int(block.Len); i++ {
-					if wasTruncMaybeNull(outData[i], inData[i], bitutil.BitIsSet(bitmap, int(offsetPos)+i)) {
+					if wasTruncMaybeNull(outData[i], inData[i], upper, bitutil.BitIsSet(bitmap, int(offsetPos)+i)) {
 						return getError(inData[i])
 					}
 				}
 			} else {
 				for i := 0; i < int(block.Len); i++ {
-					if wasTrunc(outData[i], inData[i]) {
+					if wasTrunc(outData[i], inData[i], upper) {
 						return getError(inData[i])
 					}
 				}
