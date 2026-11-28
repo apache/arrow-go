@@ -177,7 +177,13 @@ func (enc *PlainBooleanEncoder) EstimatedDataEncodedSize() int64 {
 func (enc *PlainBooleanEncoder) FlushValues() (Buffer, error) {
 	if enc.wr.Pos() > 0 {
 		toFlush := int(enc.wr.Pos())
-		enc.append(enc.bitsBuffer[:bitutil.BytesForBits(int64(toFlush))])
+		nbytes := bitutil.BytesForBits(int64(toFlush))
+		// the bits past the last value keep what the reused buffer held, so they
+		// are cleared for the same values to encode to the same bytes
+		if toFlush%8 != 0 {
+			enc.bitsBuffer[nbytes-1] &= bitutil.PrecedingBitmask[toFlush%8]
+		}
+		enc.append(enc.bitsBuffer[:nbytes])
 	}
 
 	enc.wr.Reset(0, boolsInBuf)
