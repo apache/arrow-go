@@ -874,6 +874,78 @@ func TestCSVWriterReaderTimestampRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCSVWriterReaderTime32RoundTrip(t *testing.T) {
+	tests := []struct {
+		typ     *arrow.Time32Type
+		values  []arrow.Time32
+		wantCSV string
+	}{
+		{
+			typ:     arrow.FixedWidthTypes.Time32s.(*arrow.Time32Type),
+			values:  []arrow.Time32{0, 3723, 86399},
+			wantCSV: "00:00:00\n01:02:03\n23:59:59\nNULL\n",
+		},
+		{
+			typ:     arrow.FixedWidthTypes.Time32ms.(*arrow.Time32Type),
+			values:  []arrow.Time32{0, 3723004, 86399999},
+			wantCSV: "00:00:00.000\n01:02:03.004\n23:59:59.999\nNULL\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.typ.String(), func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			builder := array.NewTime32Builder(mem, tc.typ)
+			builder.AppendValues(tc.values, nil)
+			builder.AppendNull()
+			values := builder.NewArray()
+			builder.Release()
+			defer values.Release()
+
+			schema := arrow.NewSchema([]arrow.Field{{Name: "time", Type: tc.typ, Nullable: true}}, nil)
+			record := array.NewRecordBatch(schema, []arrow.Array{values}, int64(values.Len()))
+			defer record.Release()
+
+			var output bytes.Buffer
+			writer := csv.NewWriter(&output, schema)
+			require.NoError(t, writer.Write(record))
+			require.NoError(t, writer.Flush())
+			assert.Equal(t, tc.wantCSV, output.String())
+
+			reader := csv.NewReader(strings.NewReader(output.String()), schema,
+				csv.WithAllocator(mem), csv.WithChunk(-1), csv.WithNullReader(true, "NULL"))
+			defer reader.Release()
+			require.True(t, reader.Next())
+			require.NoError(t, reader.Err())
+			got := reader.RecordBatch().Column(0)
+			assert.Truef(t, array.Equal(values, got), "expected %s, got %s", values, got)
+		})
+	}
+}
+
+func TestCSVWriterWritesInferredTime32(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	const input = "time\n12:34:56\n23:59:59\n"
+	reader := csv.NewInferringReader(strings.NewReader(input),
+		csv.WithAllocator(mem), csv.WithHeader(true), csv.WithChunk(-1))
+	defer reader.Release()
+	require.True(t, reader.Next())
+	require.NoError(t, reader.Err())
+	record := reader.RecordBatch()
+	require.True(t, arrow.TypeEqual(arrow.FixedWidthTypes.Time32s, record.Schema().Field(0).Type),
+		"inferred %s", record.Schema().Field(0).Type)
+
+	var output bytes.Buffer
+	writer := csv.NewWriter(&output, record.Schema(), csv.WithHeader(true))
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Flush())
+	assert.Equal(t, input, output.String())
+}
+
 func TestCSVWriterRejectsInvalidTimestampTimezone(t *testing.T) {
 	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer mem.AssertSize(t, 0)

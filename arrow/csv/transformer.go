@@ -183,6 +183,16 @@ func (w *Writer) transformColToStringArr(typ arrow.DataType, col arrow.Array, st
 				res[i] = w.nullValue
 			}
 		}
+	case *arrow.Time32Type:
+		arr := col.(*array.Time32)
+		unit := typ.(*arrow.Time32Type).Unit
+		for i := 0; i < arr.Len(); i++ {
+			if arr.IsValid(i) {
+				res[i] = arr.Value(i).FormattedString(unit)
+			} else {
+				res[i] = w.nullValue
+			}
+		}
 
 	case *arrow.TimestampType:
 		arr := col.(*array.Timestamp)

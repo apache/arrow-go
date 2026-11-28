@@ -301,6 +301,7 @@ func readTypeSupported(dt arrow.DataType) bool {
 	case *arrow.StringType, *arrow.LargeStringType:
 	case *arrow.TimestampType:
 	case *arrow.Date32Type, *arrow.Date64Type:
+	case *arrow.Time32Type:
 	case *arrow.Decimal128Type, *arrow.Decimal256Type:
 	case *arrow.MapType:
 		return false
