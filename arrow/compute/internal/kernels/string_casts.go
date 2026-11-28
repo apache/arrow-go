@@ -567,7 +567,7 @@ func addNumericAndTemporalToStringCasts(outType exec.OutputType, out []exec.Scal
 	k.NullHandling = exec.NullComputedNoPrealloc
 	out = append(out, k)
 
-	for _, dt := range numericTypes {
+	for _, dt := range append([]arrow.DataType{arrow.FixedWidthTypes.Float16}, numericTypes...) {
 		k = exec.NewScalarKernel([]exec.InputType{exec.NewExactInput(dt)}, outType,
 			getNumericToStringCastExec(dt.ID()), nil)
 		k.NullHandling = exec.NullComputedNoPrealloc
