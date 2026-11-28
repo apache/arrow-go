@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/rand/v2"
 	"runtime"
 	"strconv"
 	"strings"
@@ -222,6 +223,107 @@ func TestDecimalFromFloat64ExactScaling(t *testing.T) {
 	require.Error(t, err)
 	_, err = decimal.Decimal256FromFloat(1, 23, 23)
 	require.Error(t, err)
+}
+
+// roundScaledRef is v*10^scale rounded half to even, computed with big.Rat.
+func roundScaledRef(v float64, scale int32) *big.Int {
+	r := new(big.Rat).SetFloat64(v)
+	r.Mul(r, new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)))
+	q, m := new(big.Int).QuoRem(r.Num(), r.Denom(), new(big.Int))
+	m.Abs(m).Lsh(m, 1)
+	if c := m.Cmp(r.Denom()); c > 0 || (c == 0 && q.Bit(0) == 1) {
+		q.Add(q, big.NewInt(int64(r.Sign())))
+	}
+	return q
+}
+
+func TestDecimalFromFloat64MatchesExactRounding(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1663, 2026))
+	var vals []float64
+	for s := 0; s <= 24; s++ {
+		// v*10^s is an exact tie for v = odd/2^(s+1).
+		for _, odd := range []float64{1, 3, 5, 25, 1001, 123457, 1<<40 + 1} {
+			v := odd / math.Ldexp(1, s+1)
+			vals = append(vals, v, math.Nextafter(v, 0), math.Nextafter(v, math.Inf(1)))
+		}
+	}
+	for i := 0; i < 2000; i++ {
+		vals = append(vals, math.Ldexp(rng.Float64()+0.5, rng.IntN(120)-70))
+	}
+	vals = append(vals, 1844674407370955.5, 0.5, 2.5, 4503599627370495.5, 4503599627370497,
+		0, math.SmallestNonzeroFloat64, 1e-20, 0x1p63, 0x1p64+0x1p12, 0x1p70*1.5, 0x1p100)
+
+	limit76 := new(big.Int).Exp(big.NewInt(10), big.NewInt(76), nil)
+	limit38 := new(big.Int).Exp(big.NewInt(10), big.NewInt(38), nil)
+	limit18 := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	for _, v := range vals {
+		for _, sign := range []float64{1, -1} {
+			v := sign * v
+			for scale := int32(0); scale <= 38; scale++ {
+				want := roundScaledRef(v, scale)
+				fits38 := new(big.Int).Abs(want).Cmp(limit38) < 0
+				n128, err := decimal.Decimal128FromFloat(v, 38, scale)
+				if fits38 {
+					require.NoError(t, err, "%v scale %d", v, scale)
+					require.Equal(t, want.String(), n128.BigInt().String(), "decimal128 %v scale %d", v, scale)
+				} else {
+					require.Error(t, err, "%v scale %d", v, scale)
+				}
+				n256, err := decimal.Decimal256FromFloat(v, 76, scale)
+				if new(big.Int).Abs(want).Cmp(limit76) < 0 {
+					require.NoError(t, err, "%v scale %d", v, scale)
+					require.Equal(t, want.String(), n256.BigInt().String(), "decimal256 %v scale %d", v, scale)
+				} else {
+					require.Error(t, err, "%v scale %d", v, scale)
+				}
+				if scale <= 18 {
+					n64, err := decimal.Decimal64FromFloat(v, 18, scale)
+					if new(big.Int).Abs(want).Cmp(limit18) < 0 {
+						require.NoError(t, err, "%v scale %d", v, scale)
+						require.Equal(t, want.Int64(), int64(n64), "decimal64 %v scale %d", v, scale)
+					} else {
+						require.Error(t, err, "%v scale %d", v, scale)
+					}
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkDecimalFromFloat64(b *testing.B) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	vals := make([]float64, 1024)
+	for i := range vals {
+		vals[i] = rng.Float64() * 1e6
+	}
+	b.Run("Decimal64(18,2)", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			for _, v := range vals {
+				_, _ = decimal.Decimal64FromFloat(v, 18, 2)
+			}
+		}
+	})
+	for _, ps := range [][2]int32{{10, 2}, {38, 10}, {38, 30}} {
+		b.Run(fmt.Sprintf("Decimal128(%d,%d)", ps[0], ps[1]), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				for _, v := range vals {
+					_, _ = decimal.Decimal128FromFloat(v, ps[0], ps[1])
+				}
+			}
+		})
+	}
+	for _, ps := range [][2]int32{{10, 2}, {38, 10}, {76, 30}} {
+		b.Run(fmt.Sprintf("Decimal256(%d,%d)", ps[0], ps[1]), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				for _, v := range vals {
+					_, _ = decimal.Decimal256FromFloat(v, ps[0], ps[1])
+				}
+			}
+		})
+	}
 }
 
 func TestDecimalFromFloat(t *testing.T) {

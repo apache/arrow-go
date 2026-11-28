@@ -171,22 +171,129 @@ func scalePositiveFloat64(v float64, prec, scale int32) (float64, error) {
 	return v, nil
 }
 
+// float64Parts splits a finite v into m*2^e with m < 2^53, ignoring the sign.
+func float64Parts(v float64) (m uint64, e int, ok bool) {
+	b := math.Float64bits(v)
+	m = b & (1<<52 - 1)
+	switch exp := int(b>>52) & 0x7ff; exp {
+	case 0x7ff:
+		return 0, 0, false
+	case 0:
+		return m, -1074, true
+	default:
+		return m | 1<<52, exp - 1075, true
+	}
+}
+
+// roundScaledFloat64 returns the exact product v*10^scale of a non-negative v,
+// rounded to the nearest integer with ties to even, as the 128-bit value hi:lo.
+// With v = m*2^e, m*10^scale is a single 64x64->128-bit multiply for
+// scale <= 19, so no float64 rounding happens before the final one. ok is false
+// when scale > 19, v is not finite, or the result needs more than 127 bits; the
+// caller then needs the big.Int path.
+func roundScaledFloat64(v float64, scale int32) (hi, lo uint64, ok bool) {
+	m, e, ok := float64Parts(v)
+	if !ok || scale < 0 || scale > 19 {
+		return 0, 0, false
+	}
+	hi, lo = bits.Mul64(m, pow10U64[scale])
+	if e >= 0 {
+		n := 128 - bits.LeadingZeros64(hi)
+		if hi == 0 {
+			n = 64 - bits.LeadingZeros64(lo)
+		}
+		if n+e > 127 {
+			return 0, 0, false
+		}
+		if e >= 64 {
+			return lo << (e - 64), 0, true
+		}
+		return hi<<e | lo>>(64-e), lo << e, true
+	}
+	k := -e
+	if k >= 128 {
+		// m*10^scale < 2^117, so the product is below 1/2.
+		return 0, 0, true
+	}
+	// half is the bit just below the units digit, sticky says whether any
+	// lower bit is set; then shift the fraction out.
+	var half, sticky bool
+	if j := k - 1; j >= 64 {
+		half = hi>>(j-64)&1 == 1
+		sticky = lo != 0 || hi&(1<<(j-64)-1) != 0
+	} else {
+		half = lo>>j&1 == 1
+		sticky = lo&(1<<j-1) != 0
+	}
+	if k >= 64 {
+		hi, lo = 0, hi>>(k-64)
+	} else {
+		hi, lo = hi>>k, lo>>k|hi<<(64-k)
+	}
+	if half && (sticky || lo&1 == 1) {
+		var carry uint64
+		lo, carry = bits.Add64(lo, 1, 0)
+		hi += carry
+	}
+	return hi, lo, true
+}
+
+// roundScaledFloat64Big returns v*mult rounded to the nearest integer, ties to
+// even, computed exactly from the binary value of a non-negative v. It returns
+// nil when v is not finite.
+func roundScaledFloat64Big(v float64, mult *big.Int) *big.Int {
+	m, e, ok := float64Parts(v)
+	if !ok {
+		return nil
+	}
+	c := new(big.Int).SetUint64(m)
+	c.Mul(c, mult)
+	if e >= 0 {
+		return c.Lsh(c, uint(e))
+	}
+	k := uint(-e)
+	half := c.Bit(int(k-1)) == 1
+	sticky := c.TrailingZeroBits() < k-1
+	c.Rsh(c, k)
+	if half && (sticky || c.Bit(0) == 1) {
+		c.Add(c, bigIntOne)
+	}
+	return c
+}
+
+var (
+	bigIntOne = big.NewInt(1)
+	pow10U64  = func() (t [20]uint64) {
+		t[0] = 1
+		for i := 1; i < len(t); i++ {
+			t[i] = t[i-1] * 10
+		}
+		return t
+	}()
+	// scaleMultipliersBig holds scaleMultipliers as big.Int values, built once.
+	scaleMultipliersBig = func() (out [len(scaleMultipliers)]*big.Int) {
+		for i := range scaleMultipliers {
+			out[i] = scaleMultipliers[i].BigInt()
+		}
+		return out
+	}()
+)
+
 func fromPositiveFloat64(v float64, prec, scale int32) (Num, error) {
 	if scale >= 0 && scale <= MaxScale {
-		// Scale the exact binary value using integers, then round to nearest even.
-		// Multiplying in float64 can lose coefficient digits before rounding.
-		r := new(big.Rat).SetFloat64(v)
-		if r == nil {
+		// Round the exact product v*10^scale to nearest even. Multiplying in
+		// float64 can lose coefficient digits before rounding.
+		if hi, lo, ok := roundScaledFloat64(v, scale); ok {
+			if pm := scaleMultipliers[prec]; hi > uint64(pm.hi) || (hi == uint64(pm.hi) && lo >= pm.lo) {
+				return Num{}, fmt.Errorf("cannot convert %f to decimal128(precision=%d, scale=%d): overflow", v, prec, scale)
+			}
+			return Num{hi: int64(hi), lo: lo}, nil
+		}
+		coefficient := roundScaledFloat64Big(v, scaleMultipliersBig[scale])
+		if coefficient == nil {
 			return Num{}, fmt.Errorf("cannot convert %f to decimal128", v)
 		}
-		coefficient := new(big.Int).Mul(r.Num(), scaleMultipliers[scale].BigInt())
-		var remainder big.Int
-		coefficient.QuoRem(coefficient, r.Denom(), &remainder)
-		cmp := remainder.Lsh(&remainder, 1).Cmp(r.Denom())
-		if cmp > 0 || (cmp == 0 && coefficient.Bit(0) != 0) {
-			coefficient.Add(coefficient, big.NewInt(1))
-		}
-		if coefficient.Cmp(scaleMultipliers[prec].BigInt()) >= 0 {
+		if coefficient.Cmp(scaleMultipliersBig[prec]) >= 0 {
 			return Num{}, fmt.Errorf("cannot convert %f to decimal128(precision=%d, scale=%d): overflow", v, prec, scale)
 		}
 		return FromBigInt(coefficient), nil
