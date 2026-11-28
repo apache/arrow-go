@@ -291,6 +291,17 @@ func fromPositiveFloat[T Decimal32 | Decimal64, F float32 | float64](v F, prec, 
 		return T(0), fmt.Errorf("invalid precision %d for converting float to Decimal", prec)
 	}
 
+	// float64 inputs are scaled exactly, as for Decimal128 and Decimal256.
+	// float32 inputs keep their float32 rounding, as FromFloat32 does there.
+	if f, isFloat64 := any(v).(float64); isFloat64 && scale >= 0 && scale <= int32(MaxScale[T]()) {
+		// scale <= 18 here, so roundScaledFloat64 only fails past 2^127.
+		hi, lo, ok := roundScaledFloat64(f, scale)
+		if !ok || hi != 0 || prec < 0 || lo >= pow10U64[prec] {
+			return T(0), fmt.Errorf("cannot convert %f to decimal(precision=%d, scale=%d)", f, prec, scale)
+		}
+		return T(lo), nil
+	}
+
 	val, err := scalePositiveFloat64(float64(v), prec, scale)
 	if err != nil {
 		return T(0), err
