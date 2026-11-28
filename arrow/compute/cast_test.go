@@ -3991,6 +3991,53 @@ func TestCasts(t *testing.T) {
 	suite.Run(t, new(CastSuite))
 }
 
+func TestCastToStringReleasesBuilderArray(t *testing.T) {
+	tests := []struct {
+		dt              arrow.DataType
+		inJSON, outJSON string
+	}{
+		{arrow.FixedWidthTypes.Boolean, `[true, null, false]`, `["true", null, "false"]`},
+		{arrow.PrimitiveTypes.Int8, `[-1, null, 2]`, `["-1", null, "2"]`},
+		{arrow.PrimitiveTypes.Uint8, `[1, null, 2]`, `["1", null, "2"]`},
+		{arrow.PrimitiveTypes.Int16, `[-1, null, 2]`, `["-1", null, "2"]`},
+		{arrow.PrimitiveTypes.Uint16, `[1, null, 2]`, `["1", null, "2"]`},
+		{arrow.PrimitiveTypes.Int32, `[-1, null, 2]`, `["-1", null, "2"]`},
+		{arrow.PrimitiveTypes.Uint32, `[1, null, 2]`, `["1", null, "2"]`},
+		{arrow.PrimitiveTypes.Int64, `[-1, null, 2]`, `["-1", null, "2"]`},
+		{arrow.PrimitiveTypes.Uint64, `[1, null, 2]`, `["1", null, "2"]`},
+		{arrow.PrimitiveTypes.Float32, `[1.5, null, 2]`, `["1.5", null, "2"]`},
+		{arrow.PrimitiveTypes.Float64, `[1.5, null, 2]`, `["1.5", null, "2"]`},
+		{arrow.FixedWidthTypes.Date32, `[0, null, 1]`, `["1970-01-01", null, "1970-01-02"]`},
+		{arrow.FixedWidthTypes.Date64, `[0, null, 86400000]`, `["1970-01-01", null, "1970-01-02"]`},
+		{arrow.FixedWidthTypes.Time32s, `[1, null, 62]`, `["00:00:01", null, "00:01:02"]`},
+		{arrow.FixedWidthTypes.Time64ns, `[0, null, 1]`, `["00:00:00.000000000", null, "00:00:00.000000001"]`},
+		{&arrow.TimestampType{Unit: arrow.Second}, `[0, null, 1]`, `["1970-01-01 00:00:00", null, "1970-01-01 00:00:01"]`},
+		{arrow.FixedWidthTypes.Timestamp_s, `[0, null, 1]`, `["1970-01-01 00:00:00Z", null, "1970-01-01 00:00:01Z"]`},
+	}
+
+	for _, outType := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s->%s", tt.dt, outType), func(t *testing.T) {
+				mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+				defer mem.AssertSize(t, 0)
+				ctx := compute.WithAllocator(context.Background(), mem)
+
+				in, _, err := array.FromJSON(mem, tt.dt, strings.NewReader(tt.inJSON))
+				require.NoError(t, err)
+				defer in.Release()
+				expected, _, err := array.FromJSON(mem, outType, strings.NewReader(tt.outJSON))
+				require.NoError(t, err)
+				defer expected.Release()
+
+				out, err := compute.CastArray(ctx, in, compute.SafeCastOptions(outType))
+				require.NoError(t, err)
+				defer out.Release()
+				assertArraysEqual(t, expected, out)
+			})
+		}
+	}
+}
+
 const rngseed = 0x94378165
 
 func benchmarkNumericCast(b *testing.B, fromType, toType arrow.DataType, opts compute.CastOptions, size, min, max int64, nullprob float64) {
