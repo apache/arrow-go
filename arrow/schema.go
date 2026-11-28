@@ -273,6 +273,18 @@ func (sc *Schema) FieldIndices(n string) []int {
 	return slices.Clone(sc.index[n])
 }
 
+// FieldIdx gets the index of the field with the given name.
+//
+// If there are multiple fields with the given name, FieldIdx returns
+// the index of the first such field.
+func (sc *Schema) FieldIdx(n string) (int, bool) {
+	i, ok := sc.index[n]
+	if ok {
+		return i[0], true
+	}
+	return -1, false
+}
+
 func (sc *Schema) HasField(n string) bool { return len(sc.index[n]) > 0 }
 func (sc *Schema) HasMetadata() bool      { return len(sc.meta.keys) > 0 }
 

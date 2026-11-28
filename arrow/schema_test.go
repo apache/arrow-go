@@ -362,6 +362,26 @@ func TestSchemaFieldIndicesReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestSchemaFieldIdx(t *testing.T) {
+	schema := NewSchema([]Field{
+		{Name: "id", Type: PrimitiveTypes.Int32},
+		{Name: "name", Type: BinaryTypes.String},
+		{Name: "id", Type: PrimitiveTypes.Int64},
+	}, nil)
+
+	idx, ok := schema.FieldIdx("id")
+	assert.True(t, ok)
+	assert.Equal(t, 0, idx)
+
+	idx, ok = schema.FieldIdx("name")
+	assert.True(t, ok)
+	assert.Equal(t, 1, idx)
+
+	idx, ok = schema.FieldIdx("missing")
+	assert.False(t, ok)
+	assert.Equal(t, -1, idx)
+}
+
 func TestSchemaAddField(t *testing.T) {
 	s := NewSchema([]Field{
 		{Name: "f1", Type: PrimitiveTypes.Int32},
