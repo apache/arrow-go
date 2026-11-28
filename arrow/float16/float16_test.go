@@ -18,6 +18,7 @@ package float16
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -290,4 +291,76 @@ func TestIsNaN(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsInf(t *testing.T) {
+	for _, tc := range []struct {
+		n    Num
+		want bool
+	}{
+		{Inf(), true},
+		{Inf().Negate(), true},
+		{NaN(), false},
+		{NaN().Negate(), false},
+		{Num{bits: 0x7c01}, false},
+		{Num{bits: 0xfc01}, false},
+		{Num{bits: 0x7e00}, false},
+		{Num{bits: 0xfe00}, false},
+		{MaxNum, false},
+		{MinNum, false},
+		{Num{bits: 0x0000}, false},
+		{Num{bits: 0x8000}, false},
+		{Num{bits: 0x0001}, false},
+	} {
+		t.Run(fmt.Sprintf("0x%04x", tc.n.Uint16()), func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.n.IsInf())
+		})
+	}
+}
+
+func TestSubnormalAndSpecialFloat32Conversions(t *testing.T) {
+	// Exhaustively check all 65,536 binary16 encodings against IEEE 754 semantics.
+	for u := uint32(0); u <= 0xffff; u++ {
+		n := FromBits(uint16(u))
+		f32 := n.Float32()
+		f64 := float64(f32)
+
+		assert.Equal(t, math.IsNaN(f64), n.IsNaN(), "IsNaN mismatch for 0x%04x", u)
+		assert.Equal(t, math.IsInf(f64, 0), n.IsInf(), "IsInf mismatch for 0x%04x", u)
+		assert.False(t, n.IsNaN() && n.IsInf(), "cannot be both NaN and Inf for 0x%04x", u)
+
+		exp := (u >> 10) & 0x1f
+		frac := u & 0x3ff
+		if exp == 0 && frac != 0 {
+			expected := float32(math.Ldexp(float64(frac), -24))
+			if n.Signbit() {
+				expected = -expected
+			}
+			assert.Equal(t, expected, f32, "subnormal Float32 mismatch for 0x%04x", u)
+		}
+
+		roundTrip := New(f32)
+		if n.IsNaN() {
+			assert.True(t, roundTrip.IsNaN(), "NaN round-trip failed for 0x%04x", u)
+			assert.False(t, roundTrip.IsInf(), "NaN round-tripped to Inf for 0x%04x", u)
+		} else {
+			assert.Equal(t, n.Uint16(), roundTrip.Uint16(), "round-trip mismatch for 0x%04x", u)
+		}
+	}
+
+	// Float32 subnormals must underflow to signed zero in float16.
+	assert.Equal(t, uint16(0x0000), New(math.Float32frombits(0x00400000)).Uint16())
+	assert.Equal(t, uint16(0x0000), New(math.Float32frombits(0x00000001)).Uint16())
+	assert.Equal(t, uint16(0x8000), New(math.Float32frombits(0x80400000)).Uint16())
+
+	// Float32 NaNs whose payload only occupies the lower 13 bits must remain NaN, not Inf.
+	posLowNaN := New(math.Float32frombits(0x7f800001))
+	assert.True(t, posLowNaN.IsNaN())
+	assert.False(t, posLowNaN.IsInf())
+	assert.False(t, posLowNaN.Signbit())
+
+	negLowNaN := New(math.Float32frombits(0xff800001))
+	assert.True(t, negLowNaN.IsNaN())
+	assert.False(t, negLowNaN.IsInf())
+	assert.True(t, negLowNaN.Signbit())
 }

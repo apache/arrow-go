@@ -47,14 +47,23 @@ func New(f float32) Num {
 	switch {
 	case exp == 0:
 		res = 0
+		fc = 0
 	case exp == 0xff:
 		res = 0x1f
+		if b&0x007fffff != 0 && fc == 0 {
+			fc = 0x200
+		}
 	case res > 0x1e:
 		res = 0x1f
 		fc = 0
 	case res < 0x01:
+		if shift := uint(14 - res); shift < 24 {
+			sig := (b & 0x007fffff) | 0x00800000
+			fc = uint16(sig >> shift)
+		} else {
+			fc = 0
+		}
 		res = 0
-		fc = 0
 	}
 	return Num{bits: (sn << 15) | uint16(res<<10) | fc}
 }
@@ -70,7 +79,16 @@ func (f Num) Float32() float32 {
 	fc := uint32(f.bits & 0x3ff)
 	switch exp {
 	case 0:
-		res = 0
+		if fc == 0 {
+			res = 0
+		} else {
+			res = 127 - 14
+			for fc&0x400 == 0 {
+				fc <<= 1
+				res--
+			}
+			fc &= 0x3ff
+		}
 	case 0x1f:
 		res = 0xff
 	}
@@ -180,7 +198,7 @@ func (n Num) Signbit() bool { return (n.bits & 0x8000) != 0 }
 
 func (n Num) IsNaN() bool { return (n.bits & 0x7fff) > 0x7c00 }
 
-func (n Num) IsInf() bool { return (n.bits & 0x7c00) == 0x7c00 }
+func (n Num) IsInf() bool { return (n.bits & 0x7fff) == 0x7c00 }
 
 func (n Num) IsZero() bool { return (n.bits & 0x7fff) == 0 }
 
