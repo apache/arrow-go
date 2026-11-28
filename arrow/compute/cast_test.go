@@ -34,6 +34,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/compute/exec"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/decimal256"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/internal/testing/gen"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/arrow/scalar"
@@ -402,6 +403,7 @@ func (c *CastSuite) TestCanCast() {
 	canCast(types.NewSmallintType(), numericTypes) // any cast which is valid for storage is supported
 	canCast(arrow.Null, []arrow.DataType{types.NewSmallintType()})
 
+	canCast(arrow.FixedWidthTypes.Float16, []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView})
 	canCast(arrow.FixedWidthTypes.Date32, []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString})
 	canCast(arrow.FixedWidthTypes.Date64, []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString})
 	canCast(arrow.FixedWidthTypes.Timestamp_ns, []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString})
@@ -3429,6 +3431,25 @@ func (c *CastSuite) TestFloatingToString() {
 			c.checkCastArr(arr, stype, `["0", "-0", "1.5", "-Inf", "+Inf", "NaN", null]`, *compute.DefaultCastOptions(true))
 
 			c.checkCastArr(arr64, stype, `["0", "-0", "1.5", "-Inf", "+Inf", "NaN", null]`, *compute.DefaultCastOptions(true))
+		})
+	}
+}
+
+func (c *CastSuite) TestFloat16ToString() {
+	bldr := array.NewFloat16Builder(c.mem)
+	defer bldr.Release()
+	bldr.AppendValues([]float16.Num{
+		float16.New(0), float16.New(0).Negate(), float16.New(1.5), float16.New(-2.25),
+		float16.New(65504), float16.Inf().Negate(), float16.Inf(), float16.NaN()}, nil)
+	bldr.AppendNull()
+	arr := bldr.NewArray()
+	defer arr.Release()
+
+	for _, stype := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.LargeString, arrow.BinaryTypes.StringView} {
+		c.Run(stype.String(), func() {
+			c.checkCastArr(arr, stype,
+				`["0", "-0", "1.5", "-2.25", "65504", "-Inf", "+Inf", "NaN", null]`,
+				*compute.DefaultCastOptions(true))
 		})
 	}
 }
