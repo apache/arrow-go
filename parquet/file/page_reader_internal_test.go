@@ -472,3 +472,28 @@ func TestNextFailedDictionaryPageInvalidatesCachedDictionary(t *testing.T) {
 	require.EqualValues(t, 2, dict.NumValues())
 	require.Equal(t, []byte{10, 0, 0, 0, 20, 0, 0, 0}, dict.Data())
 }
+
+// Close releases the dictionary buffer. A cached dictionary would survive it as
+// a page that reports its values without carrying them. Asking a closed reader
+// for the dictionary is misuse, but whatever comes back must not be that page.
+func TestCloseInvalidatesCachedDictionary(t *testing.T) {
+	indices := []byte{1, 3, 0x46}
+	chunk := append(
+		serializePage(t, dictPageSpec(10, 20)),
+		serializePage(t, dataPageSpec(8, format.Encoding_RLE_DICTIONARY, indices))...,
+	)
+
+	p, _ := unencryptedChunkReader(t, 8, chunk)
+	require.True(t, p.Next())
+	dict, err := p.GetDictionaryPage()
+	require.NoError(t, err)
+	require.Equal(t, []byte{10, 0, 0, 0, 20, 0, 0, 0}, dict.Data())
+
+	require.NoError(t, p.Close())
+	dict, err = p.GetDictionaryPage()
+	if err != nil {
+		return
+	}
+	require.Equal(t, []byte{10, 0, 0, 0, 20, 0, 0, 0}, dict.Data(),
+		"dictionary page returned after Close")
+}

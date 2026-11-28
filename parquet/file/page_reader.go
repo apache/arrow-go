@@ -470,6 +470,9 @@ func (p *serializedPageReader) Close() error {
 		p.dictPageBuffer.Release()
 		p.dataPageBuffer.Release()
 	}
+	// The dictionary buffer is gone, so a cached dictionary would hand out a
+	// page that reports its values without carrying them.
+	p.cachedDict = cachedDictPage{}
 	return nil
 }
 
