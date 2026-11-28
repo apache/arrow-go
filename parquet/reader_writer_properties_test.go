@@ -160,3 +160,14 @@ func TestWriterPropALPVectorSize(t *testing.T) {
 		assert.NotPanics(t, func() { parquet.NewWriterProperties(parquet.WithALPVectorSize(size)) }, "size %d", size)
 	}
 }
+
+func TestWriterPropContentDefinedChunking(t *testing.T) {
+	_, enabled := parquet.NewWriterProperties().ContentDefinedChunking()
+	assert.False(t, enabled)
+	assert.Equal(t, parquet.CDCOptions{MinChunkSize: 256 * 1024, MaxChunkSize: 1024 * 1024}, parquet.DefaultCDCOptions())
+
+	opts := parquet.CDCOptions{MinChunkSize: 512 * 1024, MaxChunkSize: 2048 * 1024, NormLevel: 1}
+	got, enabled := parquet.NewWriterProperties(parquet.WithContentDefinedChunking(opts)).ContentDefinedChunking()
+	assert.True(t, enabled)
+	assert.Equal(t, opts, got)
+}

@@ -344,6 +344,10 @@ func (w *columnWriter) FlushCurrentPage() error {
 }
 
 func (w *columnWriter) flushCurrentPage() error {
+	if w.numBufferedValues == 0 {
+		return nil
+	}
+
 	var (
 		defLevelsRLESize int32 = 0
 		repLevelsRLESize int32 = 0
